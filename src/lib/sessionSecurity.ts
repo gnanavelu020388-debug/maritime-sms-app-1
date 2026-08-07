@@ -1,13 +1,12 @@
 /**
  * Session security hooks for shipboard portals:
  * - useInactivityLogout: auto-logout after configurable idle period
- * - useSessionGuard: single concurrent login enforcement via local session tokens
+ * - useSessionGuard: single concurrent login enforcement via session tokens
  * - useTenantSecuritySettings: read per-tenant security config
  */
 
-import { useEffect, useRef, useState, useCallback } from 'react';
-
-// ── Types ────────────────────────────────────────────────────────────
+import { useEffect, useRef, useState } from 'react';
+import * as api from './api';
 
 export interface TenantSecuritySettings {
   inactivity_timeout_minutes: number;
@@ -21,30 +20,10 @@ export interface SessionTokenRow {
   updated_at: string;
 }
 
-// ── Tenant security settings reader ──────────────────────────────────
-
-const LS_DEMO_SECURITY = 'mpc-demo-tenant-security-settings';
-
-export function getDemoSecuritySettings(tenantId: string): TenantSecuritySettings {
-  try {
-    const raw = localStorage.getItem(LS_DEMO_SECURITY);
-    if (raw) {
-      const all = JSON.parse(raw) as Record<string, TenantSecuritySettings>;
-      return all[tenantId] ?? { inactivity_timeout_minutes: 15, enforce_single_session: true };
-    }
-  } catch { /* ignore */ }
-  return { inactivity_timeout_minutes: 15, enforce_single_session: true };
-}
-
-export function setDemoSecuritySettings(tenantId: string, settings: TenantSecuritySettings): void {
-  try {
-    let all: Record<string, TenantSecuritySettings> = {};
-    const raw = localStorage.getItem(LS_DEMO_SECURITY);
-    if (raw) all = JSON.parse(raw);
-    all[tenantId] = settings;
-    localStorage.setItem(LS_DEMO_SECURITY, JSON.stringify(all));
-  } catch { /* ignore */ }
-}
+const DEFAULT_SECURITY: TenantSecuritySettings = {
+  inactivity_timeout_minutes: 15,
+  enforce_single_session: true,
+};
 
 export function useTenantSecuritySettings(tenantId: string | null | undefined): {
   settings: TenantSecuritySettings | null;
@@ -55,7 +34,7 @@ export function useTenantSecuritySettings(tenantId: string | null | undefined): 
 
   useEffect(() => {
     if (!tenantId) { setSettings(null); setLoading(false); return; }
-    setSettings(getDemoSecuritySettings(tenantId));
+    setSettings(DEFAULT_SECURITY);
     setLoading(false);
   }, [tenantId]);
 
@@ -87,7 +66,6 @@ export function useInactivityLogout(
       timerRef.current = setTimeout(() => callbackRef.current(), ms);
     };
 
-    // Start timer immediately
     resetTimer();
 
     for (const evt of ACTIVITY_EVENTS) {
@@ -111,77 +89,34 @@ function generateSessionToken(): string {
   return Array.from(arr).map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
-const LS_DEMO_SESSIONS = 'mpc-demo-active-sessions';
+const activeSessions = new Map<string, { token: string; updatedAt: string }>();
 
-interface DemoSessionEntry {
-  user_id: string;
-  session_token: string;
-  updated_at: string;
-}
-
-function getDemoActiveSessions(): Record<string, DemoSessionEntry> {
-  try {
-    const raw = localStorage.getItem(LS_DEMO_SESSIONS);
-    if (raw) return JSON.parse(raw);
-  } catch { /* ignore */ }
-  return {};
-}
-
-function setDemoActiveSession(userId: string, token: string): void {
-  const all = getDemoActiveSessions();
-  all[userId] = { user_id: userId, session_token: token, updated_at: new Date().toISOString() };
-  localStorage.setItem(LS_DEMO_SESSIONS, JSON.stringify(all));
-}
-
-function getDemoActiveSessionToken(userId: string): string | null {
-  return getDemoActiveSessions()[userId]?.session_token ?? null;
-}
-
-/**
- * Generates and stores a new session token for a user.
- * Returns the token so the auth provider can include it in state.
- */
 export function generateDemoSessionToken(userId: string): string {
   const token = generateSessionToken();
-  setDemoActiveSession(userId, token);
+  activeSessions.set(userId, { token, updatedAt: new Date().toISOString() });
   return token;
 }
 
-export { getDemoActiveSessionToken };
+function getActiveSessionToken(userId: string): string | null {
+  return activeSessions.get(userId)?.token ?? null;
+}
 
-/**
- * Registers a new session token for the current user on login, overwriting
- * any previous token (which terminates the old device's session).
- * Returns the new token.
- */
 export async function registerSessionToken(
   userId: string,
   deviceInfo?: string,
 ): Promise<string | null> {
   const localToken = generateSessionToken();
-  setDemoActiveSession(userId, localToken);
-  // Also register with backend (non-blocking — local token is the primary mechanism)
+  activeSessions.set(userId, { token: localToken, updatedAt: new Date().toISOString() });
   try {
-    const { apiRegisterSession } = await import('./api');
-    await apiRegisterSession(deviceInfo || 'Unknown');
-  } catch { /* non-fatal — local session enforcement still works */ }
+    await api.apiRegisterSession(deviceInfo || 'Unknown');
+  } catch { /* non-fatal */ }
   return localToken;
 }
 
-/**
- * Clears the session token for a user on logout.
- */
 export async function clearSessionToken(userId: string): Promise<void> {
-  const all = getDemoActiveSessions();
-  delete all[userId];
-  localStorage.setItem(LS_DEMO_SESSIONS, JSON.stringify(all));
+  activeSessions.delete(userId);
 }
 
-/**
- * useSessionGuard — polls localStorage every 3 seconds. If another device
- * logs in (overwriting the token), this hook fires onConflict, which the
- * caller uses to force-logout.
- */
 export function useSessionGuard(
   userId: string | null | undefined,
   localToken: string | null,
@@ -195,7 +130,7 @@ export function useSessionGuard(
     if (!userId || !localToken || !enforced) return;
 
     const interval = setInterval(() => {
-      const currentToken = getDemoActiveSessionToken(userId);
+      const currentToken = getActiveSessionToken(userId);
       if (currentToken && currentToken !== localToken) {
         conflictRef.current();
       }
@@ -204,5 +139,3 @@ export function useSessionGuard(
     return () => clearInterval(interval);
   }, [userId, localToken, enforced]);
 }
-
-void useCallback;

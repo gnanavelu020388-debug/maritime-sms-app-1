@@ -1,6 +1,5 @@
-import { isDemoMode, getEffectiveDemoVessels, DEMO_TENANTS } from './demoData';
-
-void isDemoMode;
+import { getEffectiveDemoVessels } from './demoData';
+import * as dataCache from './dataCache';
 
 export interface SmsProfile {
   id: string;
@@ -46,7 +45,7 @@ function seedDefaultProfiles(tenantId: string): SmsProfile[] {
     created_at: now,
     updated_at: now,
   };
-  const tenantName = DEMO_TENANTS.find((t) => t.id === tenantId)?.company ?? '';
+  const tenantName = dataCache.getCachedTenants().find((t) => t.id === tenantId)?.company ?? '';
   let secondName = 'Fleet SMS Profile';
   if (tenantName.includes('Atlantic') || tenantName.includes('Tanker')) secondName = 'Tanker Fleet SMS';
   else if (tenantName.includes('Pacific')) secondName = 'Bulk Carrier SMS';

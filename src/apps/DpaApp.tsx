@@ -9,12 +9,11 @@ import { VesselsView } from '../views/company/VesselsView';
 import { CrewRosterView } from '../views/company/CrewRosterView';
 import { CompanyAuditView } from '../views/company/CompanyAuditView';
 import { CompanySecuritySettings } from '../views/company/CompanySecuritySettings';
-import { DemoAuthProvider } from '../lib/demoAuth';
 import { Modal } from '../components/Modal';
 import { useAuth } from '../lib/auth';
 import { useFeatureFlags } from '../lib/featureFlags';
 
-export function DpaApp({ demoMode = false }: { demoMode?: boolean }) {
+export function DpaApp() {
   const { tenant } = useAuth();
   const { isEnabled, loading: flagsLoading } = useFeatureFlags(tenant?.id);
   const [active, setActive] = useState<DpaSection>('dashboard');
@@ -35,7 +34,7 @@ export function DpaApp({ demoMode = false }: { demoMode?: boolean }) {
   }, [isEnabled]);
 
   const content = (
-    <DpaShell active={active} demoMode={demoMode}>
+    <DpaShell active={active}>
       {active === 'dashboard' && <DpaDashboard onNavigate={setActive} />}
       {active === 'approvals' && isEnabled('sms_documentation') && <SmsApprovalsView />}
       {active === 'library' && isEnabled('sms_documentation') && <SmsLibraryView />}
@@ -62,8 +61,5 @@ export function DpaApp({ demoMode = false }: { demoMode?: boolean }) {
     </DpaShell>
   );
 
-  if (demoMode) {
-    return <DemoAuthProvider role="dpa">{content}</DemoAuthProvider>;
-  }
   return content;
 }

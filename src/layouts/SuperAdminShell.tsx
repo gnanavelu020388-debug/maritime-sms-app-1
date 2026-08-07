@@ -3,7 +3,6 @@ import { StoreProvider } from '../store';
 import { Sidebar } from '../components/Sidebar';
 import { Topbar } from '../components/Topbar';
 import { MaintenanceBanner } from '../components/MaintenanceBanner';
-import { ImpersonationOverlay } from '../components/ImpersonationOverlay';
 import { Toaster } from '../components/Toaster';
 import { DashboardView } from '../views/DashboardView';
 import { TenantsView } from '../views/TenantsView';
@@ -20,12 +19,10 @@ import type { User, PlatformRole, InternalRole } from '../lib/supabase';
 import { roleLabel } from '../lib/auth-utils';
 import { INTERNAL_ROLE_LABEL, INTERNAL_ROLE_SUMMARY, canAccessSection, capabilitiesFor, type Capabilities } from '../lib/permissions';
 import { LogOut, Lock } from 'lucide-react';
-import { DemoSessionSwitcher } from '../components/DemoSessionSwitcher';
 
-export function SuperAdminShell({ user, role, internalRole, onSignOut, demoMode = false }: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void; demoMode?: boolean }) {
+export function SuperAdminShell({ user, role, internalRole, onSignOut }: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
   const [active, setActive] = useState<SectionId>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [showSwitcher, setShowSwitcher] = useState(false);
   const roleKey: InternalRole = internalRole ?? 'super_admin';
   const caps = capabilitiesFor(roleKey);
 
@@ -39,11 +36,10 @@ export function SuperAdminShell({ user, role, internalRole, onSignOut, demoMode 
         <Sidebar active={active} onNavigate={setActive} open={sidebarOpen} onClose={() => setSidebarOpen(false)} roleKey={roleKey} />
         <div className="flex min-w-0 flex-1 flex-col">
           <MaintenanceBanner />
-          <ImpersonationOverlay />
           <Topbar active={active} onMenu={() => setSidebarOpen(true)} />
           <div className="flex items-center justify-between border-b border-ink-100 bg-white px-4 py-2 dark:border-ink-800 dark:bg-ink-900">
             <span className="text-xs text-ink-500">Signed in as <strong className="text-ink-800 dark:text-white">{user.email}</strong> · <span className="font-semibold text-primary-600">{INTERNAL_ROLE_LABEL[roleKey]}</span></span>
-            <button onClick={() => demoMode ? setShowSwitcher(true) : onSignOut()} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-ink-600 hover:bg-ink-100 dark:text-ink-300 dark:hover:bg-ink-800">
+            <button onClick={onSignOut} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-ink-600 hover:bg-ink-100 dark:text-ink-300 dark:hover:bg-ink-800">
               <LogOut className="h-3.5 w-3.5" /> Sign Out
             </button>
           </div>
@@ -68,7 +64,6 @@ export function SuperAdminShell({ user, role, internalRole, onSignOut, demoMode 
             </div>
           </main>
         </div>
-        {demoMode && <DemoSessionSwitcher open={showSwitcher} onClose={() => setShowSwitcher(false)} />}
         <Toaster />
       </div>
     </StoreProvider>

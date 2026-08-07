@@ -1,6 +1,6 @@
-// Local type definitions — no external Supabase dependency.
-// The application now runs fully self-contained with local authentication
-// and localStorage-backed data persistence.
+// Domain type definitions for the maritime platform.
+// All data access goes through the Express API backend (Google Cloud Run)
+// with data persisted in Google Cloud SQL (MySQL) and files in Google Cloud Storage.
 
 // ---- Auth types (replacing @supabase/supabase-js User & Session) ----
 

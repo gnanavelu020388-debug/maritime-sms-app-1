@@ -5,7 +5,6 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  isDemoMode,
   getDemoFeatureFlags,
   getDemoFeatureFlagsForTenant,
   demoSetFeatureFlag,
@@ -16,8 +15,6 @@ import {
 } from './demoData';
 import { postSyncEvent, onSyncEvent, type SyncEvent } from './syncChannel';
 import * as api from './api';
-
-void isDemoMode; // always local mode
 
 /** All platform modules that can be toggled per tenant. */
 export const MODULE_KEYS = [
@@ -146,19 +143,21 @@ export async function fetchSyncConfig(tenantId: string): Promise<SyncConfigRow> 
   const cached = syncConfigCache.get(tenantId);
   if (cached) return cached;
 
-  const stored = getDemoSyncConfigForTenant(tenantId);
-  if (stored) {
-    const result = {
-      ...defaultConfig,
-      auto_sync_interval_hours: stored.auto_sync_interval_hours,
-      manual_replicate_enabled: stored.manual_replicate_enabled,
-      updated_by: stored.updated_by,
-      updated_at: stored.updated_at,
+  try {
+    const row = await api.apiGetSyncConfig<SyncConfigRow>(tenantId);
+    const result: SyncConfigRow = {
+      id: row.id ?? 'default',
+      tenant_id: tenantId,
+      auto_sync_interval_hours: row.auto_sync_interval_hours ?? 6,
+      manual_replicate_enabled: row.manual_replicate_enabled ?? true,
+      updated_by: row.updated_by ?? null,
+      updated_at: row.updated_at ?? new Date().toISOString(),
     };
     syncConfigCache.set(tenantId, result);
     return result;
+  } catch {
+    return defaultConfig;
   }
-  return defaultConfig;
 }
 
 export async function fetchAllFeatureFlags(): Promise<FeatureFlagRow[]> {
@@ -169,18 +168,10 @@ export async function fetchAllFeatureFlags(): Promise<FeatureFlagRow[]> {
       const flags = await api.apiGetFeatureFlags<FeatureFlagRow>(t.id).catch(() => []);
       all.push(...flags);
     }
-    if (all.length > 0) return all;
-  } catch { /* fall back to local */ }
-  const entries = getDemoFeatureFlags();
-  return entries.map((e, i) => ({
-    id: `local-${i}`,
-    tenant_id: e.tenant_id,
-    feature_key: e.feature_key as ModuleKey,
-    enabled: e.enabled,
-    custom_config: null,
-    updated_by: e.updated_by,
-    updated_at: e.updated_at,
-  }));
+    return all;
+  } catch {
+    return [];
+  }
 }
 
 export async function setFeatureFlag(
@@ -207,9 +198,19 @@ export async function setSyncConfig(
   manualReplicateEnabled: boolean,
   updatedBy: string
 ): Promise<boolean> {
+  try {
+    await api.apiUpdateSyncConfig<SyncConfigRow>(tenantId, {
+      auto_sync_interval_hours: intervalHours,
+      manual_replicate_enabled: manualReplicateEnabled,
+    });
+  } catch (err) {
+    console.error('[setSyncConfig] API error:', err);
+    return false;
+  }
   demoSetSyncConfig(tenantId, intervalHours, manualReplicateEnabled, updatedBy);
   syncConfigCache.delete(tenantId);
   notifyFlagChange(tenantId);
+  postSyncEvent({ type: 'FEATURE_FLAGS_CHANGED', tenantId, payload: { tenantId, syncIntervalHours: intervalHours } });
   return true;
 }
 

@@ -1,11 +1,10 @@
 import { useState, useEffect, useCallback } from 'react';
 import { VesselShell } from '../layouts/VesselShell';
 import { VesselPortalView } from '../views/vessel/VesselPortalView';
-import { DemoAuthProvider } from '../lib/demoAuth';
 import type { ModuleKey } from '../lib/featureFlags';
 import type { DrawerSection } from '../components/BridgeDrawer';
 
-export function VesselApp({ demoMode = false }: { demoMode?: boolean }) {
+export function VesselApp() {
   const [activeModule, setActiveModule] = useState<ModuleKey | null>(null);
   const [drawerSection, setDrawerSection] = useState<DrawerSection | null>(null);
   const [drawerOpen, setDrawerOpen] = useState(true);
@@ -36,7 +35,6 @@ export function VesselApp({ demoMode = false }: { demoMode?: boolean }) {
 
   const content = (
     <VesselShell
-      demoMode={demoMode}
       activeModule={activeModule}
       onReturnToDashboard={handleReturnToDashboard}
       drawerOpen={drawerOpen}
@@ -55,8 +53,5 @@ export function VesselApp({ demoMode = false }: { demoMode?: boolean }) {
     </VesselShell>
   );
 
-  if (demoMode) {
-    return <DemoAuthProvider role="vessel">{content}</DemoAuthProvider>;
-  }
   return content;
 }

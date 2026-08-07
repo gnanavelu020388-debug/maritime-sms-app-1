@@ -10,7 +10,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { isDemoMode } from './demoData';
+
 import { MODULE_KEYS, MODULE_LABELS, type ModuleKey } from './featureFlags';
 
 // ── Shoreside Role Definitions ───────────────────────────────────────
@@ -387,15 +387,8 @@ export function useShoreRolesForTenant(tenantId: string | null | undefined): {
 
   useEffect(() => {
     if (!tenantId) { setRoles([]); setLoading(false); return; }
-    if (isDemoMode()) {
-      setRoles(getDemoShoreDefs(tenantId));
-      setLoading(false);
-      return;
-    }
-    // Production: fetch from tenant_shore_role_definitions table
-    // Falls back to defaults if no rows or table doesn't exist yet
-    setLoading(false);
     setRoles(DEFAULT_SHORE_ROLES);
+    setLoading(false);
   }, [tenantId, tick]);
 
   return { roles, loading, refresh: () => setTick((t) => t + 1) };
@@ -415,21 +408,6 @@ export function useShoreRolePermissions(tenantId: string | null | undefined): {
   useEffect(() => {
     if (!tenantId) { setPermissions({}); setLoading(false); return; }
 
-    if (isDemoMode()) {
-      const demoPerms = getDemoShorePerms(tenantId);
-      const map: Record<string, ShorePermissionMap> = {};
-      for (const role of Object.keys(DEFAULT_SHORE_PERMISSIONS)) {
-        map[role] = demoPerms[role]
-          ? normalizeShorePerms(demoPerms[role])
-          : normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[role]);
-      }
-      setPermissions(map);
-      setLoading(false);
-      return;
-    }
-
-    // Production: fetch from shore_role_permissions table
-    // Falls back to defaults
     const map: Record<string, ShorePermissionMap> = {};
     for (const role of Object.keys(DEFAULT_SHORE_PERMISSIONS)) {
       map[role] = normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[role]);
@@ -448,11 +426,6 @@ export async function saveShoreRolePermission(
   role: string,
   perms: ShorePermissionMap,
 ): Promise<{ error: string | null }> {
-  if (isDemoMode()) {
-    setDemoShorePerms(tenantId, role, perms);
-    return { error: null };
-  }
-  // Production: upsert to shore_role_permissions table
   return { error: null };
 }
 
@@ -463,10 +436,6 @@ export async function saveCustomShoreRole(
   role: string,
   description: string,
 ): Promise<{ error: string | null }> {
-  if (isDemoMode()) {
-    demoAddCustomShoreRole(tenantId, role, description);
-    return { error: null };
-  }
   return { error: null };
 }
 
@@ -476,10 +445,6 @@ export async function updateCustomShoreRole(
   newRole: string,
   description: string,
 ): Promise<{ error: string | null }> {
-  if (isDemoMode()) {
-    demoEditCustomShoreRole(tenantId, oldRole, newRole, description);
-    return { error: null };
-  }
   return { error: null };
 }
 
@@ -487,10 +452,6 @@ export async function deleteCustomShoreRole(
   tenantId: string,
   role: string,
 ): Promise<{ error: string | null }> {
-  if (isDemoMode()) {
-    demoDeleteCustomShoreRole(tenantId, role);
-    return { error: null };
-  }
   return { error: null };
 }
 
@@ -526,12 +487,6 @@ export function resolveShoreRoleName(rank: string | null | undefined): string {
 
 /** Get the shore permission map for a specific role (merged defaults + overrides). */
 export function getShorePermsForRole(tenantId: string, role: string): ShorePermissionMap {
-  if (isDemoMode()) {
-    const demoPerms = getDemoShorePerms(tenantId);
-    const base = DEFAULT_SHORE_PERMISSIONS[role] ?? {};
-    return normalizeShorePerms({ ...base, ...(demoPerms[role] ?? {}) });
-  }
-  // Production: would fetch from DB. Falls back to defaults.
   return normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[role] ?? {});
 }
 

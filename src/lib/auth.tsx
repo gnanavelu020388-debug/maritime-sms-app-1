@@ -3,7 +3,7 @@ import type { Session, User, PlatformRole, InternalRole, TenantRow, TenantUserRo
 import { clearFeatureFlagCache } from './featureFlags';
 import { registerSessionToken, clearSessionToken } from './sessionSecurity';
 import { DEFAULT_RANK_PERMISSIONS, type RankPermissionMap } from './rankPermissions';
-import { DEMO_TENANTS, getDemoTenant, getEffectiveDemoUsers, getEffectiveDemoAssignments, getEffectiveDemoVessels } from './demoData';
+import { getEffectiveDemoUsers, getEffectiveDemoAssignments, getEffectiveDemoVessels, getDemoTenant, getEffectiveDemoTenants } from './demoData';
 import * as api from './api';
 import { initializeDataCache, isCacheInitialized } from './dataCache';
 
@@ -30,41 +30,10 @@ export interface AuthContextValue extends AuthState {
   signUp: (email: string, password: string, name: string, asSuperAdmin: boolean) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
-  sessionToken: string | null;
-  sessionConflict: boolean;
   dismissSessionConflict: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
-
-let demoGetter: (() => AuthContextValue | null) | null = null;
-
-export function _registerDemoAuthGetter(getter: () => AuthContextValue | null) {
-  demoGetter = getter;
-}
-
-const LS_AUTH_SESSION = 'mpc-local-auth-session';
-
-interface LocalAuthSession {
-  email: string;
-  uid: string;
-}
-
-function loadStoredSession(): LocalAuthSession | null {
-  try {
-    const raw = localStorage.getItem(LS_AUTH_SESSION);
-    if (raw) return JSON.parse(raw) as LocalAuthSession;
-  } catch { /* ignore */ }
-  return null;
-}
-
-function storeSession(s: LocalAuthSession | null): void {
-  if (s) {
-    localStorage.setItem(LS_AUTH_SESSION, JSON.stringify(s));
-  } else {
-    localStorage.removeItem(LS_AUTH_SESSION);
-  }
-}
 
 function buildUser(uid: string, email: string): User {
   return {
@@ -75,14 +44,14 @@ function buildUser(uid: string, email: string): User {
     app_metadata: {},
     user_metadata: {},
     identities: [],
-    created_at: '2025-01-01T00:00:00Z',
+    created_at: new Date().toISOString(),
   };
 }
 
-function buildSession(user: User): Session {
+function buildSession(user: User, token: string): Session {
   return {
-    access_token: `local-${user.id}-${Date.now()}`,
-    refresh_token: `local-refresh-${user.id}`,
+    access_token: token,
+    refresh_token: '',
     expires_in: 3600,
     expires_at: Math.floor(Date.now() / 1000) + 3600,
     token_type: 'bearer',
@@ -104,9 +73,9 @@ function resolveRoleAndTenant(uid: string, email: string): Pick<AuthState, 'role
     };
   }
 
-  // Search all demo users across all tenants
+  // Search all tenant users
   const allUsers: TenantUserRow[] = [];
-  for (const t of DEMO_TENANTS) {
+  for (const t of getEffectiveDemoTenants()) {
     allUsers.push(...getEffectiveDemoUsers(t.id));
   }
 
@@ -116,18 +85,14 @@ function resolveRoleAndTenant(uid: string, email: string): Pick<AuthState, 'role
   }
 
   const tenant = getDemoTenant(tenantUser.tenant_id);
-
   if (tenant.status === 'archived') {
     return { role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, rankPermissions: null };
   }
 
-  // For vessel-role users, resolve active crew assignment
   let activeAssignment: ActiveAssignment | null = null;
   if (tenantUser.role === 'vessel') {
     const assignments = getEffectiveDemoAssignments(tenantUser.tenant_id);
-    const active = assignments.find(
-      (a) => a.user_id === tenantUser.id && !a.signed_off_at,
-    );
+    const active = assignments.find((a) => a.user_id === tenantUser.id && !a.signed_off_at);
     if (active) {
       const vessel = getEffectiveDemoVessels(tenantUser.tenant_id).find((v) => v.id === active.vessel_id);
       if (vessel) {
@@ -158,6 +123,41 @@ function resolveRoleAndTenant(uid: string, email: string): Pick<AuthState, 'role
   };
 }
 
+async function resolveFromApi(userObj: { id: string; email: string; role?: string; tenant_id?: string; rank?: string; name?: string }): Promise<Pick<AuthState, 'role' | 'tenant' | 'tenantUser' | 'activeAssignment' | 'internalRole' | 'adminName' | 'rankPermissions'>> {
+  // If server provided a role, prefer that and fetch tenant data when available
+  try {
+    if (userObj.role === 'super_admin') {
+      return { role: 'super_admin', internalRole: 'super_admin', adminName: 'Platform Admin', tenant: null, tenantUser: null, activeAssignment: null, rankPermissions: null };
+    }
+    if (userObj.tenant_id) {
+      try {
+        const tenant = await api.apiGetTenant(userObj.tenant_id);
+        const tenantUser = userObj ? { id: userObj.id, tenant_id: userObj.tenant_id, name: userObj.name || '', email: userObj.email, rank: userObj.rank || 'Crew', role: (userObj.role as any) || 'vessel' } as any : null;
+        let activeAssignment = null;
+        if (tenantUser && tenantUser.role === 'vessel') {
+          // attempt to locate an active assignment from demo fallback (best-effort)
+          const assignments = getEffectiveDemoAssignments(tenantUser.tenant_id);
+          const active = assignments.find((a) => a.user_id === tenantUser.id && !a.signed_off_at);
+          if (active) {
+            const vessel = getEffectiveDemoVessels(tenantUser.tenant_id).find((v) => v.id === active.vessel_id);
+            if (vessel) {
+              activeAssignment = { assignment_id: active.id, vessel_id: vessel.id, vessel_name: vessel.name, tenant_id: vessel.tenant_id, user_id: tenantUser.id, rank: tenantUser.rank, signed_on_at: active.signed_on_at };
+            }
+          }
+        }
+        const rankPermissions = (tenantUser && (DEFAULT_RANK_PERMISSIONS as any)[tenantUser.rank]) ?? null;
+        const adminName = tenantUser && tenantUser.rank === 'DPA' ? `${tenantUser.name} (DPA)` : tenantUser?.name ?? null;
+        return { role: tenantUser?.role ?? null, internalRole: null, adminName, tenant: tenant as any, tenantUser: tenantUser as any, activeAssignment, rankPermissions };
+      } catch {
+        // fall through to demo resolution
+      }
+    }
+  } catch {
+    // ignore and fall back
+  }
+  return { role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, rankPermissions: null };
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<AuthState>({
     user: null,
@@ -184,39 +184,55 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function refresh() {
-    const stored = loadStoredSession();
-    if (!stored) {
-      setState({ user: null, session: null, role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, loading: false, error: null, rankPermissions: null });
-      return;
+    try {
+      const res = await api.apiGetMe();
+      if (!res.user) {
+        setState((s) => ({ ...s, loading: false }));
+        return;
+      }
+      // prefer server-provided role/tenant information when available
+      const resolved = await resolveFromApi(res.user as any);
+      const user = buildUser(res.user.id, res.user.email);
+      const session = buildSession(user, api.getToken() ?? '');
+      const token = await registerNewSessionToken(res.user.id);
+      setState({ user, session, ...resolved, loading: false, error: null, sessionToken: token, sessionConflict: false });
+    } catch {
+      setState((s) => ({ ...s, loading: false }));
     }
-    const resolved = resolveRoleAndTenant(stored.uid, stored.email);
-    const user = buildUser(stored.uid, stored.email);
-    const session = buildSession(user);
-    const token = await registerNewSessionToken(stored.uid);
-    setState({ user, session, ...resolved, loading: false, error: null, sessionToken: token, sessionConflict: false });
   }
 
   useEffect(() => {
     let mounted = true;
-    const stored = loadStoredSession();
-    if (!stored) {
-      // No stored session — still initialize the data cache so demo data is available
+    const token = api.getToken();
+    if (!token) {
+      // No stored token — still initialize the data cache
       initializeDataCache().then(() => {
         if (mounted) {
-          setState({ user: null, session: null, role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, loading: false, error: null, rankPermissions: null });
+          setState((s) => ({ ...s, loading: false }));
         }
       });
       return () => { mounted = false; };
     }
-    // Initialize data cache from backend, then resolve session
+    // Initialize data cache from backend, then verify token
     initializeDataCache().then(async () => {
       if (!mounted) return;
-      const resolved = resolveRoleAndTenant(stored.uid, stored.email);
-      const user = buildUser(stored.uid, stored.email);
-      const session = buildSession(user);
-      const token = await registerNewSessionToken(stored.uid);
-      if (mounted) {
-        setState({ user, session, ...resolved, loading: false, error: null, sessionToken: token, sessionConflict: false });
+      try {
+        const res = await api.apiGetMe();
+        if (!res.user) {
+          api.clearToken();
+          setState((s) => ({ ...s, loading: false }));
+          return;
+        }
+        const resolved = resolveRoleAndTenant(res.user.id, res.user.email);
+        const user = buildUser(res.user.id, res.user.email);
+        const session = buildSession(user, token);
+        const sessionToken = await registerNewSessionToken(res.user.id);
+        if (mounted) {
+          setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false });
+        }
+      } catch {
+        api.clearToken();
+        if (mounted) setState((s) => ({ ...s, loading: false }));
       }
     });
     return () => { mounted = false; };
@@ -227,17 +243,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const result = await api.apiLogin(email, password);
       const { user: apiUser, token } = result;
       const uid = apiUser.id;
-      storeSession({ email, uid });
 
-      // Initialize cache if not yet done
-      if (!isCacheReady()) {
+      if (!isCacheInitialized()) {
         await initializeDataCache();
       }
 
-      const resolved = resolveRoleAndTenant(uid, email);
+      // prefer API-resolved role/tenant
+      const resolved = await resolveFromApi(apiUser as any) || resolveRoleAndTenant(uid, email);
       const user = buildUser(uid, email);
-      const session = buildSession(user);
-      session.access_token = token;
+      const session = buildSession(user, token);
       const sessionToken = await registerNewSessionToken(uid);
       setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false });
       return { error: null };
@@ -248,24 +262,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const signUp = async (email: string, password: string, name: string, asSuperAdmin: boolean) => {
     if (password.length < 6) return { error: 'Password must be at least 6 characters.' };
-
     const result = await api.apiSignup(email, password, name, asSuperAdmin);
     if (result.error) return { error: result.error };
-
     if (asSuperAdmin && result.token && result.user) {
       const uid = result.user.id;
-      storeSession({ email, uid });
-      if (!isCacheReady()) {
+      if (!isCacheInitialized()) {
         await initializeDataCache();
       }
       const resolved = resolveRoleAndTenant(uid, email);
       const user = buildUser(uid, email);
-      const session = buildSession(user);
-      session.access_token = result.token;
+      const session = buildSession(user, result.token);
       const sessionToken = await registerNewSessionToken(uid);
       setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false });
     }
-
     return { error: null };
   };
 
@@ -275,7 +284,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await clearSessionToken(state.user.id);
     }
     api.clearToken();
-    storeSession(null);
     setState({ user: null, session: null, role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, loading: false, error: null, sessionToken: null, sessionConflict: false, rankPermissions: null });
   };
 
@@ -290,16 +298,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 }
 
-function isCacheReady(): boolean {
-  return isCacheInitialized();
-}
-
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
-  if (ctx) return ctx;
-  if (demoGetter) {
-    const demo = demoGetter();
-    if (demo) return demo;
-  }
-  throw new Error('useAuth must be used within AuthProvider');
+  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  return ctx;
 }

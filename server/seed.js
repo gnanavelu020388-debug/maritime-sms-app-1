@@ -1,9 +1,15 @@
 import bcrypt from 'bcryptjs';
 import { v4 as uuidv4 } from 'uuid';
+import fs from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import pool from './db.js';
 
 dotenv.config();
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const DEMO_PASSWORD_HASH = bcrypt.hashSync('demo', 10);
 const ADMIN_PASSWORD_HASH = bcrypt.hashSync('admin123', 10);
@@ -155,10 +161,4 @@ async function seed() {
   await pool.end();
 }
 
-seed().catch(async (err) => {
-  console.error('[Seed] Error:', err);
-
-  await pool.end();
-
-  process.exit(1);
-});
+seed().catch((err) => { console.error('[Seed] Error:', err); process.exit(1); });

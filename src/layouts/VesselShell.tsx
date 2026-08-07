@@ -4,17 +4,17 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { useDemoAuth } from '../lib/demoAuth';
 import { startSyncLoop, getSyncStatus, replicateToShoreNow, type SyncResult } from '../lib/syncService';
 import { getLocalSmsVersion } from '../lib/localVesselDb';
 import { getEffectiveDemoVessels, getEffectiveDemoAssignments, getEffectiveDemoUsers } from '../lib/demoData';
 import { getProfileForVessel, type SmsProfile } from '../lib/smsProfiles';
-import { DemoSessionSwitcher } from '../components/DemoSessionSwitcher';
 import { useVesselConnection } from '../lib/useVesselConnection';
 import { VesselSyncStatusPill } from '../components/VesselSyncStatusPill';
 import { useSyncConfig, useModuleDefinitions, getDisplayName, type ModuleKey } from '../lib/featureFlags';
 import type { Rank } from '../lib/supabase';
 import { SessionSecurityGuard, broadcastSecurityTenant } from '../components/SessionSecurityGuard';
+import { NetworkStatusBadge } from '../components/NetworkStatusBadge';
+import { ReconnectionBanner } from '../components/ReconnectionBanner';
 import { BridgeDrawer, type DrawerSection } from '../components/BridgeDrawer';
 
 import { Toaster } from '../components/Toaster';
@@ -23,11 +23,10 @@ import { SmsUpdateBanner } from '../components/SmsUpdateBanner';
 import { MaintenanceBanner } from '../components/MaintenanceBanner';
 
 export function VesselShell({
-  children, demoMode = false, activeModule, onReturnToDashboard,
+  children, activeModule, onReturnToDashboard,
   drawerOpen, onDrawerOpenChange, drawerSection, onSelectDrawerSection,
 }: {
   children: ReactNode;
-  demoMode?: boolean;
   activeModule: ModuleKey | null;
   onReturnToDashboard: () => void;
   drawerOpen: boolean;
@@ -36,10 +35,8 @@ export function VesselShell({
   onSelectDrawerSection: (section: DrawerSection) => void;
 }) {
   const { user, tenant, activeAssignment, tenantUser, signOut } = useAuth();
-  const demo = useDemoAuth();
   const [localVersion, setLocalVersion] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
-  const [showSwitcher, setShowSwitcher] = useState(false);
   const [isReplicating, setIsReplicating] = useState(false);
   const [syncIntervalMs, setSyncIntervalMs] = useState<number | null>(null);
   const [manualReplicateEnabled, setManualReplicateEnabled] = useState(false);
@@ -53,8 +50,12 @@ export function VesselShell({
   const { config: syncConfig } = useSyncConfig(tenant?.id);
   useEffect(() => {
     if (!syncConfig) return;
-    setSyncIntervalMs(syncConfig.auto_sync_interval_hours * 60 * 60 * 1000);
+    const intervalMs = syncConfig.auto_sync_interval_hours * 60 * 60 * 1000;
+    setSyncIntervalMs(intervalMs);
     setManualReplicateEnabled(syncConfig.manual_replicate_enabled);
+    console.log(
+      `[VesselShell] sync config loaded tenant=${tenant?.id} interval=${syncConfig.auto_sync_interval_hours}h (${intervalMs}ms) manualReplicate=${syncConfig.manual_replicate_enabled} updatedBy=${syncConfig.updated_by ?? 'N/A'}`,
+    );
   }, [syncConfig]);
 
   const crewRank: Rank | null = activeAssignment?.rank ?? tenantUser?.rank as Rank ?? null;
@@ -62,19 +63,19 @@ export function VesselShell({
 
   const vesselConn = useVesselConnection(tenant?.id);
 
-  const allDemoVessels = demo && tenant ? getEffectiveDemoVessels(tenant.id) : [];
-  const demoVesselUsers = demo && tenant
+  const allVessels = tenant ? getEffectiveDemoVessels(tenant.id) : [];
+  const vesselUsers = tenant
     ? getEffectiveDemoUsers(tenant.id).filter((u) => u.role === 'vessel')
     : [];
-  const currentUserObj = demoVesselUsers.find((u) => u.id === demo?.demoSession.userId) ?? demoVesselUsers[0];
+  const currentUserObj = vesselUsers.find((u) => u.id === user?.id) ?? vesselUsers[0];
 
-  const assignedVesselIds = demo && tenant && currentUserObj
+  const assignedVesselIds = tenant && currentUserObj
     ? new Set(getEffectiveDemoAssignments(tenant.id).filter((a) => a.user_id === currentUserObj.id).map((a) => a.vessel_id))
     : new Set<string>();
-  const demoVessels = demo && tenant
-    ? (currentUserObj ? allDemoVessels.filter((v) => assignedVesselIds.has(v.id)) : allDemoVessels)
+  const accessibleVessels = tenant && currentUserObj
+    ? allVessels.filter((v) => assignedVesselIds.has(v.id))
     : [];
-  const currentVessel = demoVessels.find((v) => v.id === demo?.demoSession.vesselId) ?? demoVessels[0] ?? null;
+  const currentVessel = accessibleVessels[0] ?? null;
 
   const activeVesselId = activeAssignment?.vessel_id ?? currentVessel?.id;
 
@@ -139,16 +140,12 @@ export function VesselShell({
   }
 
   function handleSignOut() {
-    if (demoMode) {
-      setShowSwitcher(true);
-    } else {
-      signOut();
-    }
+    signOut();
   }
 
   const isMasterOrChiefEng = crewRank === 'Master' || crewRank === 'Chief Engineer';
 
-  if (demoMode && tenant && currentUserObj && demoVessels.length === 0) {
+  if (tenant && currentUserObj && accessibleVessels.length === 0 && !activeAssignment) {
     return (
       <StoreProvider>
         <div className="flex min-h-screen flex-col items-center justify-center gap-4 bg-ink-50 p-6 text-center dark:bg-ink-950">
@@ -156,7 +153,7 @@ export function VesselShell({
             <ShieldX className="h-8 w-8 text-danger-500" />
           </div>
           <div>
-            <h1 className="text-xl font-bold text-ink-900 dark:text-white">Access Blocked — No Active Vessel Assignment</h1>
+            <h1 className="text-xl font-bold text-ink-900 dark:text-white">No Active Vessel Assignment</h1>
             <p className="mt-2 max-w-md text-sm text-ink-500 dark:text-ink-400">
               You are not currently signed on to any vessel. Shipboard users can only access the vessel they are actively assigned to by Company Admin.
             </p>
@@ -165,7 +162,7 @@ export function VesselShell({
           <div className="flex items-center gap-2 rounded-lg bg-ink-100 px-4 py-2 text-xs text-ink-500 dark:bg-ink-800 dark:text-ink-300">
             <Anchor className="h-4 w-4" /> Status: <strong className="font-semibold">Ashore / Unassigned</strong>
           </div>
-          <button onClick={handleSignOut} className="btn-secondary mt-2">Back to Session Switcher</button>
+          <button onClick={handleSignOut} className="btn-secondary mt-2">Sign Out</button>
         </div>
       </StoreProvider>
     );
@@ -182,11 +179,10 @@ export function VesselShell({
     <SessionSecurityGuard>
     <div className="flex min-h-screen flex-col bg-ink-50 dark:bg-ink-950">
       <MaintenanceBanner />
+      <ReconnectionBanner />
 
-      {/* Top bar — minimal and clean */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-ink-100 bg-white/95 px-4 backdrop-blur dark:border-ink-800 dark:bg-ink-900/95">
         <div className="flex items-center gap-3">
-          {/* Return to Dashboard button — shown when inside a module or drawer section */}
           {isInModule && (
             <button
               onClick={onReturnToDashboard}
@@ -211,6 +207,7 @@ export function VesselShell({
         </div>
 
         <div className="flex items-center gap-3">
+          <NetworkStatusBadge compact />
           <VesselSyncStatusPill
             lastSyncAt={lastSync ?? vesselConn.lastSyncAt}
             pendingSyncItems={0}
@@ -278,7 +275,7 @@ export function VesselShell({
             <p className="text-[10px] text-ink-400">SMS v{versionLabel}{lastSync ? ` · synced ${new Date(lastSync).toLocaleTimeString()}` : ''}</p>
           </div>
 
-          {demoMode && currentVessel && (
+          {currentVessel && (
             <div className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-ink-50 px-2.5 py-1.5 text-xs font-semibold text-ink-600 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-300" title="Vessel locked to your active sign-on assignment">
               <Lock className="h-3 w-3 text-ink-400" />
               <Ship className="h-3.5 w-3.5 text-primary-500" />
@@ -286,7 +283,7 @@ export function VesselShell({
             </div>
           )}
 
-          {demoMode && currentUserObj && (
+          {currentUserObj && (
             <div className="inline-flex items-center gap-1.5 rounded-lg border border-ink-200 bg-ink-50 px-2.5 py-1.5 text-xs font-semibold text-ink-600 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-300" title="Crew identity locked to your authenticated sign-on">
               <Lock className="h-3 w-3 text-ink-400" />
               <div className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-accent-500/15 text-[9px] font-bold text-accent-600">
@@ -305,7 +302,6 @@ export function VesselShell({
       <SmsUpdateBanner />
 
       <div className="flex flex-1">
-        {/* Bridge Drawer — state lifted to VesselApp */}
         <BridgeDrawer
           open={drawerOpen}
           onOpenChange={onDrawerOpenChange}
@@ -318,13 +314,11 @@ export function VesselShell({
           onSelectSection={onSelectDrawerSection}
         />
 
-        {/* Main content area — offset by drawer width when open */}
         <main className={`flex-1 overflow-x-hidden px-6 py-6 transition-all duration-200 ${drawerOpen ? 'ml-[260px]' : 'ml-0'}`}>
           {children}
         </main>
       </div>
 
-      {demoMode && <DemoSessionSwitcher open={showSwitcher} onClose={() => setShowSwitcher(false)} />}
       <Toaster />
     </div>
     </SessionSecurityGuard>

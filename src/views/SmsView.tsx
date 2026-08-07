@@ -9,7 +9,7 @@ import { useStore } from '../store';
 import { CriticalActionWizard } from '../components/CriticalActionWizard';
 import { Modal } from '../components/Modal';
 import { postSyncEvent } from '../lib/syncChannel';
-import { isDemoMode, demoSetWorkspaceFrozen, demoGetWorkspaceFrozen, demoSetGuardrails, demoGetGuardrails } from '../lib/demoData';
+import { demoSetWorkspaceFrozen, demoGetWorkspaceFrozen, demoSetGuardrails, demoGetGuardrails } from '../lib/demoData';
 import { relativeTime } from '../constants';
 import type { Capabilities } from '../lib/permissions';
 import type { Tenant, SmsSnapshot, TenantGuardrails, PlanTier } from '../types';
@@ -65,7 +65,7 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
   const [maxDepth, setMaxDepth] = useState(guardrails.maxSubfolderDepth);
   const [maxUpload, setMaxUpload] = useState(guardrails.maxUploadSizeMb);
   const [rollbackFor, setRollbackFor] = useState<SmsSnapshot | null>(null);
-  const isFrozen = selectedTenant ? (isDemoMode() ? demoGetWorkspaceFrozen(selectedTenant.demoTenantId ?? selectedTenant.id) : guardrails.workspaceFrozen) : false;
+  const isFrozen = selectedTenant ? demoGetWorkspaceFrozen(selectedTenant.id) : false;
   const [freezeConfirm, setFreezeConfirm] = useState(false);
 
   // Sync local state when selection changes
@@ -88,7 +88,7 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
     if (selectedTenant) {
       const newFrozen = !isFrozen;
       dispatch({ type: 'TENANT_FREEZE', id: selectedTenant.id, frozen: newFrozen });
-      if (isDemoMode()) demoSetWorkspaceFrozen(selectedTenant.demoTenantId ?? selectedTenant.id, newFrozen);
+      demoSetWorkspaceFrozen(selectedTenant.id, newFrozen);
       postSyncEvent({ type: 'SMS_UPDATED', tenantId: selectedTenant.demoTenantId ?? selectedTenant.id, payload: { action: 'workspace_freeze', frozen: newFrozen } });
       toast({
         tone: newFrozen ? 'danger' : 'success',
@@ -102,12 +102,12 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
   function handleSaveGuardrails() {
     if (selectedTenant) {
       dispatch({ type: 'GUARDRAILS_UPDATE', id: selectedTenant.id, patch: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload } });
-      if (isDemoMode()) demoSetGuardrails(selectedTenant.demoTenantId ?? selectedTenant.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload });
+      demoSetGuardrails(selectedTenant.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload });
       postSyncEvent({ type: 'SMS_UPDATED', tenantId: selectedTenant.demoTenantId ?? selectedTenant.id, payload: { action: 'guardrails_updated', maxDepth, maxUpload } });
       toast({ tone: 'success', title: 'Tenant guardrails updated', message: `${selectedTenant.company}: max depth ${maxDepth}, max upload ${maxUpload}MB` });
     } else {
       dispatch({ type: 'GUARDRAILS_GLOBAL_UPDATE', patch: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload } });
-      if (isDemoMode()) tenants.forEach((t) => { if (t.demoTenantId) demoSetGuardrails(t.demoTenantId, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload }); });
+      tenants.forEach((t) => { demoSetGuardrails(t.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload }); });
       tenants.forEach((t) => postSyncEvent({ type: 'SMS_UPDATED', tenantId: t.demoTenantId ?? t.id, payload: { action: 'global_guardrails_updated', maxDepth, maxUpload } }));
       toast({ tone: 'success', title: 'Global defaults updated', message: `Platform-wide: max depth ${maxDepth}, max upload ${maxUpload}MB` });
     }
@@ -530,7 +530,7 @@ function TenantGovernanceTable({
           <tbody>
             {filtered.map((t) => {
               const g = t.guardrails;
-              const isFrozen = isDemoMode() ? demoGetWorkspaceFrozen(t.demoTenantId ?? t.id) : (g?.workspaceFrozen ?? false);
+              const isFrozen = demoGetWorkspaceFrozen(t.id);
               const isSelected = selectedTenantId === t.id;
               return (
                 <tr

@@ -27,7 +27,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   modules JSON NOT NULL,
   sms_version VARCHAR(20) NOT NULL DEFAULT '1.0.0',
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  contract_expires TIMESTAMP NOT NULL DEFAULT (CURRENT_TIMESTAMP + INTERVAL 365 DAY),
+  contract_expires TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS tenant_users (
   seaman_book_number VARCHAR(100),
   nationality VARCHAR(100),
   `rank` VARCHAR(100) NOT NULL DEFAULT 'Crew',
-  role VARCHAR(50) NOT NULL DEFAULT 'vessel',
+  `role` VARCHAR(50) NOT NULL DEFAULT 'vessel',
   status VARCHAR(50) NOT NULL DEFAULT 'invited',
   fleet_scope VARCHAR(20) NOT NULL DEFAULT 'global',
   assigned_vessel_ids JSON NOT NULL,
@@ -131,7 +131,7 @@ CREATE TABLE IF NOT EXISTS audit_logs (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   INDEX idx_audit_tenant (tenant_id),
-  INDEX idx_audit_created (created_at DESC)
+  INDEX idx_audit_created (created_at)
 );
 
 CREATE TABLE IF NOT EXISTS sms_profiles (
@@ -190,7 +190,7 @@ CREATE TABLE IF NOT EXISTS sms_document_versions (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (document_id) REFERENCES sms_documents(id) ON DELETE CASCADE,
-  INDEX idx_doc_versions (tenant_id, document_id, revision DESC)
+  INDEX idx_doc_versions (tenant_id, document_id, revision)
 );
 
 CREATE TABLE IF NOT EXISTS vessel_sync_outbox (
@@ -210,7 +210,7 @@ CREATE TABLE IF NOT EXISTS vessel_sync_outbox (
   synced_at TIMESTAMP NULL,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   FOREIGN KEY (vessel_id) REFERENCES vessels(id) ON DELETE CASCADE,
-  INDEX idx_outbox_tenant_vessel (tenant_id, vessel_id, status, priority DESC),
+  INDEX idx_outbox_tenant_vessel (tenant_id, vessel_id, status, priority),
   INDEX idx_outbox_module (tenant_id, module_key, status),
   INDEX idx_outbox_status (status, created_at)
 );

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Anchor, Shield, Building2, Loader2 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { StandaloneBanner } from '../components/MaintenanceBanner';
+import { NetworkStatusBadge } from '../components/NetworkStatusBadge';
 
 export function AuthView() {
   const { signIn, signUp } = useAuth();
@@ -31,6 +32,9 @@ export function AuthView() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-ink-50 via-primary-50/30 to-ink-100 dark:from-ink-950 dark:via-ink-900 dark:to-ink-950">
       <StandaloneBanner />
+      <div className="absolute right-4 top-4 z-10">
+        <NetworkStatusBadge />
+      </div>
       <div className="flex min-h-[calc(100vh-40px)] items-center justify-center p-4">
       <div className="w-full max-w-md">
         <div className="mb-6 flex flex-col items-center gap-2 text-center">

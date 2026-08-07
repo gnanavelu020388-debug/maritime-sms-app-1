@@ -8,9 +8,10 @@ import { resolveShoreRoleName } from '../lib/shoreRoles';
 import { Toaster } from '../components/Toaster';
 import { StoreProvider } from '../store';
 import { MaintenanceBanner } from '../components/MaintenanceBanner';
-import { DemoSessionSwitcher } from '../components/DemoSessionSwitcher';
 import { SessionSecurityGuard, broadcastSecurityTenant } from '../components/SessionSecurityGuard';
 import { useFeatureFlags, useModuleDefinitions, getDisplayName, type ModuleKey } from '../lib/featureFlags';
+import { NetworkStatusBadge } from '../components/NetworkStatusBadge';
+import { ReconnectionBanner } from '../components/ReconnectionBanner';
 import type { PlatformRole } from '../lib/supabase';
 
 export type CompanySection = 'overview' | 'vessels' | 'crew_management' | 'permissions' | 'sms_dpa' | 'master_library' | 'audit' | 'security';
@@ -34,11 +35,10 @@ function useCompanyNav(): { id: CompanySection; label: string; icon: ReactNode; 
 
 
 
-export function CompanyShell({ children, active, demoMode = false }: { children: ReactNode; active: CompanySection; demoMode?: boolean }) {
+export function CompanyShell({ children, active }: { children: ReactNode; active: CompanySection }) {
   const { user, role, tenant, tenantUser, signOut } = useAuth();
   const { isEnabled } = useFeatureFlags(tenant?.id);
   const [open, setOpen] = useState(false);
-  const [showSwitcher, setShowSwitcher] = useState(false);
 
   useEffect(() => {
     broadcastSecurityTenant(tenant?.id);
@@ -48,11 +48,7 @@ export function CompanyShell({ children, active, demoMode = false }: { children:
   const items = navItems.filter((n) => role && n.roles.includes(role) && (!n.feature || isEnabled(n.feature)));
 
   function handleSignOut() {
-    if (demoMode) {
-      setShowSwitcher(true);
-    } else {
-      signOut();
-    }
+    signOut();
   }
 
   return (
@@ -92,6 +88,7 @@ export function CompanyShell({ children, active, demoMode = false }: { children:
 
       <div className="flex min-w-0 flex-1 flex-col">
         <MaintenanceBanner />
+        <ReconnectionBanner />
         <header className="flex h-16 items-center justify-between border-b border-ink-100 bg-white px-4 dark:border-ink-800 dark:bg-ink-900">
           <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-ink-500 hover:bg-ink-100 dark:hover:bg-ink-800 lg:hidden">
             <Menu className="h-5 w-5" />
@@ -109,6 +106,7 @@ export function CompanyShell({ children, active, demoMode = false }: { children:
             )}
           </div>
           <div className="flex items-center gap-3">
+            <NetworkStatusBadge />
             <div className="text-right">
               <p className="text-xs font-semibold text-ink-800 dark:text-white">{user?.email}</p>
               <p className="text-[10px] text-ink-400">SMS v{tenant?.sms_version ?? '—'}</p>
@@ -122,7 +120,6 @@ export function CompanyShell({ children, active, demoMode = false }: { children:
           <div className="mx-auto w-full animate-fade-in">{children}</div>
         </main>
       </div>
-      {demoMode && <DemoSessionSwitcher open={showSwitcher} onClose={() => setShowSwitcher(false)} />}
       <Toaster />
     </div>
     </SessionSecurityGuard>

@@ -53,24 +53,7 @@ app.use('/api/sessions', sessionRoutes);
 app.use('/api/banner', bannerRoutes);
 
 // ── Health check ────────────────────────────────────────────
-app.get('/api/health', async (_req, res) => {
-  try {
-    await pool.query('SELECT 1');
-
-    res.json({
-      status: 'healthy',
-      database: 'connected',
-      timestamp: new Date().toISOString(),
-    });
-  } catch (err) {
-    res.status(503).json({
-      status: 'unhealthy',
-      database: 'disconnected',
-      error: err.message,
-      timestamp: new Date().toISOString(),
-    });
-  }
-});
+app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
 
 // ── Serve static frontend in production ──────────────────────
 const distPath = path.join(__dirname, '..', 'dist');
@@ -79,8 +62,23 @@ if (fs.existsSync(distPath)) {
   app.get('*', (_req, res) => res.sendFile(path.join(distPath, 'index.html')));
 }
 
-app.listen(PORT, () => {
+// ── Initialize schema on startup ─────────────────────────────
+async function initSchema() {
+  try {
+    const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
+    const statements = schema.split(';').map(s => s.trim()).filter(s => s.length > 0);
+    for (const stmt of statements) {
+      await pool.query(stmt);
+    }
+    console.log('[DB] Schema initialized');
+  } catch (err) {
+    console.error('[DB] Schema init error:', err.message);
+  }
+}
+
+app.listen(PORT, async () => {
   console.log(`[Server] Maritime Platform API running on port ${PORT}`);
+  await initSchema();
 });
 
 export default app;

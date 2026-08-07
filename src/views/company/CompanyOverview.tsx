@@ -1,6 +1,6 @@
 import { Ship, FileText, Users, Shield, ArrowRight, TrendingUp, CheckCircle2, Clock, Anchor } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
-import { getEffectiveDemoUsers, DEMO_SMS_DOCS, getEffectiveDemoAssignments, getEffectiveDemoVessels } from '../../lib/demoData';
+import { getEffectiveDemoUsers, getEffectiveDemoSmsDocs, getEffectiveDemoAssignments, getEffectiveDemoVessels } from '../../lib/demoData';
 import { useFleetScope } from '../../lib/useFleetScope';
 import { useEffect, useState } from 'react';
 import type { CompanySection } from '../../layouts/CompanyShell';
@@ -18,7 +18,7 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
     if (!tenant) return;
     const liveVessels = fleetScope.filterVessels(getEffectiveDemoVessels(tenant.id));
     const liveUsers = getEffectiveDemoUsers(tenant.id);
-    const liveDocs = DEMO_SMS_DOCS.filter((d) => d.tenant_id === tenant.id);
+    const liveDocs = getEffectiveDemoSmsDocs(tenant.id);
     const liveAssignments = getEffectiveDemoAssignments(tenant.id);
     setStats({
       vessels: liveVessels.length,

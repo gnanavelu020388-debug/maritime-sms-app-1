@@ -15,10 +15,7 @@
 
 import { useEffect, useState } from 'react';
 import { type Rank, ALL_RANKS, CORE_RANKS } from './supabase';
-import { isDemoMode } from './demoData';
 import { MODULE_KEYS, MODULE_LABELS, type ModuleKey } from './featureFlags';
-
-void isDemoMode; // always local mode
 
 // ── Custom Rank Definitions ──────────────────────────────────────────
 

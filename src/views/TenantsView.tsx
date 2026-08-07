@@ -12,7 +12,7 @@ import { useAuth } from '../lib/auth';
 import { PLAN_DEFAULTS, PLAN_TIERS, formatUtc } from '../constants';
 import type { Capabilities } from '../lib/permissions';
 import type { DocTreeKind, DocumentNode, PlanTier, Tenant, TenantStatus } from '../types';
-import { isDemoMode } from '../lib/demoData';
+
 
 export function TenantsView({ caps }: { caps: Capabilities }) {
   const { tenants, dispatch, toast } = useStore();

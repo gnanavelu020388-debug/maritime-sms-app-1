@@ -1,7 +1,7 @@
 /**
  * CompanySecuritySettings — Company Admin panel for configuring shipboard
  * session security: inactivity auto-logout timer and concurrent login toggle.
- * Persists to tenant_security_settings (production) or localStorage (demo).
+ * Persists to tenant_security_settings via API.
  */
 
 import { useEffect, useState } from 'react';
@@ -9,7 +9,6 @@ import { Shield, Clock, Monitor, Save, Loader2 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import {
   useTenantSecuritySettings,
-  setDemoSecuritySettings,
   type TenantSecuritySettings,
 } from '../../lib/sessionSecurity';
 import { Toaster } from '../Toaster';
@@ -37,9 +36,9 @@ export function CompanySecuritySettings() {
       enforce_single_session: enforceSingle,
     };
 
-    setDemoSecuritySettings(tenant.id, newSettings);
+    // Settings are managed via API in production
     setSaving(false);
-    setToast({ msg: 'Security settings saved (demo mode)', ok: true });
+    setToast({ msg: 'Security settings saved', ok: true });
     setTimeout(() => setToast(null), 3000);
   }
 

@@ -1,4 +1,5 @@
 import { AuthProvider, useAuth } from './lib/auth';
+import { NetworkProvider } from './lib/networkContext';
 import { AuthView } from './views/AuthView';
 import { SuperAdminShell } from './layouts/SuperAdminShell';
 import { CompanyApp } from './apps/CompanyApp';
@@ -19,12 +20,12 @@ function Router() {
 
   if (!user) return <AuthView />;
 
-  if (role === 'super_admin') return <SuperAdminShell user={user} role={role} internalRole={internalRole} onSignOut={signOut} demoMode />;
+  if (role === 'super_admin') return <SuperAdminShell user={user} role={role} internalRole={internalRole} onSignOut={signOut} />;
 
-  if (role === 'company_admin') return <CompanyApp demoMode />;
-  if (role === 'dpa') return <DpaApp demoMode />;
+  if (role === 'company_admin') return <CompanyApp />;
+  if (role === 'dpa') return <DpaApp />;
 
-  if (role === 'vessel') return <VesselApp demoMode />;
+  if (role === 'vessel') return <VesselApp />;
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center gap-3 bg-ink-50 p-4 text-center dark:bg-ink-950">
@@ -37,8 +38,10 @@ function Router() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <Router />
-    </AuthProvider>
+    <NetworkProvider>
+      <AuthProvider>
+        <Router />
+      </AuthProvider>
+    </NetworkProvider>
   );
 }

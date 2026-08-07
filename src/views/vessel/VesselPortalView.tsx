@@ -1,5 +1,4 @@
 import { useAuth } from '../../lib/auth';
-import { useDemoAuth } from '../../lib/demoAuth';
 import { SmsLibrarySplitView } from '../../components/SmsLibrarySplitView';
 import {
   ShieldX, Anchor, BookX, Ship, Lock, ArrowRight, ArrowLeft,
@@ -162,11 +161,10 @@ export function VesselPortalView({
   localVersion: string;
 }) {
   const { tenant, tenantUser, activeAssignment } = useAuth();
-  const demo = useDemoAuth();
   const { flags, isEnabled } = useFeatureFlags(tenant?.id);
   const { defs } = useModuleDefinitions();
 
-  const vesselId = activeAssignment?.vessel_id ?? demo?.demoSession.vesselId ?? null;
+  const vesselId = activeAssignment?.vessel_id ?? null;
   const crewRank: Rank | null = activeAssignment?.rank ?? (tenantUser?.rank as Rank) ?? null;
   const isMasterOrChiefEng = crewRank === 'Master' || crewRank === 'Chief Engineer';
 
@@ -176,7 +174,7 @@ export function VesselPortalView({
   const smsBlocked = !isEnabled('sms_documentation');
 
   // ── Hard vessel boundary ──────────────────────────────────────────
-  if (!activeAssignment && !demo) {
+  if (!activeAssignment) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
         <div className="flex h-16 w-16 items-center justify-center rounded-full bg-danger-100 dark:bg-danger-900/30">
@@ -199,7 +197,7 @@ export function VesselPortalView({
 
   if (!tenant) return null;
 
-  const vesselName = activeAssignment?.vessel_name ?? demo?.demoSession.vesselName ?? tenant?.company ?? 'Vessel';
+  const vesselName = activeAssignment?.vessel_name ?? tenant?.company ?? 'Vessel';
 
   // ── Drawer section rendering ──────────────────────────────────────
   if (drawerSection) {

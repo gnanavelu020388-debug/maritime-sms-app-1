@@ -8,12 +8,13 @@ import { roleLabel } from '../lib/auth-utils';
 import { Toaster } from '../components/Toaster';
 import { StoreProvider } from '../store';
 import { MaintenanceBanner } from '../components/MaintenanceBanner';
-import { DemoSessionSwitcher } from '../components/DemoSessionSwitcher';
 import { VesselSyncStatusCompact } from '../components/VesselSyncStatusPill';
 import { getSyncStatus } from '../lib/syncService';
 import { useFeatureFlags, useModuleDefinitions, getDisplayName, type ModuleKey } from '../lib/featureFlags';
 import { SessionSecurityGuard, broadcastSecurityTenant } from '../components/SessionSecurityGuard';
 import { getShorePermsForRole, resolveShoreRoleName, canDoShore } from '../lib/shoreRoles';
+import { NetworkStatusBadge } from '../components/NetworkStatusBadge';
+import { ReconnectionBanner } from '../components/ReconnectionBanner';
 
 export type DpaSection =
   | 'dashboard'
@@ -47,7 +48,7 @@ const DYNAMIC_NAV_IDS: { id: DpaSection; icon: ReactNode; feature: ModuleKey; pe
   { id: 'security', icon: <Settings className="h-4 w-4" />, feature: 'sms_documentation', perm: 'manage_security' },
 ];
 
-export function DpaShell({ children, active, demoMode = false }: { children: ReactNode; active: DpaSection; demoMode?: boolean }) {
+export function DpaShell({ children, active }: { children: ReactNode; active: DpaSection }) {
   const { user, role, tenant, tenantUser, signOut } = useAuth();
   const { isEnabled } = useFeatureFlags(tenant?.id);
   const { defs } = useModuleDefinitions();
@@ -92,18 +93,13 @@ export function DpaShell({ children, active, demoMode = false }: { children: Rea
     getSyncStatus(tenant.id).then((s) => setLastSyncAt(s.lastSyncAt));
   }, [tenant?.id]);
   const [open, setOpen] = useState(false);
-  const [showSwitcher, setShowSwitcher] = useState(false);
 
   useEffect(() => {
     broadcastSecurityTenant(tenant?.id);
   }, [tenant?.id]);
 
   function handleSignOut() {
-    if (demoMode) {
-      setShowSwitcher(true);
-    } else {
-      signOut();
-    }
+    signOut();
   }
 
   return (
@@ -153,6 +149,7 @@ export function DpaShell({ children, active, demoMode = false }: { children: Rea
 
         <div className="flex min-w-0 flex-1 flex-col">
           <MaintenanceBanner />
+          <ReconnectionBanner />
           <header className="flex h-16 items-center justify-between border-b border-ink-100 bg-white px-4 dark:border-ink-800 dark:bg-ink-900">
             <button onClick={() => setOpen(true)} className="rounded-lg p-2 text-ink-500 hover:bg-ink-100 dark:hover:bg-ink-800 lg:hidden">
               <Menu className="h-5 w-5" />
@@ -170,6 +167,7 @@ export function DpaShell({ children, active, demoMode = false }: { children: Rea
               )}
             </div>
             <div className="flex items-center gap-3">
+              <NetworkStatusBadge />
               <VesselSyncStatusCompact
                 lastSyncAt={lastSyncAt}
                 pendingSyncItems={0}
@@ -188,7 +186,6 @@ export function DpaShell({ children, active, demoMode = false }: { children: Rea
             <div className="w-full animate-fade-in">{children}</div>
           </main>
         </div>
-        {demoMode && <DemoSessionSwitcher open={showSwitcher} onClose={() => setShowSwitcher(false)} />}
         <Toaster />
       </div>
     </SessionSecurityGuard>

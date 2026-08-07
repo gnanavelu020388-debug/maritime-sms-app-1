@@ -11,7 +11,7 @@ import { formatBytes, relativeTime, formatGb, formatCurrency } from '../constant
 import { PLAN_TIERS, PLAN_DEFAULTS } from '../constants';
 import type { ErrorLog, SatellitePayload, Tenant, PlanTier } from '../types';
 import type { Capabilities } from '../lib/permissions';
-import { DEMO_TENANTS, DEMO_VESSELS } from '../lib/demoData';
+import { getEffectiveDemoTenants, getEffectiveDemoVessels } from '../lib/demoData';
 
 type BreachType = 'vessels' | 'storage' | 'seats';
 
@@ -440,14 +440,14 @@ function FleetSyncMatrix() {
     let mounted = true;
     async function load() {
       try {
-        const vessels = DEMO_VESSELS.map((v) => ({
-          id: v.id,
-          tenant_id: v.tenant_id,
-          name: v.name,
-          sms_active_version: v.sms_active_version,
-          last_sync_at: v.last_sync_at,
-        }));
-        const tenants = DEMO_TENANTS.map((t) => ({ id: t.id, company: t.company, sms_version: t.sms_version }));
+        const tenants = getEffectiveDemoTenants().map((t) => ({ id: t.id, company: t.company, sms_version: t.sms_version }));
+        const allVessels: { id: string; tenant_id: string; name: string; sms_active_version: string; last_sync_at: string | null }[] = [];
+        for (const t of tenants) {
+          for (const v of getEffectiveDemoVessels(t.id)) {
+            allVessels.push({ id: v.id, tenant_id: v.tenant_id, name: v.name, sms_active_version: v.sms_active_version, last_sync_at: v.last_sync_at });
+          }
+        }
+        const vessels = allVessels;
         const deltas: { tenant_id: string; to_version: string; created_at: string }[] = [];
         const syncStates: { vessel_id: string; last_sync_at: string | null; pending_outbox_count: number; failed_outbox_count: number; connection_mode: string; server_reachable: boolean }[] = [];
 

@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import { useAuth } from './auth';
 import type { VesselRow } from './supabase';
 import type { SmsProfileWithVessels } from './smsProfiles';
-import { isDemoMode, getEffectiveDemoVessels } from './demoData';
+import { getEffectiveDemoVessels } from './demoData';
 
 export interface FleetScopeState {
   scope: 'global' | 'specific';
@@ -81,4 +81,4 @@ export function getDemoScopedVessels(tenantId: string, assignedVesselIds: string
   return getEffectiveDemoVessels(tenantId).filter((v) => allowed.has(v.id));
 }
 
-export { isDemoMode };
+

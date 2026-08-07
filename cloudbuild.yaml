@@ -1,0 +1,20 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['build', '-t', 'gcr.io/$PROJECT_ID/maritime-platform:$SHORT_SHA', '.']
+  - name: 'gcr.io/cloud-builders/docker'
+    args: ['push', 'gcr.io/$PROJECT_ID/maritime-platform:$SHORT_SHA']
+  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        gcloud run deploy "${_CLOUD_RUN_SERVICE}" \
+          --image "gcr.io/$PROJECT_ID/maritime-platform:$SHORT_SHA" \
+          --region "${_CLOUD_RUN_REGION}" \
+          --platform managed \
+          --allow-unauthenticated
+images:
+  - 'gcr.io/$PROJECT_ID/maritime-platform:$SHORT_SHA'
+substitutions:
+  _CLOUD_RUN_SERVICE: 'maritime-platform-api'
+  _CLOUD_RUN_REGION: 'us-central1'

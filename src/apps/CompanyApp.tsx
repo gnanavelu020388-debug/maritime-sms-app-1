@@ -9,12 +9,11 @@ import { CrewRosterView } from '../views/company/CrewRosterView';
 import { PermissionsMatrixView, getPermissionsDirtyState } from '../views/company/PermissionsMatrixView';
 import { CompanyAuditView } from '../views/company/CompanyAuditView';
 import { CompanySecuritySettings } from '../views/company/CompanySecuritySettings';
-import { DemoAuthProvider } from '../lib/demoAuth';
 import { Modal } from '../components/Modal';
 import { useAuth } from '../lib/auth';
 import { useFeatureFlags } from '../lib/featureFlags';
 
-export function CompanyApp({ demoMode = false }: { demoMode?: boolean }) {
+export function CompanyApp() {
   const { tenant } = useAuth();
   const { isEnabled, loading: flagsLoading } = useFeatureFlags(tenant?.id);
   const [active, setActive] = useState<CompanySection>('overview');
@@ -80,7 +79,7 @@ export function CompanyApp({ demoMode = false }: { demoMode?: boolean }) {
   }, [performNav]);
 
   const content = (
-    <CompanyShell active={active} demoMode={demoMode}>
+    <CompanyShell active={active}>
       {active === 'overview' && <CompanyOverview onNavigate={setActive} />}
       {active === 'vessels' && <VesselsView />}
       {active === 'sms_dpa' && <SmsDpaView />}
@@ -140,8 +139,5 @@ export function CompanyApp({ demoMode = false }: { demoMode?: boolean }) {
     </CompanyShell>
   );
 
-  if (demoMode) {
-    return <DemoAuthProvider role="company_admin">{content}</DemoAuthProvider>;
-  }
   return content;
 }

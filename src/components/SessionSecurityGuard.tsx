@@ -12,7 +12,7 @@ import {
   useSessionGuard,
   useTenantSecuritySettings,
 } from '../lib/sessionSecurity';
-import { isDemoMode } from '../lib/demoData';
+
 
 export function SessionSecurityGuard({ children }: { children: ReactNode }) {
   const { user, signOut, sessionToken, sessionConflict, dismissSessionConflict } = useAuth();

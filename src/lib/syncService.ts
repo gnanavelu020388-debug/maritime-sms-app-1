@@ -16,13 +16,12 @@ import type { SyncModuleKey } from './syncTypes';
 /**
  * Unified Satellite Sync Service — vessel-side background worker.
  *
- * Runs fully locally: seeds the IndexedDB cache from demo data on first login,
- * then polls for version changes via BroadcastChannel cross-window events.
- * All reads go through the local DB so the vessel workstation keeps serving
- * cached SMS files even with no satellite connectivity.
+ * Reads the sync interval from tenant_sync_config via the API.
+ * Polls for version changes and pushes/pulls updates between the vessel's
+ * local server and the Cloud Run backend at the configured interval.
  */
 
-const DEFAULT_CHECK_INTERVAL_MS = 60_000;
+const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 export interface SyncResult {
   applied: boolean;
@@ -72,21 +71,36 @@ export function startSyncLoop(
   intervalMs: number = DEFAULT_CHECK_INTERVAL_MS,
   vesselId?: string,
 ): () => void {
-  const safeInterval = Math.min(Math.max(intervalMs, 10_000), 1_800_000);
+  const safeInterval = Math.min(Math.max(intervalMs, 30_000), 24 * 60 * 60 * 1000);
+  const intervalHours = (safeInterval / (60 * 60 * 1000)).toFixed(1);
+
+  console.log(
+    `[syncService] startSyncLoop tenant=${tenantId} vessel=${vesselId ?? 'N/A'} interval=${intervalHours}h (${safeInterval}ms)`,
+  );
 
   const initialTimeout = setTimeout(() => {
+    console.log(`[syncService] initial sync tick tenant=${tenantId}`);
     performSyncCheckIn(tenantId, vesselId)
-      .then((result) => onSync?.(result))
-      .catch(() => { /* local — no-op */ });
+      .then((result) => {
+        console.log(`[syncService] sync result tenant=${tenantId} applied=${result.applied} version=${result.toVersion ?? 'none'}`);
+        onSync?.(result);
+      })
+      .catch((err) => console.error(`[syncService] sync error tenant=${tenantId}`, err));
   }, 3000);
 
   const interval = setInterval(() => {
+    const next = new Date(Date.now() + safeInterval).toISOString();
+    console.log(`[syncService] scheduled sync tick tenant=${tenantId} next=${next}`);
     performSyncCheckIn(tenantId, vesselId)
-      .then((result) => onSync?.(result))
-      .catch(() => { /* local — no-op */ });
+      .then((result) => {
+        console.log(`[syncService] sync result tenant=${tenantId} applied=${result.applied} version=${result.toVersion ?? 'none'}`);
+        onSync?.(result);
+      })
+      .catch((err) => console.error(`[syncService] sync error tenant=${tenantId}`, err));
   }, safeInterval);
 
   return () => {
+    console.log(`[syncService] stopping sync loop tenant=${tenantId}`);
     clearTimeout(initialTimeout);
     clearInterval(interval);
   };

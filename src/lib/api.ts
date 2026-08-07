@@ -1,17 +1,19 @@
 /**
  * API Client — communicates with the Express backend server.
  *
- * All frontend data operations now route through this client instead of
- * reading/writing localStorage directly. The response shapes match the
- * TypeScript types defined in supabase.ts so existing UI components
- * remain unchanged.
+ * All frontend data operations route through this client. The base URL
+ * is determined by the network mode: ONLINE hits Cloud Run, OFFLINE
+ * hits the local Docker instance. Write operations performed while
+ * offline are queued and flushed back to Cloud Run on reconnection.
  */
 
-const API_BASE = import.meta.env.VITE_API_BASE || '/api';
+import { getApiBase } from './networkContext';
 
 function getToken(): string | null {
   return localStorage.getItem('mpc-auth-token');
 }
+
+export { getToken };
 
 export function setToken(token: string): void {
   localStorage.setItem('mpc-auth-token', token);
@@ -19,6 +21,18 @@ export function setToken(token: string): void {
 
 export function clearToken(): void {
   localStorage.removeItem('mpc-auth-token');
+}
+
+const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
+
+function getNetworkMode(): 'online' | 'offline' {
+  const fn = (window as Record<string, unknown>).__networkMode as (() => 'online' | 'offline') | undefined;
+  return fn ? fn() : 'online';
+}
+
+function enqueueOfflineAction(path: string, method: string, body: unknown): void {
+  const fn = (window as Record<string, unknown>).__networkEnqueueAction as ((a: { path: string; method: string; body: unknown }) => void) | undefined;
+  if (fn) fn({ path, method, body });
 }
 
 async function request<T>(
@@ -32,7 +46,21 @@ async function request<T>(
   };
   if (token) headers['Authorization'] = `Bearer ${token}`;
 
-  const res = await fetch(`${API_BASE}${path}`, { ...options, headers });
+  const method = (options.method || 'GET').toUpperCase();
+  const mode = getNetworkMode();
+
+  // In offline mode, queue writes and throw a gentle error so the UI
+  // can show "saved locally" feedback. Reads still hit the local server.
+  if (mode === 'offline' && WRITE_METHODS.has(method)) {
+    let body: unknown = null;
+    if (options.body) {
+      try { body = JSON.parse(options.body as string); } catch { body = options.body; }
+    }
+    enqueueOfflineAction(path, method, body);
+    throw new Error('OFFLINE_QUEUED');
+  }
+
+  const res = await fetch(`${getApiBase()}${path}`, { ...options, headers });
 
   if (res.status === 401) {
     clearToken();
@@ -257,6 +285,10 @@ export async function apiGetSignedUrl(filePath: string): Promise<string> {
 
 export async function apiGetSyncConfig<T>(tenantId: string): Promise<T> {
   return request<T>(`/sync-config/${tenantId}`);
+}
+
+export async function apiUpdateSyncConfig<T>(tenantId: string, data: { auto_sync_interval_hours: number; manual_replicate_enabled: boolean }): Promise<T> {
+  return request<T>(`/sync-config/${tenantId}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 
 // ── Sessions ──────────────────────────────────────────────

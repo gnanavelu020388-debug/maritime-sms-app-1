@@ -5,6 +5,7 @@ import {
   Server, Lock, Building2, RotateCcw, ExternalLink, CircleDot,
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
+import { NetworkStatusBadge } from './NetworkStatusBadge';
 import { SECTIONS } from '../constants';
 import { useStore } from '../store';
 import { relativeTime } from '../constants';
@@ -101,6 +102,7 @@ export function Topbar({
           {helpOpen && <HelpDrawer onClose={() => setHelpOpen(false)} />}
         </div>
 
+        <NetworkStatusBadge />
         <ThemeToggle />
       </div>
     </header>
