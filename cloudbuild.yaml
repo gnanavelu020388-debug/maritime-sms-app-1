@@ -8,13 +8,30 @@ steps:
     args:
       - '-c'
       - |
+        set -e
+        ENV_VARS="DB_HOST=${_DB_HOST},DB_PORT=${_DB_PORT},DB_USER=${_DB_USER},DB_PASSWORD=${_DB_PASSWORD},DB_NAME=${_DB_NAME},JWT_SECRET=${_JWT_SECRET},GCS_BUCKET_NAME=${_GCS_BUCKET_NAME}"
         gcloud run deploy "${_CLOUD_RUN_SERVICE}" \
           --image "gcr.io/$PROJECT_ID/maritime-platform:$SHORT_SHA" \
           --region "${_CLOUD_RUN_REGION}" \
           --platform managed \
-          --allow-unauthenticated
+          --allow-unauthenticated \
+          --set-env-vars "$ENV_VARS"
+        if [ -n "${_CLOUD_SQL_CONNECTION_NAME}" ]; then
+          gcloud run services update "${_CLOUD_RUN_SERVICE}" \
+            --region "${_CLOUD_RUN_REGION}" \
+            --platform managed \
+            --add-cloudsql-instances "${_CLOUD_SQL_CONNECTION_NAME}"
+        fi
 images:
   - 'gcr.io/$PROJECT_ID/maritime-platform:$SHORT_SHA'
 substitutions:
   _CLOUD_RUN_SERVICE: 'maritime-platform-api'
   _CLOUD_RUN_REGION: 'us-central1'
+  _DB_HOST: '127.0.0.1'
+  _DB_PORT: '3306'
+  _DB_USER: 'maritime_app'
+  _DB_PASSWORD: 'your-db-password'
+  _DB_NAME: 'maritime_platform'
+  _JWT_SECRET: 'change-me-to-a-strong-random-secret'
+  _GCS_BUCKET_NAME: 'maritime-platform-docs'
+  _CLOUD_SQL_CONNECTION_NAME: ''

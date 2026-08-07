@@ -3,9 +3,7 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
-const pool = mysql.createPool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '3306', 10),
+const poolConfig = {
   user: process.env.DB_USER || 'root',
   password: process.env.DB_PASSWORD || '',
   database: process.env.DB_NAME || 'maritime_platform',
@@ -13,6 +11,15 @@ const pool = mysql.createPool({
   connectionLimit: 10,
   queueLimit: 0,
   multipleStatements: true,
-});
+};
+
+if (process.env.DB_HOST && process.env.DB_HOST.startsWith('/cloudsql/')) {
+  poolConfig.socketPath = process.env.DB_HOST;
+} else {
+  poolConfig.host = process.env.DB_HOST || 'localhost';
+  poolConfig.port = parseInt(process.env.DB_PORT || '3306', 10);
+}
+
+const pool = mysql.createPool(poolConfig);
 
 export default pool;

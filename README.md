@@ -34,12 +34,20 @@ The repository also includes `cloudbuild.yaml` so you can use Google Cloud Build
 1. In GCP Console, go to **Cloud Build > Triggers**.
 2. Create a trigger for your repository and branch `main`.
 3. Use the existing `cloudbuild.yaml` in the repo.
-4. Set substitutions:
+5. Set substitutions in the trigger for your service configuration:
    - `_CLOUD_RUN_SERVICE` = your existing Cloud Run service name
    - `_CLOUD_RUN_REGION` = your Cloud Run region
-5. In Cloud Run, ensure the service has the correct environment variables configured, or update them manually after deployment.
+   - `_DB_HOST` = your database host or `/cloudsql/<project>:<region>:<instance>` if using Cloud SQL socket mode
+   - `_DB_PORT` = your database port
+   - `_DB_USER` = your database username
+   - `_DB_PASSWORD` = your database password
+   - `_DB_NAME` = your database name
+   - `_JWT_SECRET` = your server JWT secret
+   - `_GCS_BUCKET_NAME` = your Cloud Storage bucket name
+   - `_CLOUD_SQL_CONNECTION_NAME` = optional Cloud SQL instance connection name for Cloud Run socket attachment
+6. In Cloud Run, the trigger will deploy the service with the specified env vars automatically.
 
-This makes commits to `main` trigger a build and deploy directly from GCP.
+This makes commits to `main` trigger a build and deploy directly from GCP with the required backend configuration.
 
 ### Notes
 
