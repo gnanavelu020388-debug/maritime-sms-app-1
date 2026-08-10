@@ -223,7 +223,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setState((s) => ({ ...s, loading: false }));
           return;
         }
-        const resolved = resolveRoleAndTenant(res.user.id, res.user.email);
+        const resolved = (await resolveFromApi(res.user as any)) ?? resolveRoleAndTenant(res.user.id, res.user.email);
         const user = buildUser(res.user.id, res.user.email);
         const session = buildSession(user, token);
         const sessionToken = await registerNewSessionToken(res.user.id);
