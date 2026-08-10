@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { Megaphone, X, Info, AlertTriangle, AlertOctagon } from 'lucide-react';
 import { useStore } from '../store';
-import { readPersistedBanner } from '../lib/syncChannel';
+import * as api from '../lib/api';
 import type { MaintenanceBanner as BannerData } from '../types';
 import { Modal } from './Modal';
 import { Badge } from './Badge';
@@ -15,42 +15,73 @@ const TONES = {
 const SEVERITY_LABEL = { info: 'Info', warning: 'Warning', critical: 'Critical' };
 const SEVERITY_TONE = { info: 'info', warning: 'warning', critical: 'danger' } as const;
 
+const POLL_INTERVAL_MS = 30_000;
+
+interface BannerRow {
+  id: string;
+  message: string;
+  severity: 'info' | 'warning' | 'critical';
+  published_by: string | null;
+  published_at: string;
+  tenant_id: string | null;
+  tenant_company?: string | null;
+}
+
+/** Raw DB row (snake_case) → the shape components render. */
+export function mapBannerRow(row: BannerRow): BannerData {
+  return {
+    id: row.id,
+    message: row.message,
+    severity: row.severity,
+    publishedAt: row.published_at,
+    publishedBy: row.published_by ?? 'Platform',
+    tenantId: row.tenant_id,
+    tenantCompany: row.tenant_company ?? null,
+  };
+}
+
+function scopeLabel(banner: BannerData): string {
+  if (!banner.tenantId) return 'PLATFORM NOTICE';
+  return banner.tenantCompany ? `${banner.tenantCompany.toUpperCase()} NOTICE` : 'COMPANY NOTICE';
+}
+
 /**
- * MaintenanceBanner — platform-wide scrolling marquee notice.
+ * MaintenanceBanner — scrolling marquee notice, platform-wide or scoped to
+ * a single tenant's users.
  *
- * Renders a continuous right-to-left CSS marquee at the top of every
- * workspace (Super Admin, Company Admin, Vessel Portal) and the login
- * screen. Hovering pauses the scroll; clicking opens a modal with the
- * full untruncated notice; the fixed X button dismisses for the session.
+ * Renders at the top of every workspace (Super Admin, Company Admin, Vessel
+ * Portal). Hovering pauses the scroll; clicking opens a modal with the full
+ * untruncated notice; the fixed X button dismisses for the session.
  *
- * State is synced in real-time across all open tabs via BroadcastChannel
- * and persisted to localStorage so newly-opened tabs pick it up instantly.
+ * Polls the backend (GET /banner) every 30s — the backend resolves scoping
+ * from the caller's own JWT, so each viewer only ever gets their own
+ * tenant's banner (or the platform-wide one), never another tenant's.
  */
 export function MaintenanceBanner() {
   const { maintenance, dispatch } = useStore();
   const [locallyDismissed, setLocallyDismissed] = useState(false);
   const [showModal, setShowModal] = useState(false);
 
-  // Sync from localStorage on mount and cross-tab storage events
   useEffect(() => {
-    const checkBanner = () => {
-      const persisted = readPersistedBanner();
-      if (persisted && !maintenance) {
-        dispatch({ type: 'MAINTENANCE_REMOTE', banner: persisted as BannerData });
-        setLocallyDismissed(false);
-      } else if (!persisted && maintenance) {
-        dispatch({ type: 'MAINTENANCE_REMOTE', banner: null });
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const row = await api.apiGetBanner<BannerRow>();
+        if (cancelled) return;
+        dispatch({ type: 'MAINTENANCE_REMOTE', banner: row ? mapBannerRow(row) : null });
+      } catch {
+        // transient network error — keep showing the last known banner
       }
     };
-    checkBanner();
-    window.addEventListener('storage', checkBanner);
-    return () => window.removeEventListener('storage', checkBanner);
-  }, [maintenance, dispatch]);
+    poll();
+    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [dispatch]);
 
-  // Reset dismiss when a new banner arrives
+  // Reset dismiss when a different banner arrives
   useEffect(() => {
     if (maintenance) setLocallyDismissed(false);
-  }, [maintenance?.publishedAt]);
+  }, [maintenance?.id]);
 
   const handleDismiss = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -60,7 +91,7 @@ export function MaintenanceBanner() {
   if (!maintenance || locallyDismissed) return null;
 
   const Icon = ICONS[maintenance.severity];
-  const scrollText = `PLATFORM NOTICE — ${maintenance.message}`;
+  const scrollText = `${scopeLabel(maintenance)} — ${maintenance.message}`;
   const displayText = `${scrollText}     •     ${scrollText}     •     `;
 
   return (
@@ -102,7 +133,7 @@ export function MaintenanceBanner() {
       <Modal
         open={showModal}
         onClose={() => setShowModal(false)}
-        title="Platform Notice"
+        title={maintenance.tenantId ? 'Company Notice' : 'Platform Notice'}
         subtitle="Full maintenance announcement"
         icon={<Megaphone className="h-5 w-5" />}
         size="md"
@@ -126,6 +157,7 @@ export function MaintenanceBanner() {
           </p>
           <p className="text-xs text-ink-400">
             Published by {maintenance.publishedBy}
+            {maintenance.tenantId && maintenance.tenantCompany ? ` · scoped to ${maintenance.tenantCompany}` : ''}
           </p>
         </div>
       </Modal>
@@ -134,10 +166,10 @@ export function MaintenanceBanner() {
 }
 
 /**
- * StandaloneBanner — for routes outside the StoreProvider context
- * (e.g. the login/AuthView). Reads directly from localStorage without
- * needing the store; still receives real-time cross-tab updates via
- * the storage event listener.
+ * StandaloneBanner — for routes outside the StoreProvider context (the
+ * login/AuthView). Nobody is authenticated yet, so the backend can only
+ * ever resolve the platform-wide banner here — tenant-scoped notices
+ * require a session.
  */
 export function StandaloneBanner() {
   const [banner, setBanner] = useState<BannerData | null>(null);
@@ -145,15 +177,24 @@ export function StandaloneBanner() {
   const [showModal, setShowModal] = useState(false);
 
   useEffect(() => {
-    const check = () => {
-      const persisted = readPersistedBanner();
-      setBanner(persisted as BannerData | null);
-      if (persisted) setDismissed(false);
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const row = await api.apiGetBanner<BannerRow>();
+        if (cancelled) return;
+        setBanner(row ? mapBannerRow(row) : null);
+      } catch {
+        // transient network error — keep showing the last known banner
+      }
     };
-    check();
-    window.addEventListener('storage', check);
-    return () => window.removeEventListener('storage', check);
+    poll();
+    const interval = setInterval(poll, POLL_INTERVAL_MS);
+    return () => { cancelled = true; clearInterval(interval); };
   }, []);
+
+  useEffect(() => {
+    if (banner) setDismissed(false);
+  }, [banner?.id]);
 
   const handleDismiss = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
@@ -163,7 +204,7 @@ export function StandaloneBanner() {
   if (!banner || dismissed) return null;
 
   const Icon = ICONS[banner.severity];
-  const scrollText = `PLATFORM NOTICE — ${banner.message}`;
+  const scrollText = `${scopeLabel(banner)} — ${banner.message}`;
   const displayText = `${scrollText}     •     ${scrollText}     •     `;
 
   return (

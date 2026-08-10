@@ -23,6 +23,7 @@ export interface AuthState {
   sessionToken: string | null;
   sessionConflict: boolean;
   rankPermissions: RankPermissionMap | null;
+  mustChangePassword: boolean;
 }
 
 export interface AuthContextValue extends AuthState {
@@ -31,6 +32,7 @@ export interface AuthContextValue extends AuthState {
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
   dismissSessionConflict: () => void;
+  clearMustChangePassword: () => void;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -173,7 +175,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionToken: null,
     sessionConflict: false,
     rankPermissions: null,
+    mustChangePassword: false,
   });
+
+  // Registered so api.ts's request() can drop the app back to the login
+  // screen immediately when any call comes back 401, instead of leaving the
+  // UI looking logged-in while every subsequent action silently fails.
+  useEffect(() => {
+    const handleAuthExpired = () => {
+      clearFeatureFlagCache();
+      setState({
+        user: null, session: null, role: null, internalRole: null, adminName: null,
+        tenant: null, tenantUser: null, activeAssignment: null, loading: false,
+        error: 'Your session has expired. Please sign in again.',
+        sessionToken: null, sessionConflict: false, rankPermissions: null, mustChangePassword: false,
+      });
+    };
+    (window as Record<string, unknown>).__mpcAuthExpired = handleAuthExpired;
+    return () => { delete (window as Record<string, unknown>).__mpcAuthExpired; };
+  }, []);
 
   async function registerNewSessionToken(uid: string): Promise<string | null> {
     let deviceInfo = 'Unknown browser';
@@ -195,7 +215,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const user = buildUser(res.user.id, res.user.email);
       const session = buildSession(user, api.getToken() ?? '');
       const token = await registerNewSessionToken(res.user.id);
-      setState({ user, session, ...resolved, loading: false, error: null, sessionToken: token, sessionConflict: false });
+      setState({ user, session, ...resolved, loading: false, error: null, sessionToken: token, sessionConflict: false, mustChangePassword: !!res.user.mustChangePassword });
     } catch {
       setState((s) => ({ ...s, loading: false }));
     }
@@ -228,7 +248,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const session = buildSession(user, token);
         const sessionToken = await registerNewSessionToken(res.user.id);
         if (mounted) {
-          setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false });
+          setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false, mustChangePassword: !!res.user.mustChangePassword });
         }
       } catch {
         api.clearToken();
@@ -253,7 +273,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const user = buildUser(uid, email);
       const session = buildSession(user, token);
       const sessionToken = await registerNewSessionToken(uid);
-      setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false });
+      setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false, mustChangePassword: !!apiUser.mustChangePassword });
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message || 'Invalid email or password.' };
@@ -273,7 +293,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const user = buildUser(uid, email);
       const session = buildSession(user, result.token);
       const sessionToken = await registerNewSessionToken(uid);
-      setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false });
+      setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false, mustChangePassword: false });
     }
     return { error: null };
   };
@@ -284,15 +304,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await clearSessionToken(state.user.id);
     }
     api.clearToken();
-    setState({ user: null, session: null, role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, loading: false, error: null, sessionToken: null, sessionConflict: false, rankPermissions: null });
+    setState({ user: null, session: null, role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, loading: false, error: null, sessionToken: null, sessionConflict: false, rankPermissions: null, mustChangePassword: false });
   };
 
   const dismissSessionConflict = () => {
     setState((s) => ({ ...s, sessionConflict: false }));
   };
 
+  const clearMustChangePassword = () => {
+    setState((s) => ({ ...s, mustChangePassword: false }));
+  };
+
   return (
-    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, refresh, dismissSessionConflict }}>
+    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, refresh, dismissSessionConflict, clearMustChangePassword }}>
       {children}
     </AuthContext.Provider>
   );

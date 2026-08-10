@@ -139,6 +139,7 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
   const [addTabOpen, setAddTabOpen] = useState(false);
   const [newTabLabel, setNewTabLabel] = useState('');
   const [resubmitPdfPreviewUrl, setResubmitPdfPreviewUrl] = useState<string | null>(null);
+  const [resubmitPdfSize, setResubmitPdfSize] = useState<number | null>(null);
   const [submittingDraft, setSubmittingDraft] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SmsDocRow | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -226,11 +227,12 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
     setSubmittingDraft(true);
     const content = (draftContent.trim() || editingDoc.content) ?? '';
     const contentKind = editingDoc.content_kind ?? 'rich_text';
-    demoResubmitSmsDoc(tenantId, editingDoc.id, content, contentKind, authorName, authorRole, authorOrigin);
+    demoResubmitSmsDoc(tenantId, editingDoc.id, content, contentKind, authorName, authorRole, authorOrigin, contentKind === 'pdf' ? resubmitPdfSize : null);
     postSyncEvent({ type: 'SMS_UPDATED', tenantId, payload: { action: 'resubmitted', docId: editingDoc.id, label: editingDoc.label } });
     setSubmittingDraft(false);
     setEditingDoc(null);
     setDraftContent('');
+    setResubmitPdfSize(null);
     if (resubmitPdfPreviewUrl) { URL.revokeObjectURL(resubmitPdfPreviewUrl); setResubmitPdfPreviewUrl(null); }
     showToast(`"${editingDoc.label}" resubmitted for DPA approval.`, true);
   }
@@ -257,11 +259,12 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
     setSubmittingDraft(true);
     const content = (draftContent.trim() || editingDoc.content) ?? '';
     const contentKind = editingDoc.content_kind ?? 'rich_text';
-    demoUpdateSmsDocContent(tenantId, editingDoc.id, content, contentKind, authorName, authorRole, authorOrigin);
+    demoUpdateSmsDocContent(tenantId, editingDoc.id, content, contentKind, authorName, authorRole, authorOrigin, contentKind === 'pdf' ? resubmitPdfSize : null);
     postSyncEvent({ type: 'SMS_UPDATED', tenantId, payload: { action: 'draft_revision', docId: editingDoc.id, label: editingDoc.label } });
     setSubmittingDraft(false);
     setEditingDoc(null);
     setDraftContent('');
+    setResubmitPdfSize(null);
     showToast(`Draft revision submitted for DPA approval: "${editingDoc.label}"`, true);
   }
 
@@ -294,6 +297,7 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
       node_kind: 'document',
       content_kind: contentKind,
       content,
+      file_size_bytes: contentKind === 'pdf' ? addDocPdfSize : null,
       author_name: authorName,
       author_role: authorRole,
       author_origin: authorOrigin,
@@ -972,14 +976,14 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
       {editingDoc && (
         <Modal
           open
-          onClose={() => { setEditingDoc(null); setDraftContent(''); if (resubmitPdfPreviewUrl) { URL.revokeObjectURL(resubmitPdfPreviewUrl); setResubmitPdfPreviewUrl(null); } }}
+          onClose={() => { setEditingDoc(null); setDraftContent(''); setResubmitPdfSize(null); if (resubmitPdfPreviewUrl) { URL.revokeObjectURL(resubmitPdfPreviewUrl); setResubmitPdfPreviewUrl(null); } }}
           title={editingDoc.approval_state === 'rejected' ? `Edit & Resubmit: ${editingDoc.label}` : `Draft Revision: ${editingDoc.label}`}
           subtitle={`${inferDocType(editingDoc)} · v${editingDoc.version} · ${editingDoc.approval_state === 'rejected' ? 'REJECTED' : 'Approved'}`}
           icon={editingDoc.approval_state === 'rejected' ? <RotateCcw className="h-5 w-5 text-primary-500" /> : <Pencil className="h-5 w-5 text-accent-500" />}
           size="md"
           footer={
             <div className="flex w-full items-center justify-end gap-3">
-              <button onClick={() => { setEditingDoc(null); setDraftContent(''); if (resubmitPdfPreviewUrl) { URL.revokeObjectURL(resubmitPdfPreviewUrl); setResubmitPdfPreviewUrl(null); } }} className="btn-secondary">Cancel</button>
+              <button onClick={() => { setEditingDoc(null); setDraftContent(''); setResubmitPdfSize(null); if (resubmitPdfPreviewUrl) { URL.revokeObjectURL(resubmitPdfPreviewUrl); setResubmitPdfPreviewUrl(null); } }} className="btn-secondary">Cancel</button>
               <button
                 onClick={editingDoc.approval_state === 'rejected' ? handleResubmitDocument : submitDraftRevision}
                 disabled={submittingDraft}
@@ -1022,6 +1026,7 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
                     if (resubmitPdfPreviewUrl) URL.revokeObjectURL(resubmitPdfPreviewUrl);
                     const url = URL.createObjectURL(file);
                     setResubmitPdfPreviewUrl(url);
+                    setResubmitPdfSize(file.size);
                     pdfBlobUrls.set(editingDoc.id, url);
                     setDraftContent(file.name);
                   }} />

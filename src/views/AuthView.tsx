@@ -5,7 +5,7 @@ import { StandaloneBanner } from '../components/MaintenanceBanner';
 import { NetworkStatusBadge } from '../components/NetworkStatusBadge';
 
 export function AuthView() {
-  const { signIn, signUp } = useAuth();
+  const { signIn, signUp, error: authError } = useAuth();
   const [mode, setMode] = useState<'login' | 'signup'>('login');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -13,6 +13,7 @@ export function AuthView() {
   const [asSuperAdmin, setAsSuperAdmin] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const displayError = error ?? authError;
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -74,7 +75,7 @@ export function AuthView() {
             </div>
             <div>
               <label className="label">Password</label>
-              <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" minLength={6} required />
+              <input className="input" type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" minLength={4} required />
             </div>
             {mode === 'signup' && (
               <label className="flex items-center gap-2 rounded-lg border border-ink-200/70 p-3 dark:border-ink-800">
@@ -85,13 +86,13 @@ export function AuthView() {
                 </span>
               </label>
             )}
-            {error && (
-              <div className={`rounded-lg p-3 text-sm ${error.includes('created') ? 'bg-success-50 text-success-700 dark:bg-success-900/20 dark:text-success-400' : 'bg-danger-50 text-danger-700 dark:bg-danger-900/20 dark:text-danger-400'}`}>
-                {error}
+            {displayError && (
+              <div className={`rounded-lg p-3 text-sm ${displayError.includes('created') ? 'bg-success-50 text-success-700 dark:bg-success-900/20 dark:text-success-400' : 'bg-danger-50 text-danger-700 dark:bg-danger-900/20 dark:text-danger-400'}`}>
+                {displayError}
               </div>
             )}
-            <button type="submit" disabled={busy} className="btn-primary w-full justify-center">
-              {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : mode === 'login' ? <><Shield className="h-4 w-4" /> Sign In</> : <><Building2 className="h-4 w-4" /> Create Account</>}
+            <button type="submit" disabled={busy} className="btn-primary w-full flex justify-center items-center gap-2 px-3 py-2 rounded-lg">
+              {busy ? <Loader2 className="h-6 w-4 animate-spin" strokeWidth={3} /> : mode === 'login' ? <><Shield className="h-4 w-4" /> Sign In</> : <><Building2 className="h-4 w-4" /> Create Account</>}
             </button>
           </form>
 

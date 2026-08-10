@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS super_admins (
 
 CREATE TABLE IF NOT EXISTS tenants (
   id VARCHAR(36) PRIMARY KEY,
+  -- Short sequential number for display purposes only (e.g. T-0007) — id
+  -- above (the UUID) remains the real primary key used everywhere else
+  tenant_no INT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE,
   company VARCHAR(255) NOT NULL,
   contact_email VARCHAR(255) NOT NULL,
   plan VARCHAR(50) NOT NULL DEFAULT 'Standard',
@@ -44,6 +47,7 @@ CREATE TABLE IF NOT EXISTS tenant_users (
   `rank` VARCHAR(100) NOT NULL DEFAULT 'Crew',
   `role` VARCHAR(50) NOT NULL DEFAULT 'vessel',
   status VARCHAR(50) NOT NULL DEFAULT 'invited',
+  must_change_password BOOLEAN NOT NULL DEFAULT FALSE,
   fleet_scope VARCHAR(20) NOT NULL DEFAULT 'global',
   assigned_vessel_ids JSON NOT NULL,
   assigned_fleet_profile_ids JSON NOT NULL,
@@ -100,6 +104,7 @@ CREATE TABLE IF NOT EXISTS sms_documents (
   node_kind VARCHAR(20) NOT NULL,
   content_kind VARCHAR(20) NULL,
   content LONGTEXT,
+  file_size_bytes BIGINT NULL,
   is_regulatory_header BOOLEAN NOT NULL DEFAULT FALSE,
   approval_state VARCHAR(20) NOT NULL DEFAULT 'approved',
   version VARCHAR(20) NOT NULL DEFAULT '1.0.0',
@@ -275,5 +280,9 @@ CREATE TABLE IF NOT EXISTS maintenance_banner (
   severity VARCHAR(20) NOT NULL DEFAULT 'info',
   published_by VARCHAR(255),
   published_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  is_active BOOLEAN NOT NULL DEFAULT TRUE
+  is_active BOOLEAN NOT NULL DEFAULT TRUE,
+  -- NULL = platform-wide notice, otherwise scoped to a single tenant's users only
+  tenant_id VARCHAR(36) NULL,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  INDEX idx_banner_tenant_active (tenant_id, is_active)
 );

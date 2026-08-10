@@ -19,6 +19,16 @@ import * as dataCache from './dataCache';
 
 export type DemoTenantId = string;
 
+// Real (backend) tenants get a UUID id; the legacy in-memory demo seed
+// tenants used elsewhere in the UI use "T-####" — this distinguishes which
+// ones actually exist as a row in the `tenants` table (and so can be
+// targeted by anything with a real FK to it, e.g. a scoped banner) from
+// the local-only simulated ones.
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+export function isRealTenantId(id: string): boolean {
+  return UUID_RE.test(id);
+}
+
 // ── Tenant getters ──────────────────────────────────────────
 
 export function getDemoTenant(id: string): TenantRow {
@@ -191,10 +201,10 @@ export function getEffectiveDemoUsers(tenantId: string): TenantUserRow[] {
 
 export async function demoCreateUser(
   tenantId: string,
-  data: { name: string; email: string; employee_id: string | null; passport_number: string | null; seaman_book_number: string | null; nationality: string | null; rank: TenantUserRow['rank']; role: TenantUserRow['role']; status?: string; fleet_scope?: 'global' | 'specific'; assigned_vessel_ids?: string[]; assigned_fleet_profile_ids?: string[] },
+  data: { name: string; email: string; password?: string; employee_id: string | null; passport_number: string | null; seaman_book_number: string | null; nationality: string | null; rank: TenantUserRow['rank']; role: TenantUserRow['role']; status?: string; fleet_scope?: 'global' | 'specific'; assigned_vessel_ids?: string[]; assigned_fleet_profile_ids?: string[] },
 ): Promise<string> {
   const u = await api.apiCreateUser<TenantUserRow>(tenantId, {
-    name: data.name, email: data.email, employee_id: data.employee_id,
+    name: data.name, email: data.email, password: data.password, employee_id: data.employee_id,
     passport_number: data.passport_number, seaman_book_number: data.seaman_book_number,
     nationality: data.nationality, rank: data.rank, role: data.role,
     status: data.status ?? 'invited', fleet_scope: data.fleet_scope ?? 'global',
@@ -291,13 +301,14 @@ export function getEffectiveDemoSmsDocs(tenantId: string, treeKind?: string, pro
 
 export async function demoCreateSmsDoc(
   tenantId: string,
-  data: { parent_id: string | null; tree_kind: string; label: string; node_kind: 'folder' | 'document'; content_kind: 'rich_text' | 'pdf' | null; content: string | null; profile_id?: string | null; author_name?: string | null; author_role?: string | null; author_origin?: string | null },
+  data: { parent_id: string | null; tree_kind: string; label: string; node_kind: 'folder' | 'document'; content_kind: 'rich_text' | 'pdf' | null; content: string | null; file_size_bytes?: number | null; profile_id?: string | null; author_name?: string | null; author_role?: string | null; author_origin?: string | null },
 ): Promise<string> {
   const siblings = getEffectiveDemoSmsDocs(tenantId, data.tree_kind).filter((d) => d.parent_id === data.parent_id);
   const maxSort = siblings.reduce((mx, d) => Math.max(mx, d.sort_order), 0);
   const d = await api.apiCreateSmsDoc<SmsDocRow>(tenantId, {
     parent_id: data.parent_id, tree_kind: data.tree_kind, label: data.label,
     node_kind: data.node_kind, content_kind: data.content_kind, content: data.content,
+    file_size_bytes: data.file_size_bytes ?? null,
     approval_state: 'pending_dpa', sort_order: maxSort + 1, profile_id: data.profile_id ?? null,
     author_name: data.author_name ?? null, author_role: data.author_role ?? null, author_origin: data.author_origin ?? null,
   });
@@ -310,11 +321,14 @@ export async function demoRenameSmsDoc(tenantId: string, docId: string, newLabel
   await dataCache.refreshTenantData(tenantId);
 }
 
-export async function demoUpdateSmsDocContent(tenantId: string, docId: string, content: string, contentKind: 'rich_text' | 'pdf', authorName?: string | null, authorRole?: string | null, authorOrigin?: string | null): Promise<void> {
+export async function demoUpdateSmsDocContent(tenantId: string, docId: string, content: string, contentKind: 'rich_text' | 'pdf', authorName?: string | null, authorRole?: string | null, authorOrigin?: string | null, fileSizeBytes?: number | null): Promise<void> {
   const updates: Record<string, unknown> = { content, content_kind: contentKind, approval_state: 'pending_dpa' };
   if (authorName) updates.author_name = authorName;
   if (authorRole) updates.author_role = authorRole;
   if (authorOrigin) updates.author_origin = authorOrigin;
+  // Only touch file_size_bytes when a new file was actually picked — otherwise
+  // a plain resubmit-with-unchanged-PDF would wipe out the recorded size.
+  if (fileSizeBytes != null) updates.file_size_bytes = fileSizeBytes;
   await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, updates);
   await dataCache.refreshTenantData(tenantId);
 }
@@ -339,13 +353,14 @@ export async function demoRejectSmsDoc(tenantId: string, docId: string, comments
   await dataCache.refreshTenantData(tenantId);
 }
 
-export async function demoResubmitSmsDoc(tenantId: string, docId: string, content?: string, contentKind?: 'rich_text' | 'pdf', authorName?: string | null, authorRole?: string | null, authorOrigin?: string | null): Promise<void> {
+export async function demoResubmitSmsDoc(tenantId: string, docId: string, content?: string, contentKind?: 'rich_text' | 'pdf', authorName?: string | null, authorRole?: string | null, authorOrigin?: string | null, fileSizeBytes?: number | null): Promise<void> {
   const updates: Record<string, unknown> = { approval_state: 'pending_dpa', rejection_comments: null };
   if (content !== undefined) updates.content = content;
   if (contentKind !== undefined) updates.content_kind = contentKind;
   if (authorName) updates.author_name = authorName;
   if (authorRole) updates.author_role = authorRole;
   if (authorOrigin) updates.author_origin = authorOrigin;
+  if (fileSizeBytes != null) updates.file_size_bytes = fileSizeBytes;
   await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, updates);
   await dataCache.refreshTenantData(tenantId);
 }

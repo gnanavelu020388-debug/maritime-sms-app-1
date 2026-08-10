@@ -1,21 +1,92 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Building2, Ship, Users, Wifi, WifiOff, HardDrive, DollarSign, TrendingUp, TrendingDown,
-  Megaphone, Radio, Activity, Gauge, ArrowUpRight, Satellite, Server,
+  Megaphone, Radio, Activity, Gauge, ArrowUpRight, Satellite, Server, Loader2, X,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { ProgressBar } from '../components/ProgressBar';
 import { Badge } from '../components/Badge';
 import { useStore } from '../store';
+import { useAuth } from '../lib/auth';
 import { formatCurrency, formatGb, formatNumber, relativeTime } from '../constants';
 import { SatelliteQueue } from '../components/SatelliteQueue';
 import type { Capabilities } from '../lib/permissions';
+import * as api from '../lib/api';
+import { isRealTenantId } from '../lib/demoData';
+import { mapBannerRow } from '../components/MaintenanceBanner';
+import { logAudit } from '../lib/audit';
+import type { MaintenanceBanner as BannerData } from '../types';
 
 export function DashboardView({ caps }: { caps: Capabilities }) {
-  const { tenants, satellite, maintenance, audit, dispatch, toast } = useStore();
+  const { tenants, satellite, audit, toast } = useStore();
+  const { user } = useAuth();
   const [bannerText, setBannerText] = useState('System Maintenance: The platform will undergo a brief scheduled update on 25-July at 0200 UTC. Offline sync will temporarily queue.');
   const [severity, setSeverity] = useState<'info' | 'warning' | 'critical'>('warning');
+  const [targetTenantId, setTargetTenantId] = useState<string>(''); // '' = platform-wide
   const [dateRange, setDateRange] = useState<'24h' | '7d' | '30d'>('24h');
+  const [activeBanners, setActiveBanners] = useState<BannerData[]>([]);
+  const [bannersLoading, setBannersLoading] = useState(true);
+  const [publishBusy, setPublishBusy] = useState(false);
+
+  const realTenants = useMemo(() => tenants.filter((t) => isRealTenantId(t.id)), [tenants]);
+
+  async function loadActiveBanners() {
+    setBannersLoading(true);
+    try {
+      const rows = await api.apiGetAllBanners<Parameters<typeof mapBannerRow>[0]>();
+      setActiveBanners(rows.map(mapBannerRow));
+    } catch {
+      // best-effort — the publish form still works even if this listing fails
+    } finally {
+      setBannersLoading(false);
+    }
+  }
+
+  useEffect(() => { loadActiveBanners(); }, []);
+
+  async function handlePublish() {
+    if (!bannerText.trim()) return;
+    setPublishBusy(true);
+    try {
+      const tenantId = targetTenantId || null;
+      await api.apiPublishBanner(bannerText.trim(), severity, tenantId);
+      const targetCompany = realTenants.find((t) => t.id === tenantId)?.company;
+      await logAudit({
+        tenantId: tenantId ?? undefined,
+        actorEmail: user?.email ?? 'super-admin',
+        category: 'system',
+        action: tenantId ? `Maintenance banner published for ${targetCompany ?? tenantId}` : 'Platform-wide maintenance banner published',
+        target: tenantId ? (targetCompany ?? tenantId) : 'platform',
+      });
+      toast({
+        tone: 'success',
+        title: 'Banner published',
+        message: tenantId ? `Notice is now live for ${targetCompany ?? 'the selected company'} only.` : 'Notice is now live across all tenant portals.',
+      });
+      await loadActiveBanners();
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Publish failed', message: (err as Error).message });
+    } finally {
+      setPublishBusy(false);
+    }
+  }
+
+  async function handleClearBanner(banner: BannerData) {
+    try {
+      await api.apiClearBanner(banner.tenantId ?? null);
+      await logAudit({
+        tenantId: banner.tenantId ?? undefined,
+        actorEmail: user?.email ?? 'super-admin',
+        category: 'system',
+        action: banner.tenantId ? `Maintenance banner cleared for ${banner.tenantCompany ?? banner.tenantId}` : 'Platform-wide maintenance banner cleared',
+        target: banner.tenantId ? (banner.tenantCompany ?? banner.tenantId) : 'platform',
+      });
+      toast({ tone: 'info', title: 'Banner cleared' });
+      await loadActiveBanners();
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Clear failed', message: (err as Error).message });
+    }
+  }
 
   const kpis = useMemo(() => {
     const activeTenants = tenants.filter((t) => t.status === 'active').length;
@@ -125,73 +196,103 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
 
         {/* Maintenance broadcast */}
         <Card
-          title="Global Maintenance Banner"
-          subtitle="Publish a platform-wide notice"
+          title="Maintenance Banners"
+          subtitle="Publish platform-wide or company-specific notices"
           icon={<Megaphone className="h-4 w-4" />}
         >
-          {maintenance ? (
-            <div className="space-y-3">
-              <div className="rounded-lg border border-warning-200 bg-warning-50 p-3 dark:border-warning-900/60 dark:bg-warning-900/20">
-                <p className="text-xs font-bold uppercase tracking-wide text-warning-700 dark:text-warning-300">Currently live</p>
-                <p className="mt-1 text-sm text-ink-800 dark:text-ink-100">{maintenance.message}</p>
-                <p className="mt-1 text-[11px] text-ink-500">Published {relativeTime(maintenance.publishedAt)} · {maintenance.publishedBy}</p>
+          <div className="space-y-4">
+            {bannersLoading ? (
+              <p className="py-4 text-center text-xs text-ink-400">Loading active banners…</p>
+            ) : activeBanners.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-ink-200 p-4 text-center text-xs text-ink-400 dark:border-ink-700">
+                No banners currently live.
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {activeBanners.map((b) => (
+                  <div key={b.id} className="rounded-lg border border-warning-200 bg-warning-50 p-3 dark:border-warning-900/60 dark:bg-warning-900/20">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          {b.tenantId ? <Building2 className="h-3 w-3 text-warning-700 dark:text-warning-300" /> : <Radio className="h-3 w-3 text-warning-700 dark:text-warning-300" />}
+                          <p className="text-xs font-bold uppercase tracking-wide text-warning-700 dark:text-warning-300">
+                            {b.tenantId ? (b.tenantCompany ?? 'Company-specific') : 'Platform-wide'}
+                          </p>
+                        </div>
+                        <p className="mt-1 text-sm text-ink-800 dark:text-ink-100">{b.message}</p>
+                        <p className="mt-1 text-[11px] text-ink-500">Published {relativeTime(b.publishedAt)} · {b.publishedBy}</p>
+                      </div>
+                      {caps.maintenancePublish && (
+                        <button
+                          onClick={() => handleClearBanner(b)}
+                          className="shrink-0 rounded p-1 text-ink-400 hover:bg-danger-100 hover:text-danger-600 dark:hover:bg-danger-900/30 dark:hover:text-danger-400"
+                          title="Clear this banner"
+                        >
+                          <X className="h-3.5 w-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                ))}
               </div>
-              <button
-                onClick={() => {
-                  dispatch({ type: 'MAINTENANCE_CLEAR' });
-                  toast({ tone: 'info', title: 'Banner cleared' });
-                }}
-                disabled={!caps.maintenancePublish}
-                className="btn-secondary w-full disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                Clear active banner
-              </button>
-            </div>
-          ) : caps.maintenancePublish ? (
-            <div className="space-y-3">
-              <div>
-                <label className="label">Notice message</label>
-                <textarea
-                  value={bannerText}
-                  onChange={(e) => setBannerText(e.target.value)}
-                  rows={3}
-                  className="input resize-none"
-                />
-              </div>
-              <div>
-                <label className="label">Severity</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {(['info', 'warning', 'critical'] as const).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => setSeverity(s)}
-                      className={`rounded-lg border px-2 py-1.5 text-xs font-semibold capitalize transition ${severity === s
-                        ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/30 dark:text-primary-300'
-                        : 'border-ink-200 text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800'}`}
-                    >
-                      {s}
-                    </button>
-                  ))}
+            )}
+
+            {caps.maintenancePublish ? (
+              <div className="space-y-3 border-t border-ink-100 pt-3 dark:border-ink-800">
+                <div>
+                  <label className="label">Target</label>
+                  <select
+                    className="input"
+                    value={targetTenantId}
+                    onChange={(e) => setTargetTenantId(e.target.value)}
+                  >
+                    <option value="">Platform-wide (all companies)</option>
+                    {realTenants.map((t) => (
+                      <option key={t.id} value={t.id}>{t.company}</option>
+                    ))}
+                  </select>
+                  <p className="mt-1 text-[11px] text-ink-400">
+                    Company notices only appear for that company's own users — nobody else sees them.
+                  </p>
                 </div>
+                <div>
+                  <label className="label">Notice message</label>
+                  <textarea
+                    value={bannerText}
+                    onChange={(e) => setBannerText(e.target.value)}
+                    rows={3}
+                    className="input resize-none"
+                  />
+                </div>
+                <div>
+                  <label className="label">Severity</label>
+                  <div className="grid grid-cols-3 gap-2">
+                    {(['info', 'warning', 'critical'] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => setSeverity(s)}
+                        className={`rounded-lg border px-2 py-1.5 text-xs font-semibold capitalize transition ${severity === s
+                          ? 'border-primary-500 bg-primary-50 text-primary-700 dark:border-primary-400 dark:bg-primary-900/30 dark:text-primary-300'
+                          : 'border-ink-200 text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800'}`}
+                      >
+                        {s}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <button
+                  onClick={handlePublish}
+                  disabled={publishBusy || !bannerText.trim()}
+                  className="btn-primary w-full flex justify-center items-center gap-2 px-3 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {publishBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Megaphone className="h-4 w-4" />}
+                  {targetTenantId ? `Publish to ${realTenants.find((t) => t.id === targetTenantId)?.company ?? 'company'}` : 'Publish platform-wide'}
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  if (!bannerText.trim()) return;
-                  dispatch({
-                    type: 'MAINTENANCE_PUBLISH',
-                    banner: { message: bannerText.trim(), severity, publishedAt: new Date().toISOString(), publishedBy: 'Ellis Hawthorne' },
-                  });
-                  toast({ tone: 'success', title: 'Banner published', message: 'Notice is now live across all tenant portals.' });
-                }}
-                className="btn-primary w-full"
-              >
-                <Megaphone className="h-4 w-4" />
-                Publish banner
-              </button>
-            </div>
-          ) : (
-            <p className="py-6 text-center text-sm text-ink-400">No maintenance permissions for your role.</p>
-          )}
+            ) : (
+              <p className="py-2 text-center text-sm text-ink-400">No maintenance permissions for your role.</p>
+            )}
+          </div>
         </Card>
       </div>
 

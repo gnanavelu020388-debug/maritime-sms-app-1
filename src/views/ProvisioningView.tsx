@@ -54,35 +54,49 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
   async function createTenant(data: { company: string; contact_email: string; plan: string; vessels_max: number; seats_max: number; region: string }) {
     setBusy(true);
     setFormError(null);
-    const tenantId = demoCreateTenant(data);
-    demoCloneMasterSms(tenantId);
-    await logAudit({ actorEmail: user?.email ?? 'super-admin', category: 'tenant', action: `Provisioned tenant: ${data.company}`, target: data.contact_email });
-    setBusy(false);
-    setShowTenant(false);
-    load();
+    try {
+      const tenantId = await demoCreateTenant(data);
+      demoCloneMasterSms(tenantId);
+      await logAudit({ actorEmail: user?.email ?? 'super-admin', category: 'tenant', action: `Provisioned tenant: ${data.company}`, target: data.contact_email });
+      setShowTenant(false);
+      await load();
+    } catch (err) {
+      setFormError((err as Error).message || 'Failed to create tenant.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function provisionUser(tenant: TenantRow, data: { name: string; email: string; roleChoice: string; nationality: string }) {
     setBusy(true);
     setFormError(null);
-    const isCompanyAdmin = data.roleChoice === COMPANY_ADMIN_RANK;
-    const rank = isCompanyAdmin ? ('DPA' as Rank) : (data.roleChoice as Rank);
-    const role = isCompanyAdmin ? 'company_admin' : (RANK_TO_ROLE.find((r) => r.rank === data.roleChoice)?.role ?? 'vessel');
-    demoCreateUser(tenant.id, {
-      name: data.name, email: data.email.toLowerCase().trim(),
-      employee_id: null, passport_number: null, seaman_book_number: null,
-      nationality: data.nationality || null, rank, role, status: 'invited',
-    });
-    await logAudit({ tenantId: tenant.id, actorEmail: user?.email ?? 'super-admin', category: 'security', action: `Provisioned ${role}: ${data.name} <${data.email}>`, target: data.email, location: tenant.company });
-    setBusy(false);
-    setShowUser(null);
-    load();
+    try {
+      const isCompanyAdmin = data.roleChoice === COMPANY_ADMIN_RANK;
+      const rank = isCompanyAdmin ? ('DPA' as Rank) : (data.roleChoice as Rank);
+      const role = isCompanyAdmin ? 'company_admin' : (RANK_TO_ROLE.find((r) => r.rank === data.roleChoice)?.role ?? 'vessel');
+      await demoCreateUser(tenant.id, {
+        name: data.name, email: data.email.toLowerCase().trim(),
+        employee_id: null, passport_number: null, seaman_book_number: null,
+        nationality: data.nationality || null, rank, role, status: 'invited',
+      });
+      await logAudit({ tenantId: tenant.id, actorEmail: user?.email ?? 'super-admin', category: 'security', action: `Provisioned ${role}: ${data.name} <${data.email}>`, target: data.email, location: tenant.company });
+      setShowUser(null);
+      await load();
+    } catch (err) {
+      setFormError((err as Error).message || 'Failed to provision user.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function removeUser(u: TenantUserRow) {
     if (!confirm(`Remove ${u.name}? They will lose access immediately.`)) return;
-    demoDeleteUser(u.tenant_id, u.id);
-    load();
+    try {
+      await demoDeleteUser(u.tenant_id, u.id);
+      await load();
+    } catch (err) {
+      alert((err as Error).message || 'Failed to remove user.');
+    }
   }
 
   async function deleteTenant(t: TenantRow) {

@@ -64,7 +64,12 @@ async function request<T>(
 
   if (res.status === 401) {
     clearToken();
-    throw new Error('Authentication required');
+    // Clearing the token alone leaves the app's auth state stale — the UI
+    // still looks logged in while every subsequent call keeps 401ing. Let
+    // AuthProvider know so it can drop back to the login screen immediately.
+    const onExpired = (window as Record<string, unknown>).__mpcAuthExpired as (() => void) | undefined;
+    onExpired?.();
+    throw new Error('Your session has expired. Please sign in again.');
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: 'Request failed' }));
@@ -85,6 +90,7 @@ export interface AuthLoginResponse {
     tenant_id?: string;
     rank?: string;
     adminName?: string;
+    mustChangePassword?: boolean;
   };
 }
 
@@ -122,6 +128,13 @@ export async function apiGetMe(): Promise<{ user: AuthLoginResponse['user'] }> {
   return request<{ user: AuthLoginResponse['user'] }>('/auth/me');
 }
 
+export async function apiChangePassword(newPassword: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>('/auth/change-password', {
+    method: 'PUT',
+    body: JSON.stringify({ newPassword }),
+  });
+}
+
 // ── Tenants ───────────────────────────────────────────────
 
 export async function apiGetTenants<T>(): Promise<T[]> {
@@ -142,6 +155,10 @@ export async function apiUpdateTenant<T>(tenantId: string, data: Record<string, 
 
 export async function apiArchiveTenant(tenantId: string): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(`/tenants/${tenantId}`, { method: 'DELETE' });
+}
+
+export async function apiDeleteTenantPermanent(tenantId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/tenants/${tenantId}/permanent`, { method: 'DELETE' });
 }
 
 // ── Users ─────────────────────────────────────────────────
@@ -308,15 +325,22 @@ export async function apiClearSession(token: string): Promise<void> {
 }
 
 // ── Banner ────────────────────────────────────────────────
+// tenant_id null/omitted = platform-wide notice; otherwise scoped to just
+// that tenant's users.
 
 export async function apiGetBanner<T>(): Promise<T | null> {
   return request<T | null>('/banner');
 }
 
-export async function apiPublishBanner<T>(message: string, severity: string): Promise<T> {
-  return request<T>('/banner', { method: 'POST', body: JSON.stringify({ message, severity }) });
+export async function apiGetAllBanners<T>(): Promise<T[]> {
+  return request<T[]>('/banner/all');
 }
 
-export async function apiClearBanner(): Promise<{ success: boolean }> {
-  return request<{ success: boolean }>('/banner', { method: 'DELETE' });
+export async function apiPublishBanner<T>(message: string, severity: string, tenantId: string | null): Promise<T> {
+  return request<T>('/banner', { method: 'POST', body: JSON.stringify({ message, severity, tenant_id: tenantId }) });
+}
+
+export async function apiClearBanner(tenantId: string | null): Promise<{ success: boolean }> {
+  const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
+  return request<{ success: boolean }>(`/banner${qs}`, { method: 'DELETE' });
 }

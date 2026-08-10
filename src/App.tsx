@@ -5,10 +5,11 @@ import { SuperAdminShell } from './layouts/SuperAdminShell';
 import { CompanyApp } from './apps/CompanyApp';
 import { DpaApp } from './apps/DpaApp';
 import { VesselApp } from './apps/VesselApp';
+import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { Loader2 } from 'lucide-react';
 
 function Router() {
-  const { user, role, internalRole, loading, signOut } = useAuth();
+  const { user, role, internalRole, loading, signOut, mustChangePassword } = useAuth();
 
   if (loading) {
     return (
@@ -19,6 +20,8 @@ function Router() {
   }
 
   if (!user) return <AuthView />;
+
+  if (mustChangePassword) return <ChangePasswordModal />;
 
   if (role === 'super_admin') return <SuperAdminShell user={user} role={role} internalRole={internalRole} onSignOut={signOut} />;
 

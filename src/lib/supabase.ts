@@ -36,6 +36,8 @@ export type ApprovalState = 'draft' | 'pending_dpa' | 'approved' | 'rejected';
 
 export interface TenantRow {
   id: string;
+  // Short sequential number for display only — id (UUID) is the real key.
+  tenant_no?: number;
   company: string;
   contact_email: string;
   plan: string;
@@ -51,6 +53,8 @@ export interface TenantRow {
   created_at: string;
   contract_expires: string;
   updated_at: string;
+  // Summed from sms_documents.file_size_bytes on read — not a stored counter.
+  storage_bytes_used?: number;
 }
 
 export interface TenantUserRow {
@@ -66,6 +70,7 @@ export interface TenantUserRow {
   rank: Rank;
   role: Exclude<PlatformRole, 'super_admin'>;
   status: string;
+  must_change_password?: boolean;
   fleet_scope: 'global' | 'specific';
   assigned_vessel_ids: string[];
   assigned_fleet_profile_ids: string[];

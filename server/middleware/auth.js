@@ -30,6 +30,18 @@ export async function authMiddleware(req, res, next) {
   next();
 }
 
+// Like authMiddleware, but never rejects — just sets req.user when a valid
+// token is present (e.g. undefined) so a route can behave differently for
+// logged-out visitors (the login screen) vs authenticated users.
+export function optionalAuth(req, _res, next) {
+  const header = req.headers.authorization;
+  if (header && header.startsWith('Bearer ')) {
+    const decoded = verifyToken(header.slice(7));
+    if (decoded) req.user = decoded;
+  }
+  next();
+}
+
 export function requireRole(...roles) {
   return (req, res, next) => {
     if (!req.user || !roles.includes(req.user.role)) {

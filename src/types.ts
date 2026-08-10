@@ -29,8 +29,14 @@ export type ModuleKey =
 
 export interface Tenant {
   id: string;
+  // Short sequential number for display only (e.g. "T-0007") — id (the
+  // UUID) remains the real identifier used for every API call. Undefined
+  // for the legacy local-only demo tenants, which just display their id.
+  tenantNo?: number;
   company: string;
   contactEmail: string;
+  companyEmail: string;
+  companyMailPassword: string;
   plan: PlanTier;
   status: TenantStatus;
   seats: { used: number; max: number };
@@ -196,10 +202,14 @@ export interface ErrorLog {
 }
 
 export interface MaintenanceBanner {
+  id?: string;
   message: string;
   severity: 'info' | 'warning' | 'critical';
   publishedAt: string;
   publishedBy: string;
+  // null/undefined = platform-wide. Otherwise scoped to a single tenant's users.
+  tenantId?: string | null;
+  tenantCompany?: string | null;
 }
 
 export interface ImpersonationState {

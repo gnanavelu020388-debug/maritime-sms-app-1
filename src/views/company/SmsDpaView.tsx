@@ -394,9 +394,9 @@ export function SmsDpaView() {
     loadTree(); loadAllCounts(); loadAllPending();
   }
 
-  async function handleAddDocument(label: string, contentKind: 'rich_text' | 'pdf', content: string) {
+  async function handleAddDocument(label: string, contentKind: 'rich_text' | 'pdf', content: string, sizeBytes: number | null) {
     if (!tenant || !addDocFor || !label.trim()) return;
-    demoCreateSmsDoc(tenant.id, { parent_id: addDocFor.parentId, tree_kind: treeKind, label, node_kind: 'document', content_kind: contentKind, content, profile_id: activeProfile?.id, author_name: tenantUser?.name ?? 'Company Admin', author_role: 'Company Admin', author_origin: 'Shoreside HQ' });
+    demoCreateSmsDoc(tenant.id, { parent_id: addDocFor.parentId, tree_kind: treeKind, label, node_kind: 'document', content_kind: contentKind, content, file_size_bytes: sizeBytes, profile_id: activeProfile?.id, author_name: tenantUser?.name ?? 'Company Admin', author_role: 'Company Admin', author_origin: 'Shoreside HQ' });
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Added document: ${label}`, target: treeKind, location: tenant.company });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'added', label, kind: 'document' } });
     // Auto-expand parent so the new document is immediately visible as nested
@@ -405,9 +405,9 @@ export function SmsDpaView() {
     loadTree(); loadAllCounts(); loadAllPending();
   }
 
-  async function handleSaveEdit(content: string, contentKind: 'rich_text' | 'pdf') {
+  async function handleSaveEdit(content: string, contentKind: 'rich_text' | 'pdf', sizeBytes: number | null) {
     if (!tenant || !editorFor) return;
-    demoUpdateSmsDocContent(tenant.id, editorFor.id, content, contentKind, tenantUser?.name ?? 'Company Admin', 'Company Admin', 'Shoreside HQ');
+    demoUpdateSmsDocContent(tenant.id, editorFor.id, content, contentKind, tenantUser?.name ?? 'Company Admin', 'Company Admin', 'Shoreside HQ', sizeBytes);
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Edited: ${editorFor.label}`, target: treeKind, location: tenant.company });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'edited', nodeId: editorFor.id, label: editorFor.label } });
     setEditorFor(null); loadTree(); loadAllPending();
@@ -908,7 +908,7 @@ function AddFolderModal({ onClose, onAdd, depthError, maxDepth }: { onClose: () 
   );
 }
 
-function AddDocumentModal({ onClose, onAdd, maxUploadMb }: { onClose: () => void; onAdd: (label: string, contentKind: 'rich_text' | 'pdf', content: string) => void; maxUploadMb: number }) {
+function AddDocumentModal({ onClose, onAdd, maxUploadMb }: { onClose: () => void; onAdd: (label: string, contentKind: 'rich_text' | 'pdf', content: string, sizeBytes: number | null) => void; maxUploadMb: number }) {
   const [label, setLabel] = useState('');
   const [contentKind, setContentKind] = useState<'rich_text' | 'pdf'>('rich_text');
   const [text, setText] = useState('');
@@ -949,7 +949,7 @@ function AddDocumentModal({ onClose, onAdd, maxUploadMb }: { onClose: () => void
   return (
     <Modal open onClose={onClose} title="Add Document" subtitle="Upload a PDF or draft a rich-text policy" icon={<FilePlus2 className="h-5 w-5" />} size="md"
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button>
-        <button disabled={!canSubmit} onClick={() => onAdd(label.trim(), contentKind, contentKind === 'pdf' ? pdfName : text)} className="btn-primary">Add Document</button></>}>
+        <button disabled={!canSubmit} onClick={() => onAdd(label.trim(), contentKind, contentKind === 'pdf' ? pdfName : text, contentKind === 'pdf' ? pdfSize : null)} className="btn-primary">Add Document</button></>}>
       <div className="space-y-4">
         <div>
           <label className="label">Document name</label>
@@ -1099,7 +1099,7 @@ function computeNodeDepth(index: Map<string, SmsDocRow>, nodeId: string): number
   return depth;
 }
 
-function ContentEditor({ node, onClose, onSave, maxUploadMb }: { node: TreeNode; onClose: () => void; onSave: (content: string, contentKind: 'rich_text' | 'pdf') => void; maxUploadMb: number }) {
+function ContentEditor({ node, onClose, onSave, maxUploadMb }: { node: TreeNode; onClose: () => void; onSave: (content: string, contentKind: 'rich_text' | 'pdf', sizeBytes: number | null) => void; maxUploadMb: number }) {
   const [contentKind, setContentKind] = useState<'rich_text' | 'pdf'>(node.content_kind ?? 'rich_text');
   const [text, setText] = useState(node.content ?? '');
   const [pdfName, setPdfName] = useState(node.content_kind === 'pdf' ? (node.content ?? '') : '');
@@ -1132,7 +1132,7 @@ function ContentEditor({ node, onClose, onSave, maxUploadMb }: { node: TreeNode;
   return (
     <Modal open onClose={onClose} title={`Edit: ${node.label}`} subtitle="Saving marks as pending DPA approval" icon={<FileEdit className="h-5 w-5" />} size="lg"
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button>
-        <button disabled={contentKind === 'pdf' && !!sizeError} onClick={() => onSave(contentKind === 'pdf' ? pdfName : text, contentKind)} className="btn-primary">Save (marks pending)</button></>}>
+        <button disabled={contentKind === 'pdf' && !!sizeError} onClick={() => onSave(contentKind === 'pdf' ? pdfName : text, contentKind, contentKind === 'pdf' ? pdfSize : null)} className="btn-primary">Save (marks pending)</button></>}>
       <div className="space-y-4">
         <div className="grid grid-cols-2 gap-2">
           <TypeBtn active={contentKind === 'rich_text'} onClick={() => setContentKind('rich_text')} label="Rich text editor" />

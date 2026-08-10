@@ -12,16 +12,25 @@ function parseTenant(row) {
     modules: typeof row.modules === 'string' ? JSON.parse(row.modules) : (row.modules || []),
     monthly_revenue: Number(row.monthly_revenue),
     storage_gb_max: Number(row.storage_gb_max),
+    storage_bytes_used: Number(row.storage_bytes_used || 0),
   };
 }
+
+// Storage usage isn't tracked with a running counter — it's summed on read
+// from sms_documents.file_size_bytes, which is only populated for PDF
+// uploads that pass their size through (the upload UI doesn't do this yet).
+const TENANTS_WITH_STORAGE_SQL = `
+  SELECT t.*, COALESCE((SELECT SUM(d.file_size_bytes) FROM sms_documents d WHERE d.tenant_id = t.id), 0) AS storage_bytes_used
+  FROM tenants t
+`;
 
 router.get('/', authMiddleware, async (req, res) => {
   try {
     if (req.user.role === 'super_admin') {
-      const [rows] = await pool.query('SELECT * FROM tenants ORDER BY created_at DESC');
+      const [rows] = await pool.query(`${TENANTS_WITH_STORAGE_SQL} ORDER BY t.created_at DESC`);
       return res.json(rows.map(parseTenant));
     }
-    const [rows] = await pool.query('SELECT * FROM tenants WHERE id = ?', [req.user.tenant_id]);
+    const [rows] = await pool.query(`${TENANTS_WITH_STORAGE_SQL} WHERE t.id = ?`, [req.user.tenant_id]);
     return res.json(rows.map(parseTenant));
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
@@ -31,7 +40,7 @@ router.get('/:tenantId', authMiddleware, async (req, res) => {
     if (req.user.role !== 'super_admin' && req.user.tenant_id !== req.params.tenantId) {
       return res.status(403).json({ error: 'Access denied' });
     }
-    const [rows] = await pool.query('SELECT * FROM tenants WHERE id = ?', [req.params.tenantId]);
+    const [rows] = await pool.query(`${TENANTS_WITH_STORAGE_SQL} WHERE t.id = ?`, [req.params.tenantId]);
     if (rows.length === 0) return res.status(404).json({ error: 'Tenant not found' });
     return res.json(parseTenant(rows[0]));
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
@@ -73,6 +82,17 @@ router.put('/:tenantId', authMiddleware, async (req, res) => {
 router.delete('/:tenantId', authMiddleware, requireSuperAdmin, async (req, res) => {
   try {
     await pool.query('UPDATE tenants SET status = ? WHERE id = ?', ['archived', req.params.tenantId]);
+    return res.json({ success: true });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+// Genuine hard delete — cascades to tenant_users, vessels, crew_assignments,
+// sms_documents, audit_logs, etc. via the ON DELETE CASCADE foreign keys in
+// schema.sql. Distinct from the route above, which only soft-archives.
+router.delete('/:tenantId/permanent', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const [result] = await pool.query('DELETE FROM tenants WHERE id = ?', [req.params.tenantId]);
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Tenant not found' });
     return res.json({ success: true });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });

@@ -65,6 +65,7 @@ router.post('/login', async (req, res) => {
         name: tu.name,
         rank: tu.rank,
         adminName: tu.rank === 'DPA' ? `${tu.name} (DPA)` : tu.name,
+        mustChangePassword: !!tu.must_change_password,
       },
     });
   } catch (err) {
@@ -121,11 +122,30 @@ router.get('/me', authMiddleware, async (req, res) => {
         name: tu.name,
         rank: tu.rank,
         adminName: tu.rank === 'DPA' ? `${tu.name} (DPA)` : tu.name,
+        mustChangePassword: !!tu.must_change_password,
       },
       tenant,
     });
   } catch (err) {
     console.error('Me error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.put('/change-password', authMiddleware, async (req, res) => {
+  try {
+    if (req.user.role === 'super_admin') return res.status(400).json({ error: 'Not applicable to this account type.' });
+    const { newPassword } = req.body;
+    if (!newPassword || newPassword.length < 6) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+    const [rows] = await pool.query('SELECT id FROM tenant_users WHERE id = ?', [req.user.id]);
+    if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+    const hash = await bcrypt.hash(newPassword, 10);
+    await pool.query('UPDATE tenant_users SET password_hash = ?, must_change_password = FALSE WHERE id = ?', [hash, req.user.id]);
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('Change password error:', err);
     return res.status(500).json({ error: 'Internal server error' });
   }
 });

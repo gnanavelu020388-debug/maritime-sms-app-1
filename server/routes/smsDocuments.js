@@ -21,11 +21,11 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
   try {
     const tid = req.params.tenantId;
     if (!canAccess(req, tid)) return res.status(403).json({ error: 'Access denied' });
-    const { parent_id, tree_kind, label, node_kind, content_kind, content, is_regulatory_header, approval_state, version, sort_order, profile_id, author_name, author_role, author_origin, rejection_comments } = req.body;
+    const { parent_id, tree_kind, label, node_kind, content_kind, content, file_size_bytes, is_regulatory_header, approval_state, version, sort_order, profile_id, author_name, author_role, author_origin, rejection_comments } = req.body;
     const id = uuidv4();
     await pool.query(
-      'INSERT INTO sms_documents (id, tenant_id, parent_id, tree_kind, label, node_kind, content_kind, content, is_regulatory_header, approval_state, version, sort_order, profile_id, author_name, author_role, author_origin, rejection_comments) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, tid, parent_id || null, tree_kind, label, node_kind, content_kind || null, content || null, is_regulatory_header ?? false, approval_state || 'draft', version || '1.0.0', sort_order || 0, profile_id || null, author_name || null, author_role || null, author_origin || null, rejection_comments || null],
+      'INSERT INTO sms_documents (id, tenant_id, parent_id, tree_kind, label, node_kind, content_kind, content, file_size_bytes, is_regulatory_header, approval_state, version, sort_order, profile_id, author_name, author_role, author_origin, rejection_comments) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, tid, parent_id || null, tree_kind, label, node_kind, content_kind || null, content || null, file_size_bytes ?? null, is_regulatory_header ?? false, approval_state || 'draft', version || '1.0.0', sort_order || 0, profile_id || null, author_name || null, author_role || null, author_origin || null, rejection_comments || null],
     );
     const [rows] = await pool.query('SELECT * FROM sms_documents WHERE id = ?', [id]);
     return res.status(201).json(rows[0]);
@@ -36,7 +36,7 @@ router.put('/:tenantId/:docId', authMiddleware, async (req, res) => {
   try {
     const tid = req.params.tenantId;
     if (!canAccess(req, tid)) return res.status(403).json({ error: 'Access denied' });
-    const fields = ['parent_id', 'tree_kind', 'label', 'node_kind', 'content_kind', 'content', 'is_regulatory_header', 'approval_state', 'version', 'sort_order', 'profile_id', 'author_name', 'author_role', 'author_origin', 'rejection_comments'];
+    const fields = ['parent_id', 'tree_kind', 'label', 'node_kind', 'content_kind', 'content', 'file_size_bytes', 'is_regulatory_header', 'approval_state', 'version', 'sort_order', 'profile_id', 'author_name', 'author_role', 'author_origin', 'rejection_comments'];
     const sets = [];
     const vals = [];
     for (const f of fields) {

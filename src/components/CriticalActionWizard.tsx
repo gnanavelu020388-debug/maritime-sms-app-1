@@ -28,7 +28,7 @@ interface Props {
   target: CriticalTarget;
   actorEmail: string;
   onClose: () => void;
-  onExecute: (payload: CriticalActionAuditPayload) => void;
+  onExecute: (payload: CriticalActionAuditPayload) => void | Promise<void>;
 }
 
 const STEP_LABELS = ['Verify', 'Acknowledge', 'Confirm', 'Execute'] as const;
@@ -37,15 +37,16 @@ export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }:
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [acks, setAcks] = useState<boolean[]>(() => target.acknowledgements.map(() => false));
   const [typed, setTyped] = useState('');
-  const [executed, setExecuted] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [execError, setExecError] = useState<string | null>(null);
 
   const allAcks = acks.every(Boolean);
   const phraseMatch = typed.trim() === target.confirmPhrase;
-  const allAcksStep = step >= 2;
 
-  const doExecute = () => {
-    if (executed) return;
-    setExecuted(true);
+  const doExecute = async () => {
+    if (executing) return;
+    setExecError(null);
+    setExecuting(true);
     setStep(4);
     const payload: CriticalActionAuditPayload = {
       targetKind: target.kind,
@@ -55,19 +56,30 @@ export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }:
       timestamp: new Date().toISOString(),
       details: { confirmPhrase: target.confirmPhrase, acknowledgements: target.acknowledgements },
     };
-    setTimeout(() => onExecute(payload), 1500);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 1500));
+      await onExecute(payload);
+      // On success the parent is expected to unmount this component.
+    } catch (err) {
+      // If onExecute throws (e.g. the backend call failed), fall back to the
+      // confirmation step instead of leaving the wizard stuck on "Executing…"
+      // with no way to close it.
+      setExecuting(false);
+      setStep(3);
+      setExecError((err as Error)?.message || 'Action failed. Please try again.');
+    }
   };
 
   return (
     <Modal
       open
-      onClose={() => { if (!executed) onClose(); }}
+      onClose={() => { if (!executing) onClose(); }}
       title={`Critical Action — Delete ${target.kind}`}
       subtitle={target.subtitle}
       icon={<ShieldAlert className="h-5 w-5 text-danger-600" />}
       size="lg"
       footer={
-        executed ? (
+        executing ? (
           <button disabled className="btn-secondary">Executing…</button>
         ) : (
           <>
@@ -86,9 +98,6 @@ export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }:
               <button onClick={doExecute} disabled={!phraseMatch} className="btn-danger">
                 <Lock className="h-4 w-4" /> Permanently delete {target.kind.toLowerCase()}
               </button>
-            )}
-            {step === 4 && (
-              <button disabled className="btn-danger">Executing…</button>
             )}
           </>
         )
@@ -166,6 +175,12 @@ export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }:
       {/* Step 3 — String Confirmation */}
       {step === 3 && (
         <div className="space-y-4">
+          {execError && (
+            <div className="flex items-start gap-2 rounded-lg bg-danger-50 p-3 text-sm text-danger-800 dark:bg-danger-900/20 dark:text-danger-300">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <span><strong>Delete failed:</strong> {execError}</span>
+            </div>
+          )}
           <div className="rounded-lg bg-danger-50 p-3 text-sm text-danger-800 dark:bg-danger-900/20 dark:text-danger-300">
             <Lock className="mr-1.5 inline h-4 w-4" />
             To execute this deletion, type the exact confirmation phrase below.

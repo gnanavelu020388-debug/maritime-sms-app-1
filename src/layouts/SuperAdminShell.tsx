@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { StoreProvider } from '../store';
+import { useEffect, useState } from 'react';
+import { StoreProvider, useStore, type HydratedTenantRow } from '../store';
 import { Sidebar } from '../components/Sidebar';
 import { Topbar } from '../components/Topbar';
 import { MaintenanceBanner } from '../components/MaintenanceBanner';
@@ -19,8 +19,19 @@ import type { User, PlatformRole, InternalRole } from '../lib/supabase';
 import { roleLabel } from '../lib/auth-utils';
 import { INTERNAL_ROLE_LABEL, INTERNAL_ROLE_SUMMARY, canAccessSection, capabilitiesFor, type Capabilities } from '../lib/permissions';
 import { LogOut, Lock } from 'lucide-react';
+import { refreshAllTenants, refreshTenantData } from '../lib/dataCache';
+import { getEffectiveDemoTenants, getEffectiveDemoUsers, getEffectiveDemoVessels } from '../lib/demoData';
 
-export function SuperAdminShell({ user, role, internalRole, onSignOut }: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
+export function SuperAdminShell(props: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
+  return (
+    <StoreProvider>
+      <SuperAdminShellInner {...props} />
+    </StoreProvider>
+  );
+}
+
+function SuperAdminShellInner({ user, role, internalRole, onSignOut }: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
+  const { dispatch } = useStore();
   const [active, setActive] = useState<SectionId>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const roleKey: InternalRole = internalRole ?? 'super_admin';
@@ -30,8 +41,32 @@ export function SuperAdminShell({ user, role, internalRole, onSignOut }: { user:
   // locked access-denied screen instead of the view.
   const sectionDenied = !canAccessSection(roleKey, active);
 
+  // Pull real tenants from the backend once per session, at the shell level
+  // rather than inside TenantsView — otherwise any view that needs the real
+  // tenant list (e.g. the Dashboard's banner target picker) comes up empty
+  // until the Super Admin happens to visit the Tenants page first.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        await refreshAllTenants();
+        const rows = getEffectiveDemoTenants();
+        await Promise.all(rows.map((r) => refreshTenantData(r.id)));
+        if (cancelled) return;
+        const hydrated: HydratedTenantRow[] = rows.map((r) => ({
+          ...r,
+          seatsUsed: getEffectiveDemoUsers(r.id).length,
+          vesselsUsed: getEffectiveDemoVessels(r.id).length,
+        }));
+        dispatch({ type: 'TENANTS_HYDRATE', rows: hydrated });
+      } catch {
+        // Best-effort — views still show local/demo tenants if this fails.
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [dispatch]);
+
   return (
-    <StoreProvider>
       <div className="flex h-screen overflow-hidden bg-ink-50 dark:bg-ink-950">
         <Sidebar active={active} onNavigate={setActive} open={sidebarOpen} onClose={() => setSidebarOpen(false)} roleKey={roleKey} />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -66,7 +101,6 @@ export function SuperAdminShell({ user, role, internalRole, onSignOut }: { user:
         </div>
         <Toaster />
       </div>
-    </StoreProvider>
   );
 }
 

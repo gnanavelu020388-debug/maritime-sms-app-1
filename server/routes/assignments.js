@@ -24,8 +24,8 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
     const { vessel_id, user_id, rank, signed_on_at, notes } = req.body;
     const id = uuidv4();
     await pool.query(
-      'INSERT INTO crew_assignments (id, vessel_id, tenant_id, user_id, rank, signed_on_at, notes) VALUES (?,?,?,?,?,?,?)',
-      [vessel_id, vessel_id, tid, user_id, rank, signed_on_at || new Date().toISOString(), notes || null],
+      'INSERT INTO crew_assignments (id, vessel_id, tenant_id, user_id, `rank`, signed_on_at, notes) VALUES (?,?,?,?,?,?,?)',
+      [id, vessel_id, tid, user_id, rank, signed_on_at || new Date().toISOString(), notes || null],
     );
     const [rows] = await pool.query('SELECT * FROM crew_assignments WHERE id = ?', [id]);
     return res.status(201).json(rows[0]);

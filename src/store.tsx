@@ -21,7 +21,16 @@ import type {
   TierConfig,
 } from './types';
 import { SUPER_ADMIN_ID, SUPER_ADMIN_NAME, uid, DEFAULT_TIER_CONFIGS, PLAN_DEFAULTS } from './constants';
-import { onSyncEvent, publishBanner, clearBanner, readPersistedBanner, type SyncEvent, type BannerPayload } from './lib/syncChannel';
+import { onSyncEvent, type SyncEvent } from './lib/syncChannel';
+import type { TenantRow } from './lib/supabase';
+
+// A row fetched from the real backend, merged into the ledger by
+// TENANTS_HYDRATE. Usage counts (seats/vessels used) are computed
+// client-side from the data cache since the backend doesn't return them.
+export interface HydratedTenantRow extends TenantRow {
+  seatsUsed: number;
+  vesselsUsed: number;
+}
 
 // ── In-memory builders for Super Admin dashboard state ──────────────
 // These power the satellite queue simulation, audit trail, invoices,
@@ -53,6 +62,10 @@ function buildTenants(): Tenant[] {
       demoTenantId: null,
     } as Tenant;
   });
+}
+
+function bytesToGb(bytes: number | undefined): number {
+  return Math.round(((bytes ?? 0) / (1024 ** 3)) * 100) / 100;
 }
 
 const SHIP_NAMES = ['VALLE STAR', 'MAERSK VOYAGER', 'PACIFIC HORIZON', 'NORDIC BREEZE', 'CRESCENT TRADER', 'ATLAS EXPLORER', 'OCEAN PRIDE', 'STELLA SPIRIT'];
@@ -233,7 +246,8 @@ interface State {
 
 type Action =
   | { type: 'TOAST_ADD'; toast: Toast } | { type: 'TOAST_DISMISS'; id: string } | { type: 'THEME_SET'; theme: 'light' | 'dark' }
-  | { type: 'MAINTENANCE_PUBLISH'; banner: MaintenanceBanner } | { type: 'MAINTENANCE_CLEAR' } | { type: 'MAINTENANCE_REMOTE'; banner: MaintenanceBanner | null }
+  | { type: 'MAINTENANCE_REMOTE'; banner: MaintenanceBanner | null }
+  | { type: 'TENANTS_HYDRATE'; rows: HydratedTenantRow[] }
   | { type: 'TENANT_CREATE'; tenant: Tenant } | { type: 'TENANT_UPDATE'; id: string; patch: Partial<Tenant> } | { type: 'TENANT_SET_STATUS'; id: string; status: TenantStatus }
   | { type: 'TENANT_DELETE'; id: string } | { type: 'TENANT_SET_PLAN'; id: string; plan: PlanTier } | { type: 'TENANT_TOGGLE_MODULE'; id: string; module: ModuleKey }
   | { type: 'TENANT_TOGGLE_MODULE_REMOTE'; id: string; module: ModuleKey; enabled: boolean } | { type: 'TIER_CONFIG_UPDATE'; index: number; patch: Partial<TierConfig> }
@@ -258,7 +272,7 @@ const initialState: State = {
   smsPushVersion: '2.4.0', tierConfigs: DEFAULT_TIER_CONFIGS.map((t) => ({ ...t })),
   audit: buildAuditLog(tenantsWithClones), invoices: buildInvoices(tenantsWithClones), backups: buildBackups(tenantsWithClones),
   internalUsers: buildInternalUsers(), systemRoles: buildSystemRoles(), errorLogs: buildErrorLogs(),
-  maintenance: readPersistedBanner() as MaintenanceBanner | null,
+  maintenance: null, // populated by MaintenanceBanner's poll against the real backend
   impersonation: { active: false, tenantId: null, startedAt: null },
   globalMfaEnforced: true, globalGuardrails: { workspaceFrozen: false, maxSubfolderDepth: 4, maxUploadSizeMb: 50 },
   smsSnapshots: buildSmsSnapshots(tenantsWithClones), toasts: [],
@@ -283,9 +297,45 @@ function reducer(state: State, action: Action): State {
     case 'TOAST_ADD': return { ...state, toasts: [...state.toasts, action.toast] };
     case 'TOAST_DISMISS': return { ...state, toasts: state.toasts.filter((t) => t.id !== action.id) };
     case 'THEME_SET': return { ...state, theme: action.theme };
-    case 'MAINTENANCE_PUBLISH': { const next = pushAudit(state, { category: 'system', action: 'Maintenance banner published', target: 'platform', companyId: null, ip: '10.42.1.8', scope: 'system', severity: 'info' }); publishBanner(action.banner); return { ...next, maintenance: action.banner }; }
-    case 'MAINTENANCE_CLEAR': { const next = pushAudit(state, { category: 'system', action: 'Maintenance banner cleared', target: 'platform', companyId: null, ip: '10.42.1.8', scope: 'system', severity: 'info' }); clearBanner(); return { ...next, maintenance: null }; }
     case 'MAINTENANCE_REMOTE': return { ...state, maintenance: action.banner };
+    case 'TENANTS_HYDRATE': {
+      const existingIds = new Set(state.tenants.map((t) => t.id));
+      const merged = state.tenants.map((t) => {
+        const row = action.rows.find((r) => r.id === t.id);
+        if (!row) return t;
+        return {
+          ...t,
+          tenantNo: row.tenant_no,
+          company: row.company, contactEmail: row.contact_email,
+          plan: row.plan as PlanTier, status: row.status as TenantStatus, region: row.region,
+          mfaEnforced: row.mfa_enforced, modules: row.modules as ModuleKey[],
+          monthlyRevenue: Number(row.monthly_revenue), createdAt: row.created_at, contractExpires: row.contract_expires,
+          vessels: { used: row.vesselsUsed, max: row.vessels_max },
+          seats: { used: row.seatsUsed, max: row.seats_max },
+          storageGb: { used: bytesToGb(row.storage_bytes_used), max: row.storage_gb_max },
+        };
+      });
+      const newOnes: Tenant[] = action.rows.filter((r) => !existingIds.has(r.id)).map((row) => ({
+        id: row.id, tenantNo: row.tenant_no, company: row.company, contactEmail: row.contact_email,
+        companyEmail: '', companyMailPassword: '',
+        plan: row.plan as PlanTier, status: row.status as TenantStatus,
+        seats: { used: row.seatsUsed, max: row.seats_max },
+        vessels: { used: row.vesselsUsed, max: row.vessels_max },
+        storageGb: { used: bytesToGb(row.storage_bytes_used), max: row.storage_gb_max },
+        modules: row.modules as ModuleKey[], mfaEnforced: row.mfa_enforced,
+        createdAt: row.created_at, contractExpires: row.contract_expires,
+        monthlyRevenue: Number(row.monthly_revenue), region: row.region,
+        docTrees: ['sms', 'fleet_circulars', 'flag_state'] as DocTreeKind[],
+        docClones: {
+          sms: cloneDocTree(state.masterDocTrees.sms, true),
+          fleet_circulars: cloneDocTree(state.masterDocTrees.fleet_circulars, true),
+          flag_state: cloneDocTree(state.masterDocTrees.flag_state, true),
+        },
+        guardrails: { workspaceFrozen: false, maxSubfolderDepth: 3, maxUploadSizeMb: 25 },
+        demoTenantId: null,
+      }));
+      return { ...state, tenants: [...merged, ...newOnes] };
+    }
     case 'TENANT_CREATE': { const next = pushAudit(state, { category: 'tenant', action: `Tenant provisioned: ${action.tenant.company}`, target: action.tenant.company, companyId: action.tenant.id, ip: '10.42.1.8', scope: 'tenant', severity: 'info' }); return { ...next, tenants: [action.tenant, ...state.tenants] }; }
     case 'TENANT_UPDATE': { const tenant = state.tenants.find((t) => t.id === action.id); const next = pushAudit(state, { category: 'tenant', action: `Tenant edited: ${tenant?.company ?? action.id}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: 'info' }); return { ...next, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, ...action.patch } : t)) }; }
     case 'TENANT_SET_STATUS': { const tenant = state.tenants.find((t) => t.id === action.id); const next = pushAudit(state, { category: 'tenant', action: `Tenant ${action.status}: ${tenant?.company ?? action.id}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: action.status === 'suspended' ? 'warning' : 'info' }); return { ...next, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, status: action.status } : t)) }; }
@@ -339,9 +389,7 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       if (evt.type === 'AUDIT_LOGGED') {
         const p = evt.payload as { actorEmail: string; category: string; action: string; target?: string; severity?: 'info' | 'warning' | 'critical'; location?: string };
         dispatch({ type: 'AUDIT_ADD', event: { id: uid('evt'), ts: new Date().toISOString(), actor: p.actorEmail, category: (p.category as AuditCategory) ?? 'system', action: p.action, target: p.target ?? '', companyId: evt.tenantId, ip: 'remote', scope: p.location ?? 'tenant', severity: p.severity ?? 'info' } });
-      } else if (evt.type === 'BANNER_PUBLISHED') { dispatch({ type: 'MAINTENANCE_REMOTE', banner: evt.payload as MaintenanceBanner }); }
-      else if (evt.type === 'BANNER_CLEARED') { dispatch({ type: 'MAINTENANCE_REMOTE', banner: null }); }
-      else if (evt.type === 'FEATURE_FLAGS_CHANGED' && evt.tenantId) {
+      } else if (evt.type === 'FEATURE_FLAGS_CHANGED' && evt.tenantId) {
         const p = evt.payload as { featureKey?: string; enabled?: boolean };
         if (p.featureKey && typeof p.enabled === 'boolean') dispatch({ type: 'TENANT_TOGGLE_MODULE_REMOTE', id: evt.tenantId, module: p.featureKey as ModuleKey, enabled: p.enabled });
       }
