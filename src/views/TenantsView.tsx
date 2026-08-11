@@ -14,6 +14,8 @@ import {
   ExternalLink,
   Grid3x3,
   Loader2,
+  Eye,
+  EyeOff,
 } from "lucide-react";
 import { Card } from "../components/Card";
 import { Modal } from "../components/Modal";
@@ -62,7 +64,9 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
   const { tenants, dispatch, toast } = useStore();
   const { user } = useAuth();
   const [editing, setEditing] = useState<Tenant | null>(null);
-  const [editingAdminStatus, setEditingAdminStatus] = useState<{ mustChangePassword: boolean } | null>(null);
+  const [editingAdminStatus, setEditingAdminStatus] = useState<{
+    mustChangePassword: boolean;
+  } | null>(null);
   const [creating, setCreating] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState<Tenant | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null);
@@ -413,9 +417,15 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
                   // The tenant record itself has no company-admin email/password —
                   // those live on the separate tenant_users row. Pull the real
                   // email in so it actually shows instead of the blank default.
-                  const admin = getEffectiveDemoUsers(t.id).find((u) => u.role === "company_admin");
+                  const admin = getEffectiveDemoUsers(t.id).find(
+                    (u) => u.role === "company_admin",
+                  );
                   setEditing(admin ? { ...t, companyEmail: admin.email } : t);
-                  setEditingAdminStatus(admin ? { mustChangePassword: !!admin.must_change_password } : null);
+                  setEditingAdminStatus(
+                    admin
+                      ? { mustChangePassword: !!admin.must_change_password }
+                      : null,
+                  );
                 }}
                 disabled={!caps.tenantEdit}
                 className="rounded p-1 text-ink-400 hover:bg-ink-100 hover:text-ink-700 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-ink-700 dark:hover:text-ink-200"
@@ -504,7 +514,7 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
         <button
           onClick={() => setCreating(true)}
           disabled={!caps.tenantProvision}
-          className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+          className="btn-primary disabled:cursor-not-allowed disabled:opacity-50 flex justify-center items-center gap-1 p-1 rounded-md"
         >
           <Plus className="h-4 w-4" /> Provision Tenant
         </button>
@@ -732,6 +742,8 @@ function TenantFormModal({
   onClose: () => void;
   onSave: (t: Tenant) => void;
 }) {
+  const [showPassword, setShowPassword] = useState(false);
+
   const [form, setForm] = useState<Tenant>(
     tenant ?? {
       id: "",
@@ -861,16 +873,38 @@ function TenantFormModal({
         ) : (
           <div>
             <label className="label">Password</label>
-            <input
-              className="input"
-              type="password"
-              value={form.companyMailPassword}
-              onChange={(e) =>
-                setForm({ ...form, companyMailPassword: e.target.value })
-              }
-              placeholder="Please set a secure password"
-              minLength={6}
-            />
+
+            <div className="relative">
+              <input
+                className="input pr-10"
+                type={showPassword ? "text" : "password"}
+                value={form.companyMailPassword}
+                onChange={(e) =>
+                  setForm((f) => ({
+                    ...f,
+                    companyMailPassword: e.target.value,
+                  }))
+                }
+                placeholder="Please set a secure password"
+                autoComplete="new-password"
+                minLength={6}
+              />
+
+              <button
+                type="button"
+                onClick={() => setShowPassword((visible) => !visible)}
+                className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-ink-400 hover:text-ink-700 dark:hover:text-ink-200"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                title={showPassword ? "Hide password" : "Show password"}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+
             <p className="mt-1 text-[11px] text-ink-400">
               Minimum 6 characters. Used to log in as this company's admin.
             </p>

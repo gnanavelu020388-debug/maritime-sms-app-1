@@ -1,13 +1,36 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
-import type { Session, User, PlatformRole, InternalRole, TenantRow, TenantUserRow, ActiveAssignment } from './supabase';
-import { clearFeatureFlagCache } from './featureFlags';
-import { registerSessionToken, clearSessionToken } from './sessionSecurity';
-import { DEFAULT_RANK_PERMISSIONS, type RankPermissionMap } from './rankPermissions';
-import { getEffectiveDemoUsers, getEffectiveDemoAssignments, getEffectiveDemoVessels, getDemoTenant, getEffectiveDemoTenants } from './demoData';
-import * as api from './api';
-import { initializeDataCache, isCacheInitialized } from './dataCache';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  type ReactNode,
+} from "react";
+import type {
+  Session,
+  User,
+  PlatformRole,
+  InternalRole,
+  TenantRow,
+  TenantUserRow,
+  ActiveAssignment,
+} from "./supabase";
+import { clearFeatureFlagCache } from "./featureFlags";
+import { registerSessionToken, clearSessionToken } from "./sessionSecurity";
+import {
+  DEFAULT_RANK_PERMISSIONS,
+  type RankPermissionMap,
+} from "./rankPermissions";
+import {
+  getEffectiveDemoUsers,
+  getEffectiveDemoAssignments,
+  getEffectiveDemoVessels,
+  getDemoTenant,
+  getEffectiveDemoTenants,
+} from "./demoData";
+import * as api from "./api";
+import { initializeDataCache, isCacheInitialized } from "./dataCache";
 
-export type { Session, User } from './supabase';
+export type { Session, User } from "./supabase";
 
 export interface AuthState {
   user: User | null;
@@ -27,8 +50,16 @@ export interface AuthState {
 }
 
 export interface AuthContextValue extends AuthState {
-  signIn: (email: string, password: string) => Promise<{ error: string | null }>;
-  signUp: (email: string, password: string, name: string, asSuperAdmin: boolean) => Promise<{ error: string | null }>;
+  signIn: (
+    email: string,
+    password: string,
+  ) => Promise<{ error: string | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    name: string,
+    asSuperAdmin: boolean,
+  ) => Promise<{ error: string | null }>;
   signOut: () => Promise<void>;
   refresh: () => Promise<void>;
   dismissSessionConflict: () => void;
@@ -40,8 +71,8 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 function buildUser(uid: string, email: string): User {
   return {
     id: uid,
-    aud: 'authenticated',
-    role: 'authenticated',
+    aud: "authenticated",
+    role: "authenticated",
     email,
     app_metadata: {},
     user_metadata: {},
@@ -53,21 +84,33 @@ function buildUser(uid: string, email: string): User {
 function buildSession(user: User, token: string): Session {
   return {
     access_token: token,
-    refresh_token: '',
+    refresh_token: "",
     expires_in: 3600,
     expires_at: Math.floor(Date.now() / 1000) + 3600,
-    token_type: 'bearer',
+    token_type: "bearer",
     user,
   };
 }
 
-function resolveRoleAndTenant(uid: string, email: string): Pick<AuthState, 'role' | 'tenant' | 'tenantUser' | 'activeAssignment' | 'internalRole' | 'adminName' | 'rankPermissions'> {
+function resolveRoleAndTenant(
+  uid: string,
+  email: string,
+): Pick<
+  AuthState,
+  | "role"
+  | "tenant"
+  | "tenantUser"
+  | "activeAssignment"
+  | "internalRole"
+  | "adminName"
+  | "rankPermissions"
+> {
   // Super admin
-  if (email === 'admin@maritime-platform.io' || uid === 'local-sa') {
+  if (email === "admin@maritime-platform.io" || uid === "local-sa") {
     return {
-      role: 'super_admin',
-      internalRole: 'super_admin',
-      adminName: 'Platform Admin',
+      role: "super_admin",
+      internalRole: "super_admin",
+      adminName: "Platform Admin",
       tenant: null,
       tenantUser: null,
       activeAssignment: null,
@@ -83,20 +126,40 @@ function resolveRoleAndTenant(uid: string, email: string): Pick<AuthState, 'role
 
   const tenantUser = allUsers.find((u) => u.email === email);
   if (!tenantUser) {
-    return { role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, rankPermissions: null };
+    return {
+      role: null,
+      internalRole: null,
+      adminName: null,
+      tenant: null,
+      tenantUser: null,
+      activeAssignment: null,
+      rankPermissions: null,
+    };
   }
 
   const tenant = getDemoTenant(tenantUser.tenant_id);
-  if (tenant.status === 'archived') {
-    return { role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, rankPermissions: null };
+  if (tenant.status === "archived") {
+    return {
+      role: null,
+      internalRole: null,
+      adminName: null,
+      tenant: null,
+      tenantUser: null,
+      activeAssignment: null,
+      rankPermissions: null,
+    };
   }
 
   let activeAssignment: ActiveAssignment | null = null;
-  if (tenantUser.role === 'vessel') {
+  if (tenantUser.role === "vessel") {
     const assignments = getEffectiveDemoAssignments(tenantUser.tenant_id);
-    const active = assignments.find((a) => a.user_id === tenantUser.id && !a.signed_off_at);
+    const active = assignments.find(
+      (a) => a.user_id === tenantUser.id && !a.signed_off_at,
+    );
     if (active) {
-      const vessel = getEffectiveDemoVessels(tenantUser.tenant_id).find((v) => v.id === active.vessel_id);
+      const vessel = getEffectiveDemoVessels(tenantUser.tenant_id).find(
+        (v) => v.id === active.vessel_id,
+      );
       if (vessel) {
         activeAssignment = {
           assignment_id: active.id,
@@ -112,7 +175,8 @@ function resolveRoleAndTenant(uid: string, email: string): Pick<AuthState, 'role
   }
 
   const rankPermissions = DEFAULT_RANK_PERMISSIONS[tenantUser.rank] ?? null;
-  const adminName = tenantUser.rank === 'DPA' ? `${tenantUser.name} (DPA)` : tenantUser.name;
+  const adminName =
+    tenantUser.rank === "DPA" ? `${tenantUser.name} (DPA)` : tenantUser.name;
 
   return {
     role: tenantUser.role,
@@ -125,31 +189,91 @@ function resolveRoleAndTenant(uid: string, email: string): Pick<AuthState, 'role
   };
 }
 
-async function resolveFromApi(userObj: { id: string; email: string; role?: string; tenant_id?: string; rank?: string; name?: string }): Promise<Pick<AuthState, 'role' | 'tenant' | 'tenantUser' | 'activeAssignment' | 'internalRole' | 'adminName' | 'rankPermissions'>> {
+async function resolveFromApi(userObj: {
+  id: string;
+  email: string;
+  role?: string;
+  tenant_id?: string;
+  rank?: string;
+  name?: string;
+}): Promise<
+  Pick<
+    AuthState,
+    | "role"
+    | "tenant"
+    | "tenantUser"
+    | "activeAssignment"
+    | "internalRole"
+    | "adminName"
+    | "rankPermissions"
+  >
+> {
   // If server provided a role, prefer that and fetch tenant data when available
   try {
-    if (userObj.role === 'super_admin') {
-      return { role: 'super_admin', internalRole: 'super_admin', adminName: 'Platform Admin', tenant: null, tenantUser: null, activeAssignment: null, rankPermissions: null };
+    if (userObj.role === "super_admin") {
+      return {
+        role: "super_admin",
+        internalRole: "super_admin",
+        adminName: "Platform Admin",
+        tenant: null,
+        tenantUser: null,
+        activeAssignment: null,
+        rankPermissions: null,
+      };
     }
     if (userObj.tenant_id) {
       try {
         const tenant = await api.apiGetTenant(userObj.tenant_id);
-        const tenantUser = userObj ? { id: userObj.id, tenant_id: userObj.tenant_id, name: userObj.name || '', email: userObj.email, rank: userObj.rank || 'Crew', role: (userObj.role as any) || 'vessel' } as any : null;
+        const tenantUser = userObj
+          ? ({
+              id: userObj.id,
+              tenant_id: userObj.tenant_id,
+              name: userObj.name || "",
+              email: userObj.email,
+              rank: userObj.rank || "Crew",
+              role: (userObj.role as any) || "vessel",
+            } as any)
+          : null;
         let activeAssignment = null;
-        if (tenantUser && tenantUser.role === 'vessel') {
+        if (tenantUser && tenantUser.role === "vessel") {
           // attempt to locate an active assignment from demo fallback (best-effort)
           const assignments = getEffectiveDemoAssignments(tenantUser.tenant_id);
-          const active = assignments.find((a) => a.user_id === tenantUser.id && !a.signed_off_at);
+          const active = assignments.find(
+            (a) => a.user_id === tenantUser.id && !a.signed_off_at,
+          );
           if (active) {
-            const vessel = getEffectiveDemoVessels(tenantUser.tenant_id).find((v) => v.id === active.vessel_id);
+            const vessel = getEffectiveDemoVessels(tenantUser.tenant_id).find(
+              (v) => v.id === active.vessel_id,
+            );
             if (vessel) {
-              activeAssignment = { assignment_id: active.id, vessel_id: vessel.id, vessel_name: vessel.name, tenant_id: vessel.tenant_id, user_id: tenantUser.id, rank: tenantUser.rank, signed_on_at: active.signed_on_at };
+              activeAssignment = {
+                assignment_id: active.id,
+                vessel_id: vessel.id,
+                vessel_name: vessel.name,
+                tenant_id: vessel.tenant_id,
+                user_id: tenantUser.id,
+                rank: tenantUser.rank,
+                signed_on_at: active.signed_on_at,
+              };
             }
           }
         }
-        const rankPermissions = (tenantUser && (DEFAULT_RANK_PERMISSIONS as any)[tenantUser.rank]) ?? null;
-        const adminName = tenantUser && tenantUser.rank === 'DPA' ? `${tenantUser.name} (DPA)` : tenantUser?.name ?? null;
-        return { role: tenantUser?.role ?? null, internalRole: null, adminName, tenant: tenant as any, tenantUser: tenantUser as any, activeAssignment, rankPermissions };
+        const rankPermissions =
+          (tenantUser && (DEFAULT_RANK_PERMISSIONS as any)[tenantUser.rank]) ??
+          null;
+        const adminName =
+          tenantUser && tenantUser.rank === "DPA"
+            ? `${tenantUser.name} (DPA)`
+            : (tenantUser?.name ?? null);
+        return {
+          role: tenantUser?.role ?? null,
+          internalRole: null,
+          adminName,
+          tenant: tenant as any,
+          tenantUser: tenantUser as any,
+          activeAssignment,
+          rankPermissions,
+        };
       } catch {
         // fall through to demo resolution
       }
@@ -157,7 +281,15 @@ async function resolveFromApi(userObj: { id: string; email: string; role?: strin
   } catch {
     // ignore and fall back
   }
-  return { role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, rankPermissions: null };
+  return {
+    role: null,
+    internalRole: null,
+    adminName: null,
+    tenant: null,
+    tenantUser: null,
+    activeAssignment: null,
+    rankPermissions: null,
+  };
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
@@ -185,19 +317,31 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const handleAuthExpired = () => {
       clearFeatureFlagCache();
       setState({
-        user: null, session: null, role: null, internalRole: null, adminName: null,
-        tenant: null, tenantUser: null, activeAssignment: null, loading: false,
-        error: 'Your session has expired. Please sign in again.',
-        sessionToken: null, sessionConflict: false, rankPermissions: null, mustChangePassword: false,
+        user: null,
+        session: null,
+        role: null,
+        internalRole: null,
+        adminName: null,
+        tenant: null,
+        tenantUser: null,
+        activeAssignment: null,
+        loading: false,
+        error: "Your session has expired. Please sign in again.",
+        sessionToken: null,
+        sessionConflict: false,
+        rankPermissions: null,
+        mustChangePassword: false,
       });
     };
     (window as Record<string, unknown>).__mpcAuthExpired = handleAuthExpired;
-    return () => { delete (window as Record<string, unknown>).__mpcAuthExpired; };
+    return () => {
+      delete (window as Record<string, unknown>).__mpcAuthExpired;
+    };
   }, []);
 
   async function registerNewSessionToken(uid: string): Promise<string | null> {
-    let deviceInfo = 'Unknown browser';
-    if (typeof navigator !== 'undefined') {
+    let deviceInfo = "Unknown browser";
+    if (typeof navigator !== "undefined") {
       deviceInfo = navigator.userAgent.slice(0, 200);
     }
     return registerSessionToken(uid, deviceInfo);
@@ -213,9 +357,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // prefer server-provided role/tenant information when available
       const resolved = await resolveFromApi(res.user as any);
       const user = buildUser(res.user.id, res.user.email);
-      const session = buildSession(user, api.getToken() ?? '');
+      const session = buildSession(user, api.getToken() ?? "");
       const token = await registerNewSessionToken(res.user.id);
-      setState({ user, session, ...resolved, loading: false, error: null, sessionToken: token, sessionConflict: false, mustChangePassword: !!res.user.mustChangePassword });
+      setState({
+        user,
+        session,
+        ...resolved,
+        loading: false,
+        error: null,
+        sessionToken: token,
+        sessionConflict: false,
+        mustChangePassword: !!res.user.mustChangePassword,
+      });
     } catch {
       setState((s) => ({ ...s, loading: false }));
     }
@@ -225,13 +378,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     let mounted = true;
     const token = api.getToken();
     if (!token) {
-      // No stored token — still initialize the data cache
-      initializeDataCache().then(() => {
-        if (mounted) {
-          setState((s) => ({ ...s, loading: false }));
-        }
-      });
-      return () => { mounted = false; };
+      setState((s) => ({ ...s, loading: false }));
+      return () => {
+        mounted = false;
+      };
     }
     // Initialize data cache from backend, then verify token
     initializeDataCache().then(async () => {
@@ -243,19 +393,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           setState((s) => ({ ...s, loading: false }));
           return;
         }
-        const resolved = (await resolveFromApi(res.user as any)) ?? resolveRoleAndTenant(res.user.id, res.user.email);
+        const resolved =
+          (await resolveFromApi(res.user as any)) ??
+          resolveRoleAndTenant(res.user.id, res.user.email);
         const user = buildUser(res.user.id, res.user.email);
         const session = buildSession(user, token);
         const sessionToken = await registerNewSessionToken(res.user.id);
         if (mounted) {
-          setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false, mustChangePassword: !!res.user.mustChangePassword });
+          setState({
+            user,
+            session,
+            ...resolved,
+            loading: false,
+            error: null,
+            sessionToken,
+            sessionConflict: false,
+            mustChangePassword: !!res.user.mustChangePassword,
+          });
         }
       } catch {
         api.clearToken();
         if (mounted) setState((s) => ({ ...s, loading: false }));
       }
     });
-    return () => { mounted = false; };
+    return () => {
+      mounted = false;
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {
@@ -269,19 +432,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       // prefer API-resolved role/tenant
-      const resolved = await resolveFromApi(apiUser as any) || resolveRoleAndTenant(uid, email);
+      const resolved =
+        (await resolveFromApi(apiUser as any)) ||
+        resolveRoleAndTenant(uid, email);
       const user = buildUser(uid, email);
       const session = buildSession(user, token);
       const sessionToken = await registerNewSessionToken(uid);
-      setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false, mustChangePassword: !!apiUser.mustChangePassword });
+      setState({
+        user,
+        session,
+        ...resolved,
+        loading: false,
+        error: null,
+        sessionToken,
+        sessionConflict: false,
+        mustChangePassword: !!apiUser.mustChangePassword,
+      });
       return { error: null };
     } catch (err) {
-      return { error: (err as Error).message || 'Invalid email or password.' };
+      return { error: (err as Error).message || "Invalid email or password." };
     }
   };
 
-  const signUp = async (email: string, password: string, name: string, asSuperAdmin: boolean) => {
-    if (password.length < 6) return { error: 'Password must be at least 6 characters.' };
+  const signUp = async (
+    email: string,
+    password: string,
+    name: string,
+    asSuperAdmin: boolean,
+  ) => {
+    if (password.length < 6)
+      return { error: "Password must be at least 6 characters." };
     const result = await api.apiSignup(email, password, name, asSuperAdmin);
     if (result.error) return { error: result.error };
     if (asSuperAdmin && result.token && result.user) {
@@ -293,7 +473,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const user = buildUser(uid, email);
       const session = buildSession(user, result.token);
       const sessionToken = await registerNewSessionToken(uid);
-      setState({ user, session, ...resolved, loading: false, error: null, sessionToken, sessionConflict: false, mustChangePassword: false });
+      setState({
+        user,
+        session,
+        ...resolved,
+        loading: false,
+        error: null,
+        sessionToken,
+        sessionConflict: false,
+        mustChangePassword: false,
+      });
     }
     return { error: null };
   };
@@ -304,7 +493,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await clearSessionToken(state.user.id);
     }
     api.clearToken();
-    setState({ user: null, session: null, role: null, internalRole: null, adminName: null, tenant: null, tenantUser: null, activeAssignment: null, loading: false, error: null, sessionToken: null, sessionConflict: false, rankPermissions: null, mustChangePassword: false });
+    setState({
+      user: null,
+      session: null,
+      role: null,
+      internalRole: null,
+      adminName: null,
+      tenant: null,
+      tenantUser: null,
+      activeAssignment: null,
+      loading: false,
+      error: null,
+      sessionToken: null,
+      sessionConflict: false,
+      rankPermissions: null,
+      mustChangePassword: false,
+    });
   };
 
   const dismissSessionConflict = () => {
@@ -316,7 +520,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   return (
-    <AuthContext.Provider value={{ ...state, signIn, signUp, signOut, refresh, dismissSessionConflict, clearMustChangePassword }}>
+    <AuthContext.Provider
+      value={{
+        ...state,
+        signIn,
+        signUp,
+        signOut,
+        refresh,
+        dismissSessionConflict,
+        clearMustChangePassword,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   );
@@ -324,6 +538,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
 export function useAuth(): AuthContextValue {
   const ctx = useContext(AuthContext);
-  if (!ctx) throw new Error('useAuth must be used within AuthProvider');
+  if (!ctx) throw new Error("useAuth must be used within AuthProvider");
   return ctx;
 }

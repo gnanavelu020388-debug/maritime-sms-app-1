@@ -64,12 +64,21 @@ async function request<T>(
 
   if (res.status === 401) {
     clearToken();
-    // Clearing the token alone leaves the app's auth state stale — the UI
-    // still looks logged in while every subsequent call keeps 401ing. Let
-    // AuthProvider know so it can drop back to the login screen immediately.
-    const onExpired = (window as Record<string, unknown>).__mpcAuthExpired as (() => void) | undefined;
-    onExpired?.();
-    throw new Error('Your session has expired. Please sign in again.');
+
+    // Only treat 401 as an expired session when the request
+    // actually started with an authenticated session.
+    if (token) {
+      const onExpired = (window as Record<string, unknown>)
+        .__mpcAuthExpired as (() => void) | undefined;
+
+      onExpired?.();
+    }
+
+    throw new Error(
+      token
+        ? 'Your session has expired. Please sign in again.'
+        : 'Authentication required.'
+    );
   }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ error: 'Request failed' }));
