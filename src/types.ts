@@ -103,19 +103,6 @@ export interface SshNode {
   children: SshNode[];
 }
 
-export type SatelliteLink = 'Starlink' | 'VSAT' | 'FBB';
-
-export interface SatellitePayload {
-  id: string;
-  vessel: string;
-  tenantId: string;
-  sizeKb: number;
-  node: SatelliteLink;
-  status: 'syncing' | 'queued' | 'processed' | 'failed';
-  progress: number;
-  receivedAt: string;
-}
-
 export type AuditCategory =
   | 'auth'
   | 'impersonation'

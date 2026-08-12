@@ -307,6 +307,54 @@ export async function apiGetSignedUrl(filePath: string): Promise<string> {
   return res.url;
 }
 
+// ── Vessel Sync State (unified sync engine) ────────────────
+
+export async function apiGetVesselSyncStates<T>(): Promise<T[]> {
+  return request<T[]>('/vessel-sync');
+}
+
+export interface PagedResult<T> {
+  rows: T[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
+
+export async function apiGetVesselSyncLog<T>(page: number, pageSize: number, search: string, tenantId?: string): Promise<PagedResult<T>> {
+  const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+  if (search) qs.set('search', search);
+  if (tenantId) qs.set('tenantId', tenantId);
+  return request<PagedResult<T>>(`/vessel-sync/log?${qs.toString()}`);
+}
+
+export async function apiEnqueueSyncEntry(data: {
+  tenant_id: string;
+  vessel_id: string;
+  module_key: string;
+  entity_type: string;
+  entity_id: string;
+  payload: Record<string, unknown>;
+  operation?: 'upsert' | 'delete' | 'batch_upsert';
+  priority?: number;
+}): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>('/vessel-sync/outbox', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiCheckInVessel(
+  vesselId: string,
+  tenantId: string,
+  syncMethod: 'manual' | 'automatic' = 'manual',
+): Promise<{ synced: number; failed: number }> {
+  return request<{ synced: number; failed: number }>(`/vessel-sync/${vesselId}/checkin`, {
+    method: 'POST',
+    body: JSON.stringify({ tenant_id: tenantId, sync_method: syncMethod }),
+  });
+}
+
+export async function apiGetVesselSyncStateOne<T>(vesselId: string, tenantId: string): Promise<T | null> {
+  return request<T | null>(`/vessel-sync/${vesselId}?tenantId=${encodeURIComponent(tenantId)}`);
+}
+
 // ── Sync Config ───────────────────────────────────────────
 
 export async function apiGetSyncConfig<T>(tenantId: string): Promise<T> {

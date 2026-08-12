@@ -12,6 +12,7 @@ import { loadProfiles, getProfileForVessel, type SmsProfileWithVessels, type Sms
 import { useFleetScope } from '../lib/useFleetScope';
 import { getLocalSmsVersion } from '../lib/localVesselDb';
 import { onSyncEvent, postSyncEvent } from '../lib/syncChannel';
+import { enqueueSyncEntry } from '../lib/syncService';
 import { Modal } from '../components/Modal';
 import { Badge } from '../components/Badge';
 
@@ -228,6 +229,7 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
     const content = (draftContent.trim() || editingDoc.content) ?? '';
     const contentKind = editingDoc.content_kind ?? 'rich_text';
     demoResubmitSmsDoc(tenantId, editingDoc.id, content, contentKind, authorName, authorRole, authorOrigin, contentKind === 'pdf' ? resubmitPdfSize : null);
+    if (vesselId) enqueueSyncEntry(tenantId, vesselId, 'sms_documentation', 'document', editingDoc.id, { label: editingDoc.label, action: 'resubmitted' });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId, payload: { action: 'resubmitted', docId: editingDoc.id, label: editingDoc.label } });
     setSubmittingDraft(false);
     setEditingDoc(null);
@@ -260,6 +262,7 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
     const content = (draftContent.trim() || editingDoc.content) ?? '';
     const contentKind = editingDoc.content_kind ?? 'rich_text';
     demoUpdateSmsDocContent(tenantId, editingDoc.id, content, contentKind, authorName, authorRole, authorOrigin, contentKind === 'pdf' ? resubmitPdfSize : null);
+    if (vesselId) enqueueSyncEntry(tenantId, vesselId, 'sms_documentation', 'document', editingDoc.id, { label: editingDoc.label, action: 'draft_revision' });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId, payload: { action: 'draft_revision', docId: editingDoc.id, label: editingDoc.label } });
     setSubmittingDraft(false);
     setEditingDoc(null);
@@ -290,7 +293,7 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
 
   async function handleCreateDocument(label: string, contentKind: 'rich_text' | 'pdf', content: string) {
     if (!addDocFor || !label.trim()) return;
-    demoCreateSmsDoc(tenantId, {
+    const createdId = await demoCreateSmsDoc(tenantId, {
       parent_id: addDocFor.parentId,
       tree_kind: activeTabKey,
       label: label.trim(),
@@ -303,13 +306,8 @@ export function SmsLibrarySplitView({ tenantId, vesselId, readOnly = true, enabl
       author_origin: authorOrigin,
     });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId, payload: { action: 'document_created', label } });
-    if (contentKind === 'pdf' && addDocPdfPreviewUrl) {
-      // Store the blob URL so the preview modal can render the PDF inline for pending docs
-      // The new doc id is the last override or the returned id; for demo we search by label
-      const allDocs = getEffectiveDemoSmsDocs(tenantId, activeTabKey);
-      const created = allDocs.find((d) => d.label === label.trim() && d.content_kind === 'pdf');
-      if (created) pdfBlobUrls.set(created.id, addDocPdfPreviewUrl);
-    }
+    if (contentKind === 'pdf' && addDocPdfPreviewUrl) pdfBlobUrls.set(createdId, addDocPdfPreviewUrl);
+    if (vesselId) enqueueSyncEntry(tenantId, vesselId, 'sms_documentation', 'document', createdId, { label, action: 'document_created' });
     if (addDocFor.parentId) setExpanded((s) => new Set(s).add(addDocFor.parentId!));
     setAddDocFor(null);
     setSyncTick((t) => t + 1);

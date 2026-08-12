@@ -123,7 +123,7 @@ async function seed() {
   for (const u of USERS) {
     await pool.query('DELETE FROM tenant_users WHERE id = ?', [u.id]);
     await pool.query(
-      'INSERT INTO tenant_users (id, tenant_id, name, email, password_hash, rank, role, nationality, status, employee_id, seaman_book_number, fleet_scope, assigned_vessel_ids, assigned_fleet_profile_ids) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      'INSERT INTO tenant_users (id, tenant_id, name, email, password_hash, `rank`, role, nationality, status, employee_id, seaman_book_number, fleet_scope, assigned_vessel_ids, assigned_fleet_profile_ids) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [u.id, u.tenant_id, u.name, u.email, DEMO_PASSWORD_HASH, u.rank, u.role, u.nationality, u.status, u.employee_id, u.seaman_book_number, u.fleet_scope, JSON.stringify(u.assigned_vessel_ids), JSON.stringify(u.assigned_fleet_profile_ids)],
     );
   }
@@ -132,7 +132,7 @@ async function seed() {
   for (const a of ASSIGNMENTS) {
     await pool.query('DELETE FROM crew_assignments WHERE id = ?', [a.id]);
     await pool.query(
-      'INSERT INTO crew_assignments (id, vessel_id, tenant_id, user_id, rank, signed_on_at) VALUES (?,?,?,?,?,?)',
+      'INSERT INTO crew_assignments (id, vessel_id, tenant_id, user_id, `rank`, signed_on_at) VALUES (?,?,?,?,?,?)',
       [a.id, a.vessel_id, a.tenant_id, a.user_id, a.rank, a.signed_on_at],
     );
   }
@@ -140,11 +140,11 @@ async function seed() {
   // Feature flags — enable sms_documentation for all tenants
   for (const t of TENANTS) {
     await pool.query('DELETE FROM tenant_feature_flags WHERE tenant_id = ? AND feature_key = ?', [t.id, 'sms_documentation']);
-    await pool.query('INSERT INTO tenant_feature_flags (id, tenant_id, feature_key, enabled) VALUES (?,?,?,TRUE)', [uuidv4(), t.id, 'sms_documentation']);
+    await pool.query('INSERT INTO tenant_feature_flags (id, tenant_id, feature_key, enabled, custom_config) VALUES (?,?,?,TRUE,?)', [uuidv4(), t.id, 'sms_documentation', '{}']);
     for (const mod of t.modules) {
       if (mod === 'sms_documentation') continue;
       await pool.query('DELETE FROM tenant_feature_flags WHERE tenant_id = ? AND feature_key = ?', [t.id, mod]);
-      await pool.query('INSERT INTO tenant_feature_flags (id, tenant_id, feature_key, enabled) VALUES (?,?,?,TRUE)', [uuidv4(), t.id, mod]);
+      await pool.query('INSERT INTO tenant_feature_flags (id, tenant_id, feature_key, enabled, custom_config) VALUES (?,?,?,TRUE,?)', [uuidv4(), t.id, mod, '{}']);
     }
     // Sync config
     await pool.query('DELETE FROM tenant_sync_config WHERE tenant_id = ?', [t.id]);

@@ -7,7 +7,6 @@ import type {
   InternalUser,
   Invoice,
   PlanTier,
-  SatellitePayload,
   SmsSnapshot,
   SshNode,
   SshRole,
@@ -173,28 +172,6 @@ export function buildShips() {
     imo: `IMO ${9000000 + i * 137 + 421}`,
     link: (['Starlink', 'VSAT', 'VSAT', 'FBB'] as const)[i % 4],
   }));
-}
-
-export function buildSatellitePayloads(): SatellitePayload[] {
-  const out: SatellitePayload[] = [];
-  const statuses: SatellitePayload['status'][] = ['syncing', 'queued', 'processed', 'failed'];
-  const ships = SHIP_NAMES;
-  for (let i = 0; i < 14; i++) {
-    const ship = pick(ships, i);
-    const status = pick(statuses, i * 3 + 1);
-    const size = 12 + ((i * 37) % 480);
-    out.push({
-      id: `${ship.split(' ')[0]}-LOG-${1000 + i}.json`,
-      vessel: ship,
-      tenantId: `T-${1000 + (i % 4)}`,
-      sizeKb: size,
-      node: pick(['Starlink', 'VSAT', 'FBB'] as const, i),
-      status,
-      progress: status === 'syncing' ? 20 + ((i * 13) % 70) : status === 'processed' ? 100 : 0,
-      receivedAt: isoMinutesAgo(i * 4 + 2),
-    });
-  }
-  return out;
 }
 
 // ---- Master document trees (flexible template model) ----

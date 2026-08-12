@@ -18,6 +18,7 @@ import fileRoutes from './routes/files.js';
 import syncConfigRoutes from './routes/syncConfig.js';
 import sessionRoutes from './routes/sessions.js';
 import bannerRoutes from './routes/banner.js';
+import vesselSyncRoutes from './routes/vesselSync.js';
 import pool from './db.js';
 
 dotenv.config();
@@ -51,6 +52,7 @@ app.use('/api/files', fileRoutes);
 app.use('/api/sync-config', syncConfigRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/banner', bannerRoutes);
+app.use('/api/vessel-sync', vesselSyncRoutes);
 
 // ── Health check ────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

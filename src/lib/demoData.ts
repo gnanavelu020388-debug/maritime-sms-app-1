@@ -237,7 +237,7 @@ export function getEffectiveDemoVessels(tenantId: string): VesselRow[] {
 
 export async function demoCreateVessel(
   tenantId: string,
-  data: { name: string; imo_number: string; call_sign: string | null; flag_state: string | null; port_of_registry: string | null; gross_tonnage: number | null; kw_power: number | null; vessel_type: string | null; class_society: string | null },
+  data: { name: string; imo_number: string; call_sign: string | null; flag_state: string | null; port_of_registry: string | null; gross_tonnage: number | null; kw_power: number | null; vessel_type: string | null; class_society: string | null; satellite_provider?: string | null },
   smsVersion: string,
 ): Promise<string> {
   const v = await api.apiCreateVessel<VesselRow>(tenantId, {
@@ -245,6 +245,7 @@ export async function demoCreateVessel(
     flag_state: data.flag_state, port_of_registry: data.port_of_registry,
     gross_tonnage: data.gross_tonnage, kw_power: data.kw_power,
     vessel_type: data.vessel_type, class_society: data.class_society,
+    satellite_provider: data.satellite_provider ?? null,
   });
   await dataCache.refreshTenantData(tenantId);
   return v.id;

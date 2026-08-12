@@ -12,7 +12,6 @@ import type {
   MaintenanceBanner,
   ModuleKey,
   PlanTier,
-  SatellitePayload,
   SmsSnapshot,
   SshRole,
   Tenant,
@@ -33,8 +32,8 @@ export interface HydratedTenantRow extends TenantRow {
 }
 
 // ── In-memory builders for Super Admin dashboard state ──────────────
-// These power the satellite queue simulation, audit trail, invoices,
-// backups, internal staff, and SMS snapshots shown in the Super Admin UI.
+// These power the audit trail, invoices, backups, internal staff, and
+// SMS snapshots shown in the Super Admin UI.
 // Tenant data itself comes from the API via dataCache.
 
 const TENANT_SEED: Array<Partial<Tenant> & { company: string; region: string }> = [
@@ -68,23 +67,10 @@ function bytesToGb(bytes: number | undefined): number {
   return Math.round(((bytes ?? 0) / (1024 ** 3)) * 100) / 100;
 }
 
-const SHIP_NAMES = ['VALLE STAR', 'MAERSK VOYAGER', 'PACIFIC HORIZON', 'NORDIC BREEZE', 'CRESCENT TRADER', 'ATLAS EXPLORER', 'OCEAN PRIDE', 'STELLA SPIRIT'];
-
 function pick<T>(arr: T[], i: number): T { return arr[i % arr.length]; }
 function isoDaysAgo(days: number, hour = 10): string { const d = new Date(); d.setDate(d.getDate() - days); d.setHours(hour, Math.floor(Math.random() * 60), 0, 0); return d.toISOString(); }
 function isoHoursAgo(hours: number): string { return new Date(Date.now() - hours * 3600000).toISOString(); }
 function isoMinutesAgo(mins: number): string { return new Date(Date.now() - mins * 60000).toISOString(); }
-
-function buildSatellitePayloads(): SatellitePayload[] {
-  const out: SatellitePayload[] = [];
-  const statuses: SatellitePayload['status'][] = ['syncing', 'queued', 'processed', 'failed'];
-  for (let i = 0; i < 14; i++) {
-    const ship = pick(SHIP_NAMES, i);
-    const status = pick(statuses, i * 3 + 1);
-    out.push({ id: `${ship.split(' ')[0]}-LOG-${1000 + i}.json`, vessel: ship, tenantId: `T-${1000 + (i % 4)}`, sizeKb: 12 + ((i * 37) % 480), node: pick(['Starlink', 'VSAT', 'FBB'] as const, i), status, progress: status === 'syncing' ? 20 + ((i * 13) % 70) : status === 'processed' ? 100 : 0, receivedAt: isoMinutesAgo(i * 4 + 2) });
-  }
-  return out;
-}
 
 let docSeq = 0;
 function doc(label: string, parentId: string | null, kind: 'folder' | 'document', contentKind?: 'rich_text' | 'pdf', content?: string): DocumentNode {
@@ -225,7 +211,6 @@ interface Toast { id: string; title: string; message?: string; tone: 'info' | 's
 
 interface State {
   tenants: Tenant[];
-  satellite: SatellitePayload[];
   masterDocTrees: Record<DocTreeKind, DocumentNode>;
   smsPushVersion: string;
   tierConfigs: TierConfig[];
@@ -251,7 +236,7 @@ type Action =
   | { type: 'TENANT_CREATE'; tenant: Tenant } | { type: 'TENANT_UPDATE'; id: string; patch: Partial<Tenant> } | { type: 'TENANT_SET_STATUS'; id: string; status: TenantStatus }
   | { type: 'TENANT_DELETE'; id: string } | { type: 'TENANT_SET_PLAN'; id: string; plan: PlanTier } | { type: 'TENANT_TOGGLE_MODULE'; id: string; module: ModuleKey }
   | { type: 'TENANT_TOGGLE_MODULE_REMOTE'; id: string; module: ModuleKey; enabled: boolean } | { type: 'TIER_CONFIG_UPDATE'; index: number; patch: Partial<TierConfig> }
-  | { type: 'SATELLITE_TICK'; payloads: SatellitePayload[] } | { type: 'SMS_PUSH'; version: string; targets: string[] }
+  | { type: 'SMS_PUSH'; version: string; targets: string[] }
   | { type: 'DOC_ADD'; tree: DocTreeKind; parentId: string; node: DocumentNode } | { type: 'DOC_RENAME'; tree: DocTreeKind; nodeId: string; label: string }
   | { type: 'DOC_DELETE'; tree: DocTreeKind; nodeId: string } | { type: 'DOC_UPDATE_CONTENT'; tree: DocTreeKind; nodeId: string; content: string; contentKind: 'rich_text' | 'pdf' }
   | { type: 'BACKUP_ADD'; snapshot: BackupSnapshot } | { type: 'BACKUP_RESTORE'; snapshotId: string } | { type: 'BACKUP_DELETE'; snapshotId: string }
@@ -267,7 +252,6 @@ const masterDocTrees = { sms: buildMasterDocTree('sms'), fleet_circulars: buildM
 const tenantsWithClones = initialTenants.map((t) => ({ ...t, docClones: { sms: cloneDocTree(masterDocTrees.sms, true), fleet_circulars: cloneDocTree(masterDocTrees.fleet_circulars, true), flag_state: cloneDocTree(masterDocTrees.flag_state, true) } } as Tenant));
 const initialState: State = {
   tenants: tenantsWithClones,
-  satellite: buildSatellitePayloads(),
   masterDocTrees,
   smsPushVersion: '2.4.0', tierConfigs: DEFAULT_TIER_CONFIGS.map((t) => ({ ...t })),
   audit: buildAuditLog(tenantsWithClones), invoices: buildInvoices(tenantsWithClones), backups: buildBackups(tenantsWithClones),
@@ -344,7 +328,6 @@ function reducer(state: State, action: Action): State {
     case 'TENANT_TOGGLE_MODULE': { const tenant = state.tenants.find((t) => t.id === action.id); const has = tenant?.modules.includes(action.module); const next = pushAudit(state, { category: 'tenant', action: `Module ${has ? 'revoked' : 'granted'}: ${action.module}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: 'info' }); return { ...next, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, modules: has ? t.modules.filter((m) => m !== action.module) : [...t.modules, action.module] } : t) }; }
     case 'TENANT_TOGGLE_MODULE_REMOTE': return { ...state, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, modules: action.enabled ? t.modules.includes(action.module) ? t.modules : [...t.modules, action.module] : t.modules.filter((m) => m !== action.module) } : t) };
     case 'TIER_CONFIG_UPDATE': { const tierConfigs = state.tierConfigs.map((t, i) => (i === action.index ? { ...t, ...action.patch } : t)); const tenants = applyTierLimits(state.tenants, tierConfigs); const changedTier = tierConfigs[action.index]; const next = pushAudit(state, { category: 'billing', action: `Tier config updated: ${changedTier.name}`, target: changedTier.name, companyId: null, ip: '10.42.1.8', scope: 'billing', severity: 'info' }); return { ...next, tierConfigs, tenants }; }
-    case 'SATELLITE_TICK': return { ...state, satellite: action.payloads };
     case 'SMS_PUSH': { const targets = action.targets; const tenants = state.tenants.map((t) => targets.includes(t.id) ? { ...t, docTrees: ['sms', 'fleet_circulars', 'flag_state'] as DocTreeKind[], docClones: { sms: cloneDocTree(state.masterDocTrees.sms, true), fleet_circulars: cloneDocTree(state.masterDocTrees.fleet_circulars, true), flag_state: cloneDocTree(state.masterDocTrees.flag_state, true) } } : t); const next = pushAudit(state, { category: 'sms', action: `Flexible template push ${action.version} cloned to ${targets.length} tenant(s)`, target: 'platform', companyId: null, ip: '10.42.1.8', scope: 'sms', severity: 'warning' }); return { ...next, tenants, smsPushVersion: action.version }; }
     case 'DOC_ADD': { const root = state.masterDocTrees[action.tree]; const updated = addDocChild(structuredClone(root), action.parentId, action.node); const next = pushAudit(state, { category: 'sms', action: `Document node added: ${action.node.label} (${action.tree})`, target: action.tree, companyId: null, ip: '10.42.1.8', scope: 'sms', severity: 'info' }); return { ...next, masterDocTrees: { ...state.masterDocTrees, [action.tree]: updated } }; }
     case 'DOC_RENAME': { const root = state.masterDocTrees[action.tree]; const updated = renameDocNode(structuredClone(root), action.nodeId, action.label); return { ...state, masterDocTrees: { ...state.masterDocTrees, [action.tree]: updated } }; }
@@ -396,17 +379,6 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     });
     return off;
   }, []);
-
-  useEffect(() => {
-    const handle = setInterval(() => {
-      dispatch({ type: 'SATELLITE_TICK', payloads: state.satellite.map((p) => {
-        if (p.status === 'syncing') { const progress = Math.min(100, p.progress + 6 + Math.random() * 10); return progress >= 100 ? { ...p, progress: 100, status: 'processed' as const } : { ...p, progress }; }
-        if (p.status === 'queued' && Math.random() > 0.7) return { ...p, status: 'syncing' as const, progress: 5 };
-        return p;
-      }) });
-    }, 2200);
-    return () => clearInterval(handle);
-  }, [state.satellite]);
 
   const value = useMemo<StoreCtx>(() => ({
     ...state, dispatch,

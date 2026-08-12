@@ -12,6 +12,7 @@ import {
   type PendingUpdate,
 } from './localVesselDb';
 import type { SyncModuleKey } from './syncTypes';
+import * as api from './api';
 
 /**
  * Unified Satellite Sync Service — vessel-side background worker.
@@ -22,6 +23,9 @@ import type { SyncModuleKey } from './syncTypes';
  */
 
 const DEFAULT_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+
+/** How a sync check-in was triggered — recorded alongside the vessel's sync state purely as delivery-method evidence. It never changes who authored a document; see enqueueSyncEntry / SmsLibrarySplitView for that. */
+export type SyncMethod = 'manual' | 'automatic';
 
 export interface SyncResult {
   applied: boolean;
@@ -37,18 +41,32 @@ export async function seedLocalCache(tenantId: string): Promise<void> {
   await cacheAllDocuments(tenantId, docs as SmsDocRow[]);
 }
 
+/** Drains a vessel's real pending outbox via the unified sync engine's check-in endpoint. Returns how many entries were synced (0 if there's no vessel to drain for). */
 export async function drainSyncOutbox(
-  _tenantId: string,
-  _vesselId: string | undefined,
+  tenantId: string,
+  vesselId: string | undefined,
+  syncMethod: SyncMethod = 'manual',
 ): Promise<number> {
-  return 0;
+  if (!vesselId) return 0;
+  try {
+    const result = await api.apiCheckInVessel(vesselId, tenantId, syncMethod);
+    return result.synced;
+  } catch {
+    return 0;
+  }
 }
 
 export async function performSyncCheckIn(
   tenantId: string,
-  _vesselId?: string,
+  vesselId?: string,
+  syncMethod: SyncMethod = 'manual',
 ): Promise<SyncResult> {
   const localVersion = await getLocalSmsVersion(tenantId);
+
+  // Bottom-up: drain this vessel's real pending outbox as part of the same
+  // check-in. drainSyncOutbox() never throws (it swallows its own errors),
+  // so this can't break the top-down SMS version pull below.
+  await drainSyncOutbox(tenantId, vesselId, syncMethod);
 
   if (!localVersion) {
     try {
@@ -80,7 +98,7 @@ export function startSyncLoop(
 
   const initialTimeout = setTimeout(() => {
     console.log(`[syncService] initial sync tick tenant=${tenantId}`);
-    performSyncCheckIn(tenantId, vesselId)
+    performSyncCheckIn(tenantId, vesselId, 'automatic')
       .then((result) => {
         console.log(`[syncService] sync result tenant=${tenantId} applied=${result.applied} version=${result.toVersion ?? 'none'}`);
         onSync?.(result);
@@ -91,7 +109,7 @@ export function startSyncLoop(
   const interval = setInterval(() => {
     const next = new Date(Date.now() + safeInterval).toISOString();
     console.log(`[syncService] scheduled sync tick tenant=${tenantId} next=${next}`);
-    performSyncCheckIn(tenantId, vesselId)
+    performSyncCheckIn(tenantId, vesselId, 'automatic')
       .then((result) => {
         console.log(`[syncService] sync result tenant=${tenantId} applied=${result.applied} version=${result.toVersion ?? 'none'}`);
         onSync?.(result);
@@ -110,7 +128,7 @@ export async function replicateToShoreNow(
   tenantId: string,
   vesselId?: string,
 ): Promise<SyncResult> {
-  return performSyncCheckIn(tenantId, vesselId);
+  return performSyncCheckIn(tenantId, vesselId, 'manual');
 }
 
 export async function getSyncStatus(tenantId: string): Promise<{
@@ -129,34 +147,62 @@ export async function hasLocalDocs(tenantId: string, treeKind: string): Promise<
   return docs.length > 0;
 }
 
+/** Enqueues a real bottom-up outbox entry. Never throws — a failed enqueue must not break the caller's save flow, so it just reports false. */
 export async function enqueueSyncEntry(
-  _tenantId: string,
-  _vesselId: string,
-  _moduleKey: SyncModuleKey,
-  _entityType: string,
-  _entityId: string,
-  _payload: Record<string, unknown>,
-  _operation: 'upsert' | 'delete' | 'batch_upsert' = 'upsert',
-  _priority = 0,
+  tenantId: string,
+  vesselId: string,
+  moduleKey: SyncModuleKey,
+  entityType: string,
+  entityId: string,
+  payload: Record<string, unknown>,
+  operation: 'upsert' | 'delete' | 'batch_upsert' = 'upsert',
+  priority = 0,
 ): Promise<boolean> {
-  return true;
+  try {
+    await api.apiEnqueueSyncEntry({
+      tenant_id: tenantId,
+      vessel_id: vesselId,
+      module_key: moduleKey,
+      entity_type: entityType,
+      entity_id: entityId,
+      payload,
+      operation,
+      priority,
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function getVesselSyncState(
-  _tenantId: string,
-  _vesselId: string,
+  tenantId: string,
+  vesselId: string,
 ): Promise<{
   pendingOutbox: number;
   failedOutbox: number;
   lastSyncAt: string | null;
   connectionMode: string;
 } | null> {
-  return {
-    pendingOutbox: 0,
-    failedOutbox: 0,
-    lastSyncAt: null,
-    connectionMode: 'VESSEL_SERVER_LAN',
-  };
+  try {
+    const state = await api.apiGetVesselSyncStateOne<{
+      pending_outbox_count: number;
+      failed_outbox_count: number;
+      last_sync_at: string | null;
+      connection_mode: string;
+    }>(vesselId, tenantId);
+    if (!state) {
+      return { pendingOutbox: 0, failedOutbox: 0, lastSyncAt: null, connectionMode: 'VESSEL_SERVER_LAN' };
+    }
+    return {
+      pendingOutbox: state.pending_outbox_count,
+      failedOutbox: state.failed_outbox_count,
+      lastSyncAt: state.last_sync_at,
+      connectionMode: state.connection_mode,
+    };
+  } catch {
+    return { pendingOutbox: 0, failedOutbox: 0, lastSyncAt: null, connectionMode: 'VESSEL_SERVER_LAN' };
+  }
 }
 
 // Re-export for convenience

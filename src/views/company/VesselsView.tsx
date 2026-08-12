@@ -473,6 +473,7 @@ function VesselForm({ profiles, editVessel, currentProfileId, onClose, onSave }:
     kw_power: editVessel?.kw_power?.toString() ?? '',
     vessel_type: editVessel?.vessel_type ?? '',
     class_society: editVessel?.class_society ?? '',
+    satellite_provider: editVessel?.satellite_provider ?? '',
   });
   const [selectedProfileId, setSelectedProfileId] = useState<string>(currentProfileId ?? '');
 
@@ -496,6 +497,7 @@ function VesselForm({ profiles, editVessel, currentProfileId, onClose, onSave }:
         <Field label="Gross Tonnage" value={form.gross_tonnage} onChange={(v) => setForm({ ...form, gross_tonnage: v })} type="number" />
         <Field label="kW Power" value={form.kw_power} onChange={(v) => setForm({ ...form, kw_power: v })} type="number" />
         <Field label="Class Society" value={form.class_society} onChange={(v) => setForm({ ...form, class_society: v })} />
+        <Field label="Satellite / Network Provider" value={form.satellite_provider} onChange={(v) => setForm({ ...form, satellite_provider: v })} />
         <div className="sm:col-span-2">
           <label className="label">Assigned SMS Profile <span className="text-[11px] font-normal text-ink-400">(determines the vessel's active document baseline)</span></label>
           <select

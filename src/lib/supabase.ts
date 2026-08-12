@@ -90,6 +90,7 @@ export interface VesselRow {
   kw_power: number | null;
   vessel_type: string | null;
   class_society: string | null;
+  satellite_provider: string | null;
   sms_active_version: string;
   last_sync_at: string | null;
   created_at: string;
@@ -127,6 +128,7 @@ export interface SmsDocRow {
   node_kind: 'folder' | 'document';
   content_kind: 'rich_text' | 'pdf' | null;
   content: string | null;
+  file_size_bytes: number | null;
   is_regulatory_header: boolean;
   approval_state: ApprovalState;
   version: string;

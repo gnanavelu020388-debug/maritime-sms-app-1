@@ -30,13 +30,13 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
   try {
     const tid = req.params.tenantId;
     if (!canAccess(req, tid)) return res.status(403).json({ error: 'Access denied' });
-    const { name, imo_number, call_sign, flag_state, port_of_registry, gross_tonnage, kw_power, vessel_type, class_society } = req.body;
+    const { name, imo_number, call_sign, flag_state, port_of_registry, gross_tonnage, kw_power, vessel_type, class_society, satellite_provider } = req.body;
     const id = uuidv4();
     const [tRows] = await pool.query('SELECT sms_version FROM tenants WHERE id = ?', [tid]);
     const smsVer = tRows[0]?.sms_version || '1.0.0';
     await pool.query(
-      'INSERT INTO vessels (id, tenant_id, name, imo_number, call_sign, flag_state, port_of_registry, gross_tonnage, kw_power, vessel_type, class_society, sms_active_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)',
-      [id, tid, name, imo_number, call_sign || null, flag_state || null, port_of_registry || null, gross_tonnage || null, kw_power || null, vessel_type || null, class_society || null, smsVer],
+      'INSERT INTO vessels (id, tenant_id, name, imo_number, call_sign, flag_state, port_of_registry, gross_tonnage, kw_power, vessel_type, class_society, satellite_provider, sms_active_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+      [id, tid, name, imo_number, call_sign || null, flag_state || null, port_of_registry || null, gross_tonnage || null, kw_power || null, vessel_type || null, class_society || null, satellite_provider || null, smsVer],
     );
     const [rows] = await pool.query('SELECT * FROM vessels WHERE id = ?', [id]);
     return res.status(201).json(parseVessel(rows[0]));
@@ -47,7 +47,7 @@ router.put('/:tenantId/:vesselId', authMiddleware, async (req, res) => {
   try {
     const tid = req.params.tenantId;
     if (!canAccess(req, tid)) return res.status(403).json({ error: 'Access denied' });
-    const fields = ['name', 'imo_number', 'call_sign', 'flag_state', 'port_of_registry', 'gross_tonnage', 'kw_power', 'vessel_type', 'class_society', 'sms_active_version', 'last_sync_at'];
+    const fields = ['name', 'imo_number', 'call_sign', 'flag_state', 'port_of_registry', 'gross_tonnage', 'kw_power', 'vessel_type', 'class_society', 'satellite_provider', 'sms_active_version', 'last_sync_at'];
     const sets = [];
     const vals = [];
     for (const f of fields) {

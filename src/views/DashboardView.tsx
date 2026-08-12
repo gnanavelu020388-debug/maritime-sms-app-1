@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Building2, Ship, Users, Wifi, WifiOff, HardDrive, DollarSign, TrendingUp, TrendingDown,
-  Megaphone, Radio, Activity, Gauge, ArrowUpRight, Satellite, Server, Loader2, X,
+  Megaphone, Radio, Gauge, ArrowUpRight, Server, Loader2, X,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { ProgressBar } from '../components/ProgressBar';
@@ -9,7 +9,6 @@ import { Badge } from '../components/Badge';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
 import { formatCurrency, formatGb, formatNumber, relativeTime } from '../constants';
-import { SatelliteQueue } from '../components/SatelliteQueue';
 import type { Capabilities } from '../lib/permissions';
 import * as api from '../lib/api';
 import { isRealTenantId } from '../lib/demoData';
@@ -18,7 +17,7 @@ import { logAudit } from '../lib/audit';
 import type { MaintenanceBanner as BannerData } from '../types';
 
 export function DashboardView({ caps }: { caps: Capabilities }) {
-  const { tenants, satellite, audit, toast } = useStore();
+  const { tenants, audit, toast } = useStore();
   const { user } = useAuth();
   const [bannerText, setBannerText] = useState('System Maintenance: The platform will undergo a brief scheduled update on 25-July at 0200 UTC. Offline sync will temporarily queue.');
   const [severity, setSeverity] = useState<'info' | 'warning' | 'critical'>('warning');
@@ -103,17 +102,13 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
     return { activeTenants, totalTenants: tenants.length, totalShips, totalUsers, totalStorageUsed, totalStorageMax, revenue, onlineShips, offlineShips };
   }, [tenants]);
 
-  const syncing = satellite.filter((s) => s.status === 'syncing').length;
-  const queued = satellite.filter((s) => s.status === 'queued').length;
-  const processed = satellite.filter((s) => s.status === 'processed').length;
-
   return (
     <div className="space-y-6">
       {/* Filter bar */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h1 className="text-xl font-bold text-ink-900 dark:text-white">Executive Overview</h1>
-          <p className="text-sm text-ink-500 dark:text-ink-400">Cross-tenant platform health, satellite sync & governance.</p>
+          <p className="text-sm text-ink-500 dark:text-ink-400">Cross-tenant platform health & governance.</p>
         </div>
         <div className="flex items-center gap-2">
           <div className="inline-flex rounded-lg border border-ink-200 bg-white p-0.5 dark:border-ink-700 dark:bg-ink-800">
@@ -175,25 +170,7 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
         />
       </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        {/* Satellite Sync Queue */}
-        <div className="xl:col-span-2">
-          <Card
-            title="Satellite Sync Queue"
-            subtitle="Live payload streams via VSAT / Starlink nodes"
-            icon={<Satellite className="h-4 w-4" />}
-            actions={
-              <div className="hidden items-center gap-2 sm:flex">
-                <Badge tone="info" dot pulse>{syncing} syncing</Badge>
-                <Badge tone="warning" dot>{queued} queued</Badge>
-                <Badge tone="success" dot>{processed} processed</Badge>
-              </div>
-            }
-          >
-            <SatelliteQueue payloads={satellite} />
-          </Card>
-        </div>
-
+      <div className="grid grid-cols-1 gap-6">
         {/* Maintenance broadcast */}
         <Card
           title="Maintenance Banners"
@@ -303,7 +280,6 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
             <ResourceRow icon={<Server className="h-4 w-4" />} label="CPU utilization" value={42} unit="%" tone="success" />
             <ResourceRow icon={<HardDrive className="h-4 w-4" />} label="Storage allocation" value={68} unit="%" tone="warning" />
             <ResourceRow icon={<Radio className="h-4 w-4" />} label="API traffic (p95)" value={31} unit="%" tone="success" />
-            <ResourceRow icon={<Activity className="h-4 w-4" />} label="Sync queue depth" value={queued * 12 + 18} unit="%" tone="warning" />
           </div>
         </Card>
 
