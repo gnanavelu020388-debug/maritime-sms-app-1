@@ -11,9 +11,16 @@ import { DataTable, type Column } from '../components/DataTable';
 import { CriticalActionWizard } from '../components/CriticalActionWizard';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
-import { relativeTime, uid } from '../constants';
+import { relativeTime } from '../constants';
 import type { InternalUser } from '../types';
 import type { Capabilities } from '../lib/permissions';
+import { apiInvitePlatformStaff, apiUpdatePlatformStaff, apiTogglePlatformStaffLock, apiResetPlatformStaffPassword, apiDeletePlatformStaff } from '../lib/api';
+import { logAudit } from '../lib/audit';
+import type { PlatformStaffRow } from '../lib/supabase';
+
+function mapStaffRow(row: PlatformStaffRow): InternalUser {
+  return { id: row.id, name: row.name, email: row.email, role: row.role, status: row.status, lastActive: row.last_active ?? row.created_at, mfa: row.mfa };
+}
 
 const ROLE_TONE: Record<string, 'danger' | 'warning' | 'info'> = {
   'Super-Admin': 'danger',
@@ -77,8 +84,10 @@ export function UsersView({ caps }: { caps: Capabilities }) {
             title="Edit profile & role"
           ><Pencil className="h-4 w-4" /></button>
           <button
-            onClick={() => {
+            onClick={async () => {
+              await apiResetPlatformStaffPassword(u.id);
               dispatch({ type: 'USER_RESET_PASSWORD', id: u.id });
+              await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' });
               toast({ tone: 'info', title: 'Password reset issued', message: `Reset email sent to ${u.email}.` });
             }}
             disabled={!caps.userResetPassword}
@@ -86,9 +95,12 @@ export function UsersView({ caps }: { caps: Capabilities }) {
             title="Reset password"
           ><KeyRound className="h-4 w-4" /></button>
           <button
-            onClick={() => {
-              dispatch({ type: 'USER_LOCK_TOGGLE', id: u.id });
-              toast({ tone: u.status === 'locked' ? 'success' : 'warning', title: u.status === 'locked' ? 'Account unlocked' : 'Account locked', message: u.email });
+            onClick={async () => {
+              const wasLocked = u.status === 'locked';
+              const row = await apiTogglePlatformStaffLock<PlatformStaffRow>(u.id);
+              dispatch({ type: 'USER_LOCK_TOGGLE', id: u.id, user: mapStaffRow(row) });
+              await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Account ${wasLocked ? 'unlocked' : 'locked'}: ${u.email}`, target: u.email, severity: 'warning' });
+              toast({ tone: wasLocked ? 'success' : 'warning', title: wasLocked ? 'Account unlocked' : 'Account locked', message: u.email });
             }}
             disabled={!caps.userLockToggle || isSelf(u)}
             className="btn-ghost rounded-md p-1.5 disabled:cursor-not-allowed disabled:opacity-30"
@@ -171,14 +183,28 @@ export function UsersView({ caps }: { caps: Capabilities }) {
         <DataTable columns={columns} rows={internalUsers} pageSize={6} searchPlaceholder="Search staff…" searchFn={(u, q) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)} />
       </Card>
 
-      {inviteOpen && <InviteModal onClose={() => setInviteOpen(false)} onInvite={(u) => { dispatch({ type: 'USER_INVITE', user: u }); toast({ tone: 'success', title: 'Invitation sent', message: `${u.email} invited as ${u.role}.` }); setInviteOpen(false); }} />}
+      {inviteOpen && (
+        <InviteModal
+          onClose={() => setInviteOpen(false)}
+          onInvite={async (draft) => {
+            const row = await apiInvitePlatformStaff<PlatformStaffRow>({ name: draft.name, email: draft.email, role: draft.role });
+            const u = mapStaffRow(row);
+            dispatch({ type: 'USER_INVITE', user: u });
+            await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Internal staff invited: ${u.email}`, target: u.email, severity: 'info' });
+            toast({ tone: 'success', title: 'Invitation sent', message: `${u.email} invited as ${u.role}.` });
+            setInviteOpen(false);
+          }}
+        />
+      )}
 
       {editTarget && (
         <EditStaffModal
           user={editTarget}
           onClose={() => setEditTarget(null)}
-          onSave={(name, email, role) => {
+          onSave={async (name, email, role) => {
+            await apiUpdatePlatformStaff<PlatformStaffRow>(editTarget.id, { name, email, role });
             dispatch({ type: 'USER_EDIT', id: editTarget.id, name, email, role });
+            await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Staff account edited: ${editTarget.email} → ${email} (${role})`, target: email, severity: 'warning' });
             toast({ tone: 'success', title: 'Staff account updated', message: `${email} saved as ${role}.` });
             setEditTarget(null);
           }}
@@ -210,8 +236,10 @@ export function UsersView({ caps }: { caps: Capabilities }) {
           }}
           actorEmail={currentEmail || 'unknown'}
           onClose={() => setDeleteTarget(null)}
-          onExecute={(payload) => {
+          onExecute={async (payload) => {
+            await apiDeletePlatformStaff(deleteTarget.id, 'hard');
             dispatch({ type: 'USER_DELETE', id: deleteTarget.id, mode: 'hard' });
+            await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Staff account permanently removed: ${deleteTarget.email}`, target: deleteTarget.email, severity: 'critical' });
             toast({ tone: 'danger', title: 'Staff account permanently deleted', message: `${deleteTarget.email} removed. Audit entry: ${payload.timestamp}.` });
             setDeleteTarget(null);
           }}
@@ -234,7 +262,7 @@ export function UsersView({ caps }: { caps: Capabilities }) {
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={u.status} />
-                    <button onClick={() => { dispatch({ type: 'USER_RESET_PASSWORD', id: u.id }); toast({ tone: 'info', title: 'Password reset issued', message: u.email }); }} className="btn-ghost rounded-md p-1.5"><KeyRound className="h-4 w-4" /></button>
+                    <button onClick={async () => { await apiResetPlatformStaffPassword(u.id); dispatch({ type: 'USER_RESET_PASSWORD', id: u.id }); await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' }); toast({ tone: 'info', title: 'Password reset issued', message: u.email }); }} className="btn-ghost rounded-md p-1.5"><KeyRound className="h-4 w-4" /></button>
                   </div>
                 </div>
               ))}
@@ -247,10 +275,18 @@ export function UsersView({ caps }: { caps: Capabilities }) {
   );
 }
 
-function InviteModal({ onClose, onInvite }: { onClose: () => void; onInvite: (u: InternalUser) => void }) {
+interface InviteDraft { name: string; email: string; role: InternalUser['role'] }
+
+function InviteModal({ onClose, onInvite }: { onClose: () => void; onInvite: (draft: InviteDraft) => Promise<void> }) {
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<InternalUser['role']>('Global Support Staff');
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (!name.trim() || !email.trim() || saving) return;
+    setSaving(true);
+    try { await onInvite({ name, email, role }); } finally { setSaving(false); }
+  };
   return (
     <Modal
       open
@@ -262,10 +298,10 @@ function InviteModal({ onClose, onInvite }: { onClose: () => void; onInvite: (u:
         <>
           <button onClick={onClose} className="btn-secondary">Cancel</button>
           <button
-            disabled={!name.trim() || !email.trim()}
-            onClick={() => onInvite({ id: uid('usr'), name, email, role, status: 'invited', lastActive: new Date().toISOString(), mfa: false })}
+            disabled={!name.trim() || !email.trim() || saving}
+            onClick={submit}
             className="btn-primary"
-          >Send invitation</button>
+          >{saving ? 'Sending…' : 'Send invitation'}</button>
         </>
       }
     >
@@ -283,10 +319,16 @@ function InviteModal({ onClose, onInvite }: { onClose: () => void; onInvite: (u:
   );
 }
 
-function EditStaffModal({ user, onClose, onSave }: { user: InternalUser; onClose: () => void; onSave: (name: string, email: string, role: InternalUser['role']) => void }) {
+function EditStaffModal({ user, onClose, onSave }: { user: InternalUser; onClose: () => void; onSave: (name: string, email: string, role: InternalUser['role']) => Promise<void> }) {
   const [name, setName] = useState(user.name);
   const [email, setEmail] = useState(user.email);
   const [role, setRole] = useState<InternalUser['role']>(user.role);
+  const [saving, setSaving] = useState(false);
+  const submit = async () => {
+    if (!name.trim() || !email.trim() || saving) return;
+    setSaving(true);
+    try { await onSave(name.trim(), email.trim(), role); } finally { setSaving(false); }
+  };
   return (
     <Modal
       open
@@ -298,10 +340,10 @@ function EditStaffModal({ user, onClose, onSave }: { user: InternalUser; onClose
         <>
           <button onClick={onClose} className="btn-secondary">Cancel</button>
           <button
-            disabled={!name.trim() || !email.trim()}
-            onClick={() => onSave(name.trim(), email.trim(), role)}
+            disabled={!name.trim() || !email.trim() || saving}
+            onClick={submit}
             className="btn-primary"
-          >Save changes</button>
+          >{saving ? 'Saving…' : 'Save changes'}</button>
         </>
       }
     >

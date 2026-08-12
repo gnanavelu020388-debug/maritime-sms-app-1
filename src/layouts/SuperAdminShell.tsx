@@ -21,6 +21,8 @@ import { INTERNAL_ROLE_LABEL, INTERNAL_ROLE_SUMMARY, canAccessSection, capabilit
 import { LogOut, Lock } from 'lucide-react';
 import { refreshAllTenants, refreshTenantData } from '../lib/dataCache';
 import { getEffectiveDemoTenants, getEffectiveDemoUsers, getEffectiveDemoVessels } from '../lib/demoData';
+import * as api from '../lib/api';
+import type { AuditLogRow, InvoiceRow, BackupSnapshotRow, PlatformStaffRow, ErrorLogRow } from '../lib/supabase';
 
 export function SuperAdminShell(props: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
   return (
@@ -62,6 +64,22 @@ function SuperAdminShellInner({ user, role, internalRole, onSignOut }: { user: U
       } catch {
         // Best-effort — views still show local/demo tenants if this fails.
       }
+
+      // Super-Admin-only flat datasets — fetched once per session, in
+      // parallel, independent of tenant hydration succeeding above.
+      const [auditRows, invoiceRows, backupRows, staffRows, errRows] = await Promise.all([
+        api.apiGetAuditLogs<AuditLogRow>().catch(() => []),
+        api.apiGetInvoices<InvoiceRow>().catch(() => []),
+        api.apiGetBackups<BackupSnapshotRow>().catch(() => []),
+        api.apiGetPlatformStaff<PlatformStaffRow>().catch(() => []),
+        api.apiGetErrorLogs<ErrorLogRow>().catch(() => []),
+      ]);
+      if (cancelled) return;
+      dispatch({ type: 'AUDIT_HYDRATE', rows: auditRows });
+      dispatch({ type: 'INVOICES_HYDRATE', rows: invoiceRows });
+      dispatch({ type: 'BACKUPS_HYDRATE', rows: backupRows });
+      dispatch({ type: 'STAFF_HYDRATE', rows: staffRows });
+      dispatch({ type: 'ERROR_LOGS_HYDRATE', rows: errRows });
     })();
     return () => { cancelled = true; };
   }, [dispatch]);

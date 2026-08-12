@@ -49,8 +49,6 @@ export interface Tenant {
   monthlyRevenue: number;
   region: string;
   // Inherited document trees cloned to this tenant's workspace via flexible template push
-  docTrees: DocTreeKind[];
-  docClones: Record<DocTreeKind, DocumentNode>;
   guardrails?: TenantGuardrails;
   demoTenantId?: string | null;
 }
@@ -91,7 +89,6 @@ export interface SmsSnapshot {
   company: string;
   takenAt: string;
   label: string;
-  docClones: Record<DocTreeKind, DocumentNode>;
 }
 
 export interface SshNode {

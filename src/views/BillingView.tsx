@@ -10,9 +10,14 @@ import { useStore } from '../store';
 import { daysUntil, formatCurrency, formatGb, relativeTime, formatUtc } from '../constants';
 import type { Invoice, InvoiceLineItem, PlanTier, Tenant, TierConfig } from '../types';
 import type { Capabilities } from '../lib/permissions';
+import { useAuth } from '../lib/auth';
+import { apiCreateInvoice } from '../lib/api';
+import { logAudit } from '../lib/audit';
+import type { InvoiceRow } from '../lib/supabase';
 
 export function BillingView({ caps }: { caps: Capabilities }) {
   const { invoices, tenants, tierConfigs, dispatch, toast } = useStore();
+  const { user } = useAuth();
   const [dirty, setDirty] = useState(false);
   const [emailPreview, setEmailPreview] = useState<Tenant | null>(null);
   const [emailDraft, setEmailDraft] = useState('');
@@ -364,8 +369,29 @@ export function BillingView({ caps }: { caps: Capabilities }) {
         <GenerateInvoiceModal
           tenants={tenants.filter((t) => t.status !== 'archived')}
           onClose={() => setGenOpen(false)}
-          onSubmit={(inv) => {
+          onSubmit={async (draft) => {
+            const row = await apiCreateInvoice<InvoiceRow>({
+              tenant_id: draft.tenantId,
+              amount: draft.amount,
+              period: draft.period,
+              due_date: draft.dueDate || null,
+              status: 'draft',
+              line_items: draft.lineItems,
+            });
+            const inv: Invoice = {
+              id: `INV-${String(row.invoice_no).padStart(4, '0')}`,
+              tenantId: row.tenant_id,
+              company: draft.company,
+              amount: Number(row.amount),
+              currency: row.currency,
+              period: row.period,
+              issued: row.issued_at,
+              status: row.status as Invoice['status'],
+              lineItems: row.line_items,
+              dueDate: row.due_date ?? undefined,
+            };
             dispatch({ type: 'INVOICE_ADD', invoice: inv });
+            await logAudit({ tenantId: draft.tenantId, actorEmail: user?.email ?? 'unknown', category: 'billing', action: `Invoice generated: ${inv.id}`, target: draft.company, severity: 'info' });
             toast({ tone: 'success', title: 'Invoice generated', message: `${inv.id} created for ${inv.company}.` });
             setGenOpen(false);
           }}
@@ -394,10 +420,19 @@ function RevCard({ icon, label, value, sub, tone = 'success' }: { icon: ReactNod
   );
 }
 
+interface InvoiceDraft {
+  tenantId: string;
+  company: string;
+  amount: number;
+  period: string;
+  dueDate: string;
+  lineItems: InvoiceLineItem[];
+}
+
 function GenerateInvoiceModal({ tenants, onClose, onSubmit }: {
   tenants: Tenant[];
   onClose: () => void;
-  onSubmit: (invoice: Invoice) => void;
+  onSubmit: (draft: InvoiceDraft) => Promise<void>;
 }) {
   const [tenantId, setTenantId] = useState(tenants[0]?.id ?? '');
   const [amount, setAmount] = useState('');
@@ -405,27 +440,28 @@ function GenerateInvoiceModal({ tenants, onClose, onSubmit }: {
   const [lineItems, setLineItems] = useState<InvoiceLineItem[]>([
     { description: 'Monthly platform subscription', amount: 0 },
   ]);
+  const [saving, setSaving] = useState(false);
 
   const selected = tenants.find((t) => t.id === tenantId);
   const lineTotal = lineItems.reduce((s, li) => s + (Number(li.amount) || 0), 0);
   const finalAmount = Number(amount) || lineTotal;
   const valid = !!tenantId && finalAmount > 0 && !!dueDate;
 
-  const submit = () => {
-    if (!valid || !selected) return;
-    const inv: Invoice = {
-      id: `INV-${Date.now().toString().slice(-6)}`,
-      tenantId: selected.id,
-      company: selected.company,
-      amount: finalAmount,
-      currency: 'USD',
-      period: dueDate ? new Date(dueDate).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'Ad-hoc',
-      issued: new Date().toISOString(),
-      status: 'draft',
-      lineItems: lineItems.filter((li) => li.description.trim()),
-      dueDate,
-    };
-    onSubmit(inv);
+  const submit = async () => {
+    if (!valid || !selected || saving) return;
+    setSaving(true);
+    try {
+      await onSubmit({
+        tenantId: selected.id,
+        company: selected.company,
+        amount: finalAmount,
+        period: dueDate ? new Date(dueDate).toLocaleDateString('en-GB', { month: 'long', year: 'numeric' }) : 'Ad-hoc',
+        dueDate,
+        lineItems: lineItems.filter((li) => li.description.trim()),
+      });
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -439,8 +475,8 @@ function GenerateInvoiceModal({ tenants, onClose, onSubmit }: {
       footer={
         <>
           <button onClick={onClose} className="btn-secondary">Cancel</button>
-          <button onClick={submit} disabled={!valid} className="btn-primary disabled:cursor-not-allowed disabled:opacity-50">
-            <Plus className="h-4 w-4" /> Create draft invoice
+          <button onClick={submit} disabled={!valid || saving} className="btn-primary disabled:cursor-not-allowed disabled:opacity-50">
+            <Plus className="h-4 w-4" /> {saving ? 'Creating…' : 'Create draft invoice'}
           </button>
         </>
       }

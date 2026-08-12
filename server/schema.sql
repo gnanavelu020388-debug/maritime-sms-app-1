@@ -288,3 +288,115 @@ CREATE TABLE IF NOT EXISTS maintenance_banner (
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   INDEX idx_banner_tenant_active (tenant_id, is_active)
 );
+
+CREATE TABLE IF NOT EXISTS invoices (
+  id VARCHAR(36) PRIMARY KEY,
+  -- Short sequential number for display purposes only (e.g. INV-1007) — id
+  -- above (the UUID) remains the real primary key used everywhere else
+  invoice_no INT UNSIGNED NOT NULL AUTO_INCREMENT UNIQUE,
+  tenant_id VARCHAR(36) NOT NULL,
+  amount DECIMAL(10,2) NOT NULL DEFAULT 0,
+  currency VARCHAR(10) NOT NULL DEFAULT 'USD',
+  period VARCHAR(100) NOT NULL,
+  issued_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  due_date TIMESTAMP NULL,
+  status VARCHAR(20) NOT NULL DEFAULT 'draft',
+  line_items JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  INDEX idx_invoices_tenant (tenant_id),
+  INDEX idx_invoices_issued (issued_at)
+);
+
+CREATE TABLE IF NOT EXISTS backup_snapshots (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  taken_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  size_gb DECIMAL(10,2) NOT NULL DEFAULT 0,
+  type VARCHAR(20) NOT NULL DEFAULT 'manual',
+  status VARCHAR(20) NOT NULL DEFAULT 'completed',
+  expiry TIMESTAMP NOT NULL,
+  reason VARCHAR(500),
+  created_by VARCHAR(255),
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  INDEX idx_backups_tenant (tenant_id),
+  INDEX idx_backups_taken (taken_at)
+);
+
+-- Super-Admin "internal team" roster — distinct from tenant_users and from
+-- the single-row super_admins login table. Roster only: inviting a staff
+-- member here does not currently create a real login account for them.
+CREATE TABLE IF NOT EXISTS platform_staff (
+  id VARCHAR(36) PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  email VARCHAR(255) NOT NULL UNIQUE,
+  role VARCHAR(50) NOT NULL DEFAULT 'Global Support Staff',
+  status VARCHAR(20) NOT NULL DEFAULT 'invited',
+  mfa BOOLEAN NOT NULL DEFAULT FALSE,
+  last_active TIMESTAMP NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_platform_staff_email (email)
+);
+
+-- tenant_id uses ON DELETE SET NULL (not CASCADE, unlike every other table
+-- here) — an error log referencing a since-deleted tenant should persist as
+-- a platform-wide record, not vanish with the tenant.
+CREATE TABLE IF NOT EXISTS error_logs (
+  id VARCHAR(36) PRIMARY KEY,
+  ts TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  level VARCHAR(20) NOT NULL DEFAULT 'error',
+  source VARCHAR(100) NOT NULL,
+  message VARCHAR(1000) NOT NULL,
+  tenant_id VARCHAR(36) NULL,
+  payload JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE SET NULL,
+  INDEX idx_error_logs_ts (ts),
+  INDEX idx_error_logs_tenant (tenant_id)
+);
+
+-- Master SMS Template engine — a platform-wide, tenant-less document tree
+-- used for the Super-Admin "push template to fleet" feature. Deliberately
+-- separate from sms_documents (each tenant's real, live SMS document tree
+-- with its own approval workflow) and never merged with it.
+CREATE TABLE IF NOT EXISTS master_sms_documents (
+  id VARCHAR(36) PRIMARY KEY,
+  parent_id VARCHAR(36) NULL,
+  tree_kind VARCHAR(50) NOT NULL,
+  label VARCHAR(500) NOT NULL,
+  node_kind VARCHAR(20) NOT NULL,
+  content_kind VARCHAR(20) NULL,
+  content LONGTEXT,
+  version VARCHAR(20) NOT NULL DEFAULT '1.0.0',
+  sort_order INT NOT NULL DEFAULT 0,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (parent_id) REFERENCES master_sms_documents(id) ON DELETE CASCADE,
+  INDEX idx_master_sms_tree (tree_kind),
+  INDEX idx_master_sms_parent (parent_id)
+);
+
+CREATE TABLE IF NOT EXISTS master_sms_pushes (
+  id VARCHAR(36) PRIMARY KEY,
+  version VARCHAR(20) NOT NULL,
+  pushed_by VARCHAR(255),
+  pushed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  target_tenant_ids JSON NOT NULL
+);
+
+-- Per-tenant point-in-time SMS-tree snapshot powering the Super-Admin
+-- rollback feature. Stored as a JSON blob of the whole document tree
+-- rather than normalized rows: a snapshot is immutable and never queried
+-- node-by-node.
+CREATE TABLE IF NOT EXISTS sms_snapshots (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  label VARCHAR(255) NOT NULL,
+  taken_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  tree_data JSON NOT NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  INDEX idx_sms_snapshots_tenant (tenant_id)
+);

@@ -157,6 +157,48 @@ async function seed() {
     await pool.query('INSERT INTO sms_profiles (id, tenant_id, name, version, is_default) VALUES (?,?,?,?,TRUE)', [pid, t.id, 'Universal Fleet Baseline', t.sms_version]);
   }
 
+  // Invoices — a few months of billing history per tenant so the
+  // Super-Admin Billing view isn't empty on a fresh database.
+  const INVOICE_STATUSES = ['paid', 'paid', 'processing', 'overdue'];
+  const INVOICE_PERIODS = ['June 2026', 'May 2026', 'April 2026'];
+  for (let ti = 0; ti < TENANTS.length; ti++) {
+    const t = TENANTS[ti];
+    await pool.query('DELETE FROM invoices WHERE tenant_id = ?', [t.id]);
+    for (let m = 0; m < 3; m++) {
+      const lineItems = JSON.stringify([{ description: 'Monthly platform subscription', amount: t.monthly_revenue }]);
+      await pool.query(
+        'INSERT INTO invoices (id, tenant_id, amount, currency, period, status, line_items) VALUES (?,?,?,?,?,?,?)',
+        [uuidv4(), t.id, t.monthly_revenue, 'USD', INVOICE_PERIODS[m], INVOICE_STATUSES[(ti + m) % INVOICE_STATUSES.length], lineItems],
+      );
+    }
+  }
+
+  // Backup snapshots — a short recent history per tenant.
+  for (let ti = 0; ti < TENANTS.length; ti++) {
+    const t = TENANTS[ti];
+    await pool.query('DELETE FROM backup_snapshots WHERE tenant_id = ?', [t.id]);
+    for (let d = 0; d < 3; d++) {
+      await pool.query(
+        'INSERT INTO backup_snapshots (id, tenant_id, size_gb, type, status, expiry) VALUES (?,?,?,?,?, DATE_ADD(NOW(), INTERVAL 30 DAY))',
+        [uuidv4(), t.id, +(t.storage_gb_max * 0.04 + d).toFixed(2), d === 1 ? 'manual' : 'auto', 'completed'],
+      );
+    }
+  }
+
+  // Platform staff roster
+  const STAFF = [
+    { name: 'Platform Admin', email: 'admin@maritime-platform.io', role: 'Super-Admin', status: 'active', mfa: true },
+    { name: 'Morgan Whitfield', email: 'm.whitfield@maritime-platform.io', role: 'Platform Auditor', status: 'active', mfa: true },
+    { name: 'Theo Marchetti', email: 't.marchetti@maritime-platform.io', role: 'Global Support Staff', status: 'active', mfa: false },
+  ];
+  for (const s of STAFF) {
+    await pool.query('DELETE FROM platform_staff WHERE email = ?', [s.email]);
+    await pool.query(
+      'INSERT INTO platform_staff (id, name, email, role, status, mfa) VALUES (?,?,?,?,?,?)',
+      [uuidv4(), s.name, s.email, s.role, s.status, s.mfa],
+    );
+  }
+
   console.log('[Seed] Done! Demo accounts use password "demo", super admin uses "admin123".');
   await pool.end();
 }

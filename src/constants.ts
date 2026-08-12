@@ -1,4 +1,4 @@
-import type { DocTreeKind, ModuleKey, PlanTier, TierConfig } from './types';
+import type { DocTreeKind, ModuleKey, PlanTier, SshRole, TierConfig } from './types';
 
 export const PLATFORM_NAME = 'Maritime Platform Console';
 export const PLATFORM_SHORT = 'MPC';
@@ -39,6 +39,17 @@ export const DOC_TREE_KINDS: { key: DocTreeKind; label: string; subtitle: string
 ];
 
 export const SAT_NODES: ('Starlink' | 'VSAT' | 'FBB')[] = ['Starlink', 'VSAT', 'FBB'];
+
+// Fixed RBAC permission-scheme reference data — describes the platform's
+// built-in role model. Not tenant/company records, never mutated by any UI
+// action, so it lives here as static config rather than a DB table.
+export const SYSTEM_ROLES: SshRole[] = [
+  { id: 'role-company-admin', name: 'Company Admin (Shore)', description: 'Full tenant administration, vessel provisioning, user creation, and drafting SMS revisions.', permissions: ['Full tenant administration', 'Vessel provisioning', 'User creation (Shore / Ship / Crew)', 'Draft SMS document revisions', 'Create & edit fleet circulars'], scope: 'tenant', system: true },
+  { id: 'role-dpa', name: 'DPA / Marine Superintendent (Shore)', description: 'Verification cockpit, SMS review queue, fleet circular distribution, and official DPA approval/push rights.', permissions: ['Dedicated SMS approval queue', 'Review SMS revisions uploaded by Company Admin', 'Distribute fleet circulars', 'Approve & Push to Fleet', 'Reject & return to Company Admin'], scope: 'tenant', system: true },
+  { id: 'role-ship-command', name: 'Ship Command (Master & Chief Engineer)', description: 'Read-only pipeline for active DPA-approved SMS manuals, local master logging, and vessel execution controls.', permissions: ['Search & view DPA-approved SMS manuals', 'Download operational baselines', 'Print active manuals', 'Local master logging', 'Vessel execution controls'], scope: 'tenant', system: true },
+  { id: 'role-ship-officers', name: 'Shipboard Officers (Chief Mate, 2nd Engineer, Duty Officers)', description: 'Search, view, download active operational checklists, and log safety routines.', permissions: ['Search active operational checklists', 'View DPA-approved documents', 'Download operational baselines', 'Log safety routines'], scope: 'tenant', system: true },
+  { id: 'role-ship-crew', name: 'Shipboard Crew & Ratings (Bosun, AB, Oiler, Crew)', description: 'Read-only access to safety manuals, emergency procedures, and fleet circulars with controlled print/view permissions.', permissions: ['View safety manuals (read-only)', 'View emergency procedures', 'View fleet circulars', 'Controlled print of approved materials'], scope: 'tenant', system: true },
+];
 
 export const SECTIONS: { id: string; label: string; group: 'Operate' | 'Govern' | 'Commercial'; description: string }[] = [
   { id: 'dashboard', label: 'High-Level Dashboard', group: 'Operate', description: 'Platform-wide KPIs & live satellite sync' },

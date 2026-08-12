@@ -156,6 +156,81 @@ export interface AuditLogRow {
   created_at: string;
 }
 
+export interface InvoiceRow {
+  id: string;
+  invoice_no: number;
+  tenant_id: string;
+  company?: string; // joined from tenants by the invoices route
+  amount: number;
+  currency: string;
+  period: string;
+  issued_at: string;
+  due_date: string | null;
+  status: string;
+  line_items: { description: string; amount: number }[];
+  created_at: string;
+}
+
+export interface BackupSnapshotRow {
+  id: string;
+  tenant_id: string;
+  company?: string; // joined from tenants by the backups route
+  taken_at: string;
+  size_gb: number;
+  type: string;
+  status: string;
+  expiry: string;
+  reason: string | null;
+  created_by: string | null;
+  created_at: string;
+}
+
+export interface PlatformStaffRow {
+  id: string;
+  name: string;
+  email: string;
+  role: 'Super-Admin' | 'Platform Auditor' | 'Global Support Staff';
+  status: 'active' | 'locked' | 'invited';
+  mfa: boolean;
+  last_active: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ErrorLogRow {
+  id: string;
+  ts: string;
+  level: 'error' | 'warn' | 'critical';
+  source: string;
+  message: string;
+  tenant_id: string | null;
+  payload: Record<string, unknown>;
+  created_at: string;
+}
+
+export interface MasterSmsDocRow {
+  id: string;
+  parent_id: string | null;
+  tree_kind: 'sms' | 'fleet_circulars' | 'flag_state';
+  label: string;
+  node_kind: 'folder' | 'document';
+  content_kind: 'rich_text' | 'pdf' | null;
+  content: string | null;
+  version: string;
+  sort_order: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SmsSnapshotRow {
+  id: string;
+  tenant_id: string;
+  label: string;
+  taken_at: string;
+  tree_data: unknown;
+  created_at: string;
+}
+
 export function rankToRole(rank: Rank): Exclude<PlatformRole, 'super_admin'> {
   if (rank === 'DPA') return 'dpa';
   return 'vessel';

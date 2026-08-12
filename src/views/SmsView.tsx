@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   ShieldCheck, Briefcase, Ship, Lock, Eye, Layers, AlertTriangle, CheckCircle2,
   Unlock, RotateCcw, Sliders, Save, History, ShieldAlert, Loader2, ChevronRight,
@@ -6,11 +6,15 @@ import {
 } from 'lucide-react';
 import { TenantInspectionBar } from '../components/TenantInspectionBar';
 import { useStore } from '../store';
+import { useAuth } from '../lib/auth';
 import { CriticalActionWizard } from '../components/CriticalActionWizard';
 import { Modal } from '../components/Modal';
 import { postSyncEvent } from '../lib/syncChannel';
 import { demoSetWorkspaceFrozen, demoGetWorkspaceFrozen, demoSetGuardrails, demoGetGuardrails } from '../lib/demoData';
 import { relativeTime } from '../constants';
+import { apiGetSmsSnapshots, apiRollbackSmsSnapshot } from '../lib/api';
+import { logAudit } from '../lib/audit';
+import type { SmsSnapshotRow } from '../lib/supabase';
 import type { Capabilities } from '../lib/permissions';
 import type { Tenant, SmsSnapshot, TenantGuardrails, PlanTier } from '../types';
 
@@ -57,6 +61,7 @@ export function SmsView({ caps: _caps }: { caps: Capabilities }) {
 
 function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | null }) {
   const { tenants, smsSnapshots, dispatch, toast, audit, globalGuardrails } = useStore();
+  const { user } = useAuth();
   const selectedTenant = tenants.find((t) => t.id === selectedTenantId) ?? null;
 
   const isGlobal = !selectedTenant;
@@ -67,6 +72,7 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
   const [rollbackFor, setRollbackFor] = useState<SmsSnapshot | null>(null);
   const isFrozen = selectedTenant ? demoGetWorkspaceFrozen(selectedTenant.id) : false;
   const [freezeConfirm, setFreezeConfirm] = useState(false);
+  const [snapshotsLoading, setSnapshotsLoading] = useState(false);
 
   // Sync local state when selection changes
   const scopeKey = selectedTenantId ?? '__global__';
@@ -76,6 +82,17 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
     setMaxDepth(guardrails.maxSubfolderDepth);
     setMaxUpload(guardrails.maxUploadSizeMb);
   }
+
+  useEffect(() => {
+    if (!selectedTenant) return;
+    let cancelled = false;
+    setSnapshotsLoading(true);
+    apiGetSmsSnapshots<SmsSnapshotRow>(selectedTenant.id)
+      .then((rows) => { if (!cancelled) dispatch({ type: 'SMS_SNAPSHOTS_HYDRATE', tenantId: selectedTenant.id, rows }); })
+      .catch(() => { /* best-effort */ })
+      .finally(() => { if (!cancelled) setSnapshotsLoading(false); });
+    return () => { cancelled = true; };
+  }, [selectedTenant, dispatch]);
 
   const tenantSnaps = selectedTenant
     ? smsSnapshots.filter((s) => s.tenantId === selectedTenant.id)
@@ -113,10 +130,12 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
     }
   }
 
-  function handleRollback() {
+  async function handleRollback() {
     if (!rollbackFor || !selectedTenant) return;
+    await apiRollbackSmsSnapshot(selectedTenant.id, rollbackFor.id);
     dispatch({ type: 'TENANT_ROLLBACK', snapshotId: rollbackFor.id });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: selectedTenant.demoTenantId ?? selectedTenant.id, payload: { action: 'sms_rollback', snapshot: rollbackFor.label } });
+    await logAudit({ tenantId: selectedTenant.id, actorEmail: user?.email ?? 'superadmin@platform.io', category: 'sms', action: `SMS tree rollback to snapshot: ${rollbackFor.label} (${selectedTenant.company})`, target: selectedTenant.company, severity: 'critical' });
     toast({ tone: 'danger', title: 'SMS tree rolled back', message: `${selectedTenant.company} restored to: ${rollbackFor.label}` });
     setRollbackFor(null);
   }
@@ -256,7 +275,9 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
               </div>
               <div className="p-3">
                 <p className="mb-3 text-xs text-ink-500 dark:text-ink-400">Restore to a previous snapshot.</p>
-                {tenantSnaps.length === 0 ? (
+                {snapshotsLoading ? (
+                  <p className="py-4 text-center text-xs text-ink-400">Loading snapshots…</p>
+                ) : tenantSnaps.length === 0 ? (
                   <p className="py-4 text-center text-xs text-ink-400">No snapshots available.</p>
                 ) : (
                   <div className="max-h-48 space-y-2 overflow-y-auto">

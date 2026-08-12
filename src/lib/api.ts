@@ -293,7 +293,7 @@ export async function apiUploadFile(tenantId: string, docId: string, file: File)
   formData.append('tenantId', tenantId);
   formData.append('docId', docId);
   const token = getToken();
-  const res = await fetch(`${API_BASE}/files/upload`, {
+  const res = await fetch(`${getApiBase()}/files/upload`, {
     method: 'POST',
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: formData,
@@ -400,4 +400,98 @@ export async function apiPublishBanner<T>(message: string, severity: string, ten
 export async function apiClearBanner(tenantId: string | null): Promise<{ success: boolean }> {
   const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : '';
   return request<{ success: boolean }>(`/banner${qs}`, { method: 'DELETE' });
+}
+
+// ── Invoices ──────────────────────────────────────────────
+
+export async function apiGetInvoices<T>(): Promise<T[]> {
+  return request<T[]>('/invoices');
+}
+
+export async function apiCreateInvoice<T>(data: Record<string, unknown>): Promise<T> {
+  return request<T>('/invoices', { method: 'POST', body: JSON.stringify(data) });
+}
+
+// ── Backups ───────────────────────────────────────────────
+
+export async function apiGetBackups<T>(): Promise<T[]> {
+  return request<T[]>('/backups');
+}
+
+export async function apiCreateBackup<T>(data: Record<string, unknown>): Promise<T> {
+  return request<T>('/backups', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiRestoreBackup<T>(id: string): Promise<T> {
+  return request<T>(`/backups/${id}/restore`, { method: 'POST' });
+}
+
+export async function apiDeleteBackup(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/backups/${id}`, { method: 'DELETE' });
+}
+
+// ── Platform Staff ────────────────────────────────────────
+
+export async function apiGetPlatformStaff<T>(): Promise<T[]> {
+  return request<T[]>('/platform-staff');
+}
+
+export async function apiInvitePlatformStaff<T>(data: Record<string, unknown>): Promise<T> {
+  return request<T>('/platform-staff', { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdatePlatformStaff<T>(id: string, data: Record<string, unknown>): Promise<T> {
+  return request<T>(`/platform-staff/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function apiTogglePlatformStaffLock<T>(id: string): Promise<T> {
+  return request<T>(`/platform-staff/${id}/lock-toggle`, { method: 'PUT' });
+}
+
+export async function apiResetPlatformStaffPassword(id: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/platform-staff/${id}/reset-password`, { method: 'PUT' });
+}
+
+export async function apiDeletePlatformStaff(id: string, mode: 'soft' | 'hard'): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/platform-staff/${id}?mode=${mode}`, { method: 'DELETE' });
+}
+
+// ── Error Logs ────────────────────────────────────────────
+
+export async function apiGetErrorLogs<T>(): Promise<T[]> {
+  return request<T[]>('/error-logs');
+}
+
+// ── SMS Master Template (parallel system — see server/routes/smsTemplates.js) ──
+
+export async function apiGetMasterSmsTree<T>(treeKind: string): Promise<T[]> {
+  return request<T[]>(`/sms-templates/master/${treeKind}`);
+}
+
+export async function apiAddMasterSmsNode<T>(treeKind: string, data: Record<string, unknown>): Promise<T> {
+  return request<T>(`/sms-templates/master/${treeKind}`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdateMasterSmsNode<T>(treeKind: string, nodeId: string, data: Record<string, unknown>): Promise<T> {
+  return request<T>(`/sms-templates/master/${treeKind}/${nodeId}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export async function apiDeleteMasterSmsNode(treeKind: string, nodeId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/sms-templates/master/${treeKind}/${nodeId}`, { method: 'DELETE' });
+}
+
+export async function apiPushMasterSms<T>(version: string, targetTenantIds: string[]): Promise<T> {
+  return request<T>('/sms-templates/push', { method: 'POST', body: JSON.stringify({ version, targetTenantIds }) });
+}
+
+export async function apiGetSmsSnapshots<T>(tenantId: string): Promise<T[]> {
+  return request<T[]>(`/sms-templates/snapshots/${tenantId}`);
+}
+
+export async function apiCreateSmsSnapshot<T>(tenantId: string, label: string, treeData: unknown): Promise<T> {
+  return request<T>(`/sms-templates/snapshots/${tenantId}`, { method: 'POST', body: JSON.stringify({ label, treeData }) });
+}
+
+export async function apiRollbackSmsSnapshot<T>(tenantId: string, snapshotId: string): Promise<T> {
+  return request<T>(`/sms-templates/snapshots/${tenantId}/${snapshotId}/rollback`, { method: 'POST' });
 }

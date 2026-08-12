@@ -19,6 +19,11 @@ import syncConfigRoutes from './routes/syncConfig.js';
 import sessionRoutes from './routes/sessions.js';
 import bannerRoutes from './routes/banner.js';
 import vesselSyncRoutes from './routes/vesselSync.js';
+import invoiceRoutes from './routes/invoices.js';
+import backupRoutes from './routes/backups.js';
+import platformStaffRoutes from './routes/platformStaff.js';
+import errorLogRoutes from './routes/errorLogs.js';
+import smsTemplateRoutes from './routes/smsTemplates.js';
 import pool from './db.js';
 
 dotenv.config();
@@ -53,6 +58,11 @@ app.use('/api/sync-config', syncConfigRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/banner', bannerRoutes);
 app.use('/api/vessel-sync', vesselSyncRoutes);
+app.use('/api/invoices', invoiceRoutes);
+app.use('/api/backups', backupRoutes);
+app.use('/api/platform-staff', platformStaffRoutes);
+app.use('/api/error-logs', errorLogRoutes);
+app.use('/api/sms-templates', smsTemplateRoutes);
 
 // ── Health check ────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));

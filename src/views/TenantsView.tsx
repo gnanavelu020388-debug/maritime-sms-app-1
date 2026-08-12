@@ -32,8 +32,6 @@ import { useAuth } from "../lib/auth";
 import { PLAN_DEFAULTS, PLAN_TIERS, formatUtc } from "../constants";
 import type { Capabilities } from "../lib/permissions";
 import type {
-  DocTreeKind,
-  DocumentNode,
   PlanTier,
   Tenant,
   TenantStatus,
@@ -762,8 +760,6 @@ function TenantFormModal({
       contractExpires: new Date(Date.now() + 365 * 86400000).toISOString(),
       monthlyRevenue: PLAN_DEFAULTS.Professional.monthly,
       region: "EMEA",
-      docTrees: ["sms", "fleet_circulars", "flag_state"] as DocTreeKind[],
-      docClones: {} as Record<DocTreeKind, DocumentNode>,
     },
   );
 

@@ -9,9 +9,21 @@ import { ProgressBar } from '../components/ProgressBar';
 import { CriticalActionWizard } from '../components/CriticalActionWizard';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
-import { formatGb, relativeTime, formatUtc, uid } from '../constants';
+import { formatGb, relativeTime, formatUtc } from '../constants';
 import type { BackupSnapshot, Tenant } from '../types';
 import type { Capabilities } from '../lib/permissions';
+import { apiCreateBackup, apiRestoreBackup, apiDeleteBackup } from '../lib/api';
+import { logAudit } from '../lib/audit';
+import type { BackupSnapshotRow } from '../lib/supabase';
+
+function mapBackupRow(row: BackupSnapshotRow, company: string): BackupSnapshot {
+  return {
+    id: row.id, tenantId: row.tenant_id, company,
+    takenAt: row.taken_at, sizeGb: Number(row.size_gb),
+    type: row.type as BackupSnapshot['type'], status: row.status as BackupSnapshot['status'],
+    expiry: row.expiry, reason: row.reason ?? undefined,
+  };
+}
 
 type BackupFreq = '6h' | '12h' | '24h' | 'custom';
 
@@ -50,18 +62,17 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
     return isolation.filter((r) => r.tenant.company.toLowerCase().includes(q) || r.tenant.id.toLowerCase().includes(q));
   }, [isolation, searchQuery]);
 
-  const triggerManual = (tenant: Tenant) => {
-    const snap: BackupSnapshot = {
-      id: `SNP-${uid('r').slice(-6)}`,
-      tenantId: tenant.id,
-      company: tenant.company,
-      takenAt: new Date().toISOString(),
-      sizeGb: +((tenant.storageGb.used) * 0.045).toFixed(2),
+  const triggerManual = async (tenant: Tenant) => {
+    const row = await apiCreateBackup<BackupSnapshotRow>({
+      tenant_id: tenant.id,
+      size_gb: +((tenant.storageGb.used) * 0.045).toFixed(2),
       type: 'manual',
       status: 'completed',
       expiry: new Date(Date.now() + 30 * 86400000).toISOString(),
-    };
+    });
+    const snap = mapBackupRow(row, tenant.company);
     dispatch({ type: 'BACKUP_ADD', snapshot: snap });
+    await logAudit({ tenantId: tenant.id, actorEmail: user?.email ?? 'unknown', category: 'backup', action: `Manual snapshot triggered: ${tenant.company}`, target: tenant.company, severity: 'info' });
     toast({ tone: 'success', title: 'Manual snapshot triggered', message: `${tenant.company} snapshot ${snap.id} started.` });
   };
 
@@ -288,9 +299,37 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
         </div>
       </Card>
 
-      {manualOpen && <ManualSnapshotModal tenants={tenants} onClose={() => setManualOpen(false)} onCreate={(snap) => { dispatch({ type: 'BACKUP_ADD', snapshot: snap }); toast({ tone: 'success', title: 'Manual snapshot triggered', message: `${snap.company} snapshot ${snap.id} started.` }); setManualOpen(false); }} />}
+      {manualOpen && (
+        <ManualSnapshotModal
+          tenants={tenants}
+          onClose={() => setManualOpen(false)}
+          onCreate={async (draft) => {
+            const row = await apiCreateBackup<BackupSnapshotRow>({
+              tenant_id: draft.tenantId, size_gb: draft.sizeGb, type: 'manual', status: 'completed',
+              expiry: new Date(Date.now() + 30 * 86400000).toISOString(), reason: draft.reason,
+            });
+            const snap = mapBackupRow(row, draft.company);
+            dispatch({ type: 'BACKUP_ADD', snapshot: snap });
+            await logAudit({ tenantId: draft.tenantId, actorEmail: user?.email ?? 'unknown', category: 'backup', action: `Manual snapshot triggered: ${draft.company}`, target: draft.company, severity: 'info' });
+            toast({ tone: 'success', title: 'Manual snapshot triggered', message: `${draft.company} snapshot ${snap.id} started.` });
+            setManualOpen(false);
+          }}
+        />
+      )}
 
-      {restoreFor && <RestoreWizard snapshot={restoreFor} onClose={() => setRestoreFor(null)} onConfirm={() => { dispatch({ type: 'BACKUP_RESTORE', snapshotId: restoreFor.id }); toast({ tone: 'danger', title: 'Isolated restore executed', message: `${restoreFor.company} data restored from ${restoreFor.id}. Logged to audit ledger.` }); setRestoreFor(null); }} />}
+      {restoreFor && (
+        <RestoreWizard
+          snapshot={restoreFor}
+          onClose={() => setRestoreFor(null)}
+          onConfirm={async () => {
+            await apiRestoreBackup(restoreFor.id);
+            dispatch({ type: 'BACKUP_RESTORE', snapshotId: restoreFor.id });
+            await logAudit({ tenantId: restoreFor.tenantId, actorEmail: user?.email ?? 'unknown', category: 'backup', action: `Isolated restore executed: ${restoreFor.company}`, target: restoreFor.company, severity: 'critical' });
+            toast({ tone: 'danger', title: 'Isolated restore executed', message: `${restoreFor.company} data restored from ${restoreFor.id}. Logged to audit ledger.` });
+            setRestoreFor(null);
+          }}
+        />
+      )}
 
       {deleteSnap && (
         <CriticalActionWizard
@@ -318,8 +357,10 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
           }}
           actorEmail={user?.email ?? 'unknown'}
           onClose={() => setDeleteSnap(null)}
-          onExecute={(payload) => {
+          onExecute={async (payload) => {
+            await apiDeleteBackup(deleteSnap.id);
             dispatch({ type: 'BACKUP_DELETE', snapshotId: deleteSnap.id });
+            await logAudit({ tenantId: deleteSnap.tenantId, actorEmail: user?.email ?? 'unknown', category: 'backup', action: `Backup snapshot deleted: ${deleteSnap.id}`, target: deleteSnap.id, severity: 'critical' });
             toast({ tone: 'danger', title: 'Snapshot permanently deleted', message: `${deleteSnap.id} removed. Audit entry: ${payload.timestamp}.` });
             setDeleteSnap(null);
           }}
@@ -338,7 +379,9 @@ function Row({ icon, label, value }: { icon: ReactNode; label: string; value: st
   );
 }
 
-function ManualSnapshotModal({ tenants, onClose, onCreate }: { tenants: Tenant[]; onClose: () => void; onCreate: (s: BackupSnapshot) => void }) {
+interface ManualSnapshotDraft { tenantId: string; company: string; sizeGb: number; reason?: string }
+
+function ManualSnapshotModal({ tenants, onClose, onCreate }: { tenants: Tenant[]; onClose: () => void; onCreate: (draft: ManualSnapshotDraft) => Promise<void> }) {
   const [tenantId, setTenantId] = useState(tenants[0]?.id ?? '');
   const [reason, setReason] = useState('');
   const [running, setRunning] = useState(false);
@@ -354,18 +397,12 @@ function ManualSnapshotModal({ tenants, onClose, onCreate }: { tenants: Tenant[]
       setProgress(Math.min(100, p));
       if (p >= 100) {
         clearInterval(h);
-        const snap: BackupSnapshot = {
-          id: `SNP-${uid('r').slice(-6)}`,
+        onCreate({
           tenantId,
           company: tenant?.company ?? '',
-          takenAt: new Date().toISOString(),
           sizeGb: +((tenant?.storageGb.used ?? 0) * 0.045).toFixed(2),
-          type: 'manual',
-          status: 'completed',
-          expiry: new Date(Date.now() + 30 * 86400000).toISOString(),
           reason: reason || undefined,
-        };
-        onCreate(snap);
+        });
       }
     }, 180);
   };
