@@ -11,7 +11,8 @@ import {
   useTenantSecuritySettings,
   type TenantSecuritySettings,
 } from '../../lib/sessionSecurity';
-import { Toaster } from '../Toaster';
+import { apiUpdateTenantSecuritySettings } from '../../lib/api';
+import { logAudit } from '../../lib/audit';
 
 export function CompanySecuritySettings() {
   const { tenant, tenantUser } = useAuth();
@@ -35,10 +36,14 @@ export function CompanySecuritySettings() {
       inactivity_timeout_minutes: timeoutMinutes,
       enforce_single_session: enforceSingle,
     };
-
-    // Settings are managed via API in production
+    try {
+      await apiUpdateTenantSecuritySettings(tenant.id, newSettings);
+      await logAudit({ tenantId: tenant.id, actorEmail: tenantUser?.email ?? '', category: 'security', action: `Security settings updated: inactivity timeout ${timeoutMinutes}min, single-session ${enforceSingle ? 'enforced' : 'disabled'}`, target: 'tenant_security_settings' });
+      setToast({ msg: 'Security settings saved', ok: true });
+    } catch {
+      setToast({ msg: 'Failed to save security settings', ok: false });
+    }
     setSaving(false);
-    setToast({ msg: 'Security settings saved', ok: true });
     setTimeout(() => setToast(null), 3000);
   }
 

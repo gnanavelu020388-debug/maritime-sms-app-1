@@ -5,7 +5,6 @@ import {
   Eye, Calendar, User, Layers, Ship,
 } from 'lucide-react';
 import { useStore } from '../store';
-import { DOC_TREE_KINDS } from '../constants';
 import { relativeTime } from '../constants';
 import type { Tenant } from '../types';
 import { type SmsDocRow } from '../lib/supabase';
@@ -14,6 +13,7 @@ import {
 } from '../lib/demoData';
 import { loadProfiles, getVesselsForTenant, type SmsProfileWithVessels } from '../lib/smsProfiles';
 import { onSyncEvent } from '../lib/syncChannel';
+import { refreshTenantData } from '../lib/dataCache';
 
 interface TreeTab {
   key: string;
@@ -31,7 +31,7 @@ export function TenantInspectionBar({ selectedId, onSelectTenant }: {
 }) {
   const { tenants } = useStore();
   const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [activeTree, setActiveTree] = useState<string>('sms');
+  const [activeTree, setActiveTree] = useState<string>('');
 
   const activeTenants = tenants.filter((t) => t.status !== 'archived');
   const selectedTenant = selectedId ? tenants.find((t) => t.id === selectedId) ?? null : null;
@@ -64,7 +64,7 @@ export function TenantInspectionBar({ selectedId, onSelectTenant }: {
                     {activeTenants.map((t) => (
                       <button
                         key={t.id}
-                        onClick={() => { onSelectTenant(t.id); setDropdownOpen(false); setActiveTree('sms'); }}
+                        onClick={() => { onSelectTenant(t.id); setDropdownOpen(false); setActiveTree(''); }}
                         className={`flex w-full items-center gap-2.5 px-3 py-2.5 text-left text-sm transition hover:bg-ink-50 dark:hover:bg-ink-800 ${selectedId === t.id ? 'bg-primary-50 font-bold text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'text-ink-700 dark:text-ink-200'}`}
                       >
                         <Building2 className="h-4 w-4 shrink-0 text-ink-400" />
@@ -108,7 +108,7 @@ function TenantSmsMirror({ tenant, activeTree, onTreeChange }: {
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [roots, setRoots] = useState<MirrorNode[]>([]);
-  const [allTabs, setAllTabs] = useState<TreeTab[]>(DOC_TREE_KINDS.map((m) => ({ key: m.key, label: m.label })));
+  const [allTabs, setAllTabs] = useState<TreeTab[]>([]);
   const [loading, setLoading] = useState(true);
   const [docCounts, setDocCounts] = useState<Record<string, number>>({});
   const [profiles, setProfiles] = useState<SmsProfileWithVessels[]>([]);
@@ -133,21 +133,36 @@ function TenantSmsMirror({ tenant, activeTree, onTreeChange }: {
 
   useEffect(() => { loadProfilesList(); }, [dataTenantId]);
 
-  // Real-time sync: listen for SMS_UPDATED and PROFILES_UPDATED from Company Admin
+  // Cache can be stale from session-start hydration (e.g. a company admin created a
+  // vessel after this super-admin session loaded). Refetch fresh from the backend
+  // whenever the inspector opens/switches to a tenant, then re-run the loaders below.
+  useEffect(() => {
+    if (!dataTenantId) return;
+    let cancelled = false;
+    refreshTenantData(dataTenantId).then(() => {
+      if (!cancelled) setSyncTick((t) => t + 1);
+    });
+    return () => { cancelled = true; };
+  }, [dataTenantId]);
+
+  // Real-time sync: listen for SMS_UPDATED, PROFILES_UPDATED, VESSELS_UPDATED and CREW_UPDATED from Company Admin
   useEffect(() => {
     const off = onSyncEvent((evt) => {
       if (evt.tenantId !== dataTenantId) return;
-      if (evt.type === 'SMS_UPDATED' || evt.type === 'PROFILES_UPDATED') {
-        setSyncTick((t) => t + 1);
+      if (evt.type === 'SMS_UPDATED' || evt.type === 'PROFILES_UPDATED' || evt.type === 'VESSELS_UPDATED' || evt.type === 'CREW_UPDATED') {
+        refreshTenantData(dataTenantId).then(() => setSyncTick((t) => t + 1));
       }
     });
     return off;
   }, [dataTenantId]);
 
   async function loadAllTabs() {
-    const custom = getDemoCustomTabs(dataTenantId);
+    const custom = await getDemoCustomTabs(dataTenantId);
     const customTabs: TreeTab[] = Object.values(custom).map((v) => ({ key: v.key, label: v.label, custom: true }));
-    setAllTabs([...DOC_TREE_KINDS.map((m) => ({ key: m.key, label: m.label })), ...customTabs]);
+    setAllTabs(customTabs);
+    if (!activeTree || !customTabs.some((t) => t.key === activeTree)) {
+      onTreeChange(customTabs[0]?.key ?? '');
+    }
   }
 
   async function loadTree() {
@@ -282,6 +297,14 @@ function TenantSmsMirror({ tenant, activeTree, onTreeChange }: {
         );
       })()}
 
+      {allTabs.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-ink-300 bg-ink-50/50 py-16 text-center dark:border-ink-700 dark:bg-ink-900/30">
+          <Layers className="mx-auto h-10 w-10 text-ink-300 dark:text-ink-600" />
+          <p className="mt-3 text-sm font-semibold text-ink-500 dark:text-ink-400">No tabs yet</p>
+          <p className="mt-1 text-xs text-ink-400">This tenant hasn't created any document tabs in their workspace.</p>
+        </div>
+      ) : (
+      <>
       {/* Tree tabs — includes custom tabs from tenant workspace */}
       <div className="flex flex-wrap items-center gap-1 rounded-lg bg-ink-100 p-1 dark:bg-ink-800">
         {allTabs.map((tab) => {
@@ -325,6 +348,8 @@ function TenantSmsMirror({ tenant, activeTree, onTreeChange }: {
           )}
         </div>
       </div>
+      </>
+      )}
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-4 rounded-lg border border-ink-200/70 bg-ink-50 p-3 text-xs dark:border-ink-800 dark:bg-ink-900/50">

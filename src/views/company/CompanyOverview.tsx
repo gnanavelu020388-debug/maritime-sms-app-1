@@ -7,12 +7,28 @@ import type { CompanySection } from '../../layouts/CompanyShell';
 
 import { ShoreLaunchpadView } from '../../components/ShoreLaunchpadView';
 import { useFeatureFlags, type ModuleKey } from '../../lib/featureFlags';
+import { onSyncEvent } from '../../lib/syncChannel';
+import { refreshTenantData } from '../../lib/dataCache';
 
 export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection) => void }) {
   const { tenant, tenantUser } = useAuth();
   const fleetScope = useFleetScope();
   const { isEnabled } = useFeatureFlags(tenant?.id);
   const [stats, setStats] = useState({ vessels: 0, users: 0, pendingDocs: 0, approvedDocs: 0, crewOnboard: 0 });
+  const [syncTick, setSyncTick] = useState(0);
+
+  // Live sync: refresh the shared data cache and recompute stats when any other
+  // tab/role changes vessels, crew, or SMS documents for this tenant.
+  useEffect(() => {
+    if (!tenant) return;
+    const off = onSyncEvent((evt) => {
+      if (evt.tenantId !== tenant.id) return;
+      if (evt.type === 'SMS_UPDATED' || evt.type === 'CREW_UPDATED' || evt.type === 'VESSELS_UPDATED' || evt.type === 'PROFILES_UPDATED') {
+        refreshTenantData(tenant.id).then(() => setSyncTick((t) => t + 1));
+      }
+    });
+    return off;
+  }, [tenant]);
 
   useEffect(() => {
     if (!tenant) return;
@@ -27,7 +43,7 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
       approvedDocs: liveDocs.filter((d) => d.approval_state === 'approved' && d.node_kind === 'document').length,
       crewOnboard: liveAssignments.filter((a) => !a.signed_off_at).length,
     });
-  }, [tenant, fleetScope.isGlobal, fleetScope.assignedVesselIds.join(',')]);
+  }, [tenant, fleetScope.isGlobal, fleetScope.assignedVesselIds.join(','), syncTick]);
 
   const cards = [
     { label: 'Vessels', value: stats.vessels, max: tenant?.vessels_max, icon: <Ship className="h-5 w-5" />, section: 'vessels' as CompanySection, tone: 'primary' },

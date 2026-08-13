@@ -167,6 +167,14 @@ type Action =
   | { type: 'TENANT_FREEZE'; id: string; frozen: boolean } | { type: 'TENANT_ROLLBACK'; snapshotId: string }
   | { type: 'GUARDRAILS_UPDATE'; id: string; patch: Partial<TenantGuardrails> } | { type: 'GUARDRAILS_GLOBAL_UPDATE'; patch: Partial<TenantGuardrails> };
 
+function loadStoredTheme(): 'dark' | 'light' {
+  try {
+    return localStorage.getItem('mpc-theme') === 'dark' ? 'dark' : 'light';
+  } catch {
+    return 'light';
+  }
+}
+
 const initialState: State = {
   tenants: [],
   isTenantsLoading: true,
@@ -177,7 +185,7 @@ const initialState: State = {
   impersonation: { active: false, tenantId: null, startedAt: null },
   globalMfaEnforced: true, globalGuardrails: { workspaceFrozen: false, maxSubfolderDepth: 4, maxUploadSizeMb: 50 },
   smsSnapshots: [], toasts: [],
-  theme: (typeof localStorage !== 'undefined' && localStorage.getItem('mpc-theme') === 'dark') ? 'dark' : 'light',
+  theme: loadStoredTheme(),
 };
 
 function applyTierLimits(tenants: Tenant[], tierConfigs: TierConfig[], planFor?: { id: string; plan: PlanTier }): Tenant[] {

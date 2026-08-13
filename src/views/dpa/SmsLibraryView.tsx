@@ -12,12 +12,6 @@ const DPA_SMS_PERMS: RankPermissionMap = {
   },
 };
 
-const BUILTIN_TABS = [
-  { key: 'sms', label: 'SMS Documents' },
-  { key: 'fleet_circulars', label: 'Fleet Circulars' },
-  { key: 'flag_state', label: 'Flag State Documents' },
-];
-
 export function SmsLibraryView() {
   const { tenant, activeAssignment, tenantUser, refresh } = useAuth();
   if (!tenant) return null;

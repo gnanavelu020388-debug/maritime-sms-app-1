@@ -12,7 +12,7 @@ import { postSyncEvent, onSyncEvent } from '../../lib/syncChannel';
 import {
   getEffectiveDemoSmsDocs, demoApproveSmsDoc, demoRejectSmsDoc,
   demoCreateSmsDoc, demoUpdateSmsDocContent, demoRenameSmsDoc, demoDeleteSmsDoc,
-  demoGetWorkspaceFrozen,
+  demoGetWorkspaceFrozen, getDemoCustomTabs,
 } from '../../lib/demoData';
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { useFleetScope } from '../../lib/useFleetScope';
@@ -24,12 +24,6 @@ interface Crumb {
   label: string;
   kind: 'root' | 'folder' | 'document';
 }
-
-const BUILTIN_TABS = [
-  { key: 'sms', label: 'SMS Documents', subtitle: 'Safety Management System' },
-  { key: 'fleet_circulars', label: 'Fleet Circulars', subtitle: 'Company-wide directives' },
-  { key: 'flag_state', label: 'Flag State Documents', subtitle: 'Flag authority requirements' },
-];
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -85,6 +79,7 @@ export function SmsApprovalsView() {
   const [profileDropdownOpen, setProfileDropdownOpen] = useState(false);
   const [syncTick, setSyncTick] = useState(0);
   const [filterTreeKind, setFilterTreeKind] = useState<string>('all');
+  const [tabLabels, setTabLabels] = useState<Record<string, string>>({});
 
   // Permission-gated action modals
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -164,6 +159,15 @@ export function SmsApprovalsView() {
 
   useEffect(() => {
     if (!tenant) return;
+    getDemoCustomTabs(tenant.id).then((custom) => {
+      const labels: Record<string, string> = {};
+      for (const v of Object.values(custom)) labels[v.key] = v.label;
+      setTabLabels(labels);
+    });
+  }, [tenant, syncTick]);
+
+  useEffect(() => {
+    if (!tenant) return;
     const off = onSyncEvent((evt) => {
       if (evt.tenantId !== tenant.id) return;
       if (evt.type === 'SMS_UPDATED' || evt.type === 'PROFILES_UPDATED' || evt.type === 'VESSELS_UPDATED') {
@@ -179,7 +183,7 @@ export function SmsApprovalsView() {
   }
 
   function resolveCrumbs(doc: SmsDocRow): Crumb[] {
-    const tabLabel = BUILTIN_TABS.find((t) => t.key === doc.tree_kind)?.label ?? doc.tree_kind.replace(/_/g, ' ');
+    const tabLabel = tabLabels[doc.tree_kind] ?? doc.tree_kind.replace(/_/g, ' ');
     const crumbs: Crumb[] = [{ label: tabLabel, kind: 'root' }];
     const chain: string[] = [];
     let currentId = doc.parent_id;
@@ -433,7 +437,7 @@ export function SmsApprovalsView() {
             onClick={() => setFilterTreeKind(k)}
             className={`rounded-full px-2.5 py-1 text-xs font-semibold ${filterTreeKind === k ? 'bg-accent-100 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300' : 'text-ink-500 hover:bg-ink-100 dark:hover:bg-ink-800'}`}
           >
-            {k === 'all' ? 'All' : BUILTIN_TABS.find((t) => t.key === k)?.label ?? k.replace(/_/g, ' ')}
+            {k === 'all' ? 'All' : tabLabels[k] ?? k.replace(/_/g, ' ')}
           </button>
         ))}
         <div className="ml-auto flex items-center gap-1">
@@ -872,13 +876,22 @@ function UploadSmsModal({ tenantId, profiles, onClose, onUpload }: {
 }) {
   const [label, setLabel] = useState('');
   const [docId, setDocId] = useState('');
-  const [treeKind, setTreeKind] = useState('sms');
+  const [treeKind, setTreeKind] = useState('');
   const [profileId, setProfileId] = useState<string | null>(null);
   const [content, setContent] = useState('');
   const [saving, setSaving] = useState(false);
+  const [tabs, setTabs] = useState<{ key: string; label: string }[]>([]);
+
+  useEffect(() => {
+    getDemoCustomTabs(tenantId).then((custom) => {
+      const list = Object.values(custom).map((v) => ({ key: v.key, label: v.label }));
+      setTabs(list);
+      setTreeKind((prev) => (prev && list.some((t) => t.key === prev)) ? prev : (list[0]?.key ?? ''));
+    });
+  }, [tenantId]);
 
   async function handleSubmit() {
-    if (!label.trim()) return;
+    if (!label.trim() || !treeKind) return;
     setSaving(true);
     await onUpload({
       label: label.trim(),
@@ -902,7 +915,7 @@ function UploadSmsModal({ tenantId, profiles, onClose, onUpload }: {
       footer={
         <>
           <button onClick={onClose} className="btn-secondary" disabled={saving}>Cancel</button>
-          <button onClick={handleSubmit} disabled={saving || !label.trim()} className="btn-primary flex items-center gap-2">
+          <button onClick={handleSubmit} disabled={saving || !label.trim() || !treeKind} className="btn-primary flex items-center gap-2">
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Upload className="h-4 w-4" />}
             Upload &amp; Submit for Approval
           </button>
@@ -921,8 +934,12 @@ function UploadSmsModal({ tenantId, profiles, onClose, onUpload }: {
           </div>
           <div>
             <label className="label">Category *</label>
-            <select className="input" value={treeKind} onChange={(e) => setTreeKind(e.target.value)}>
-              {BUILTIN_TABS.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)}
+            <select className="input" value={treeKind} onChange={(e) => setTreeKind(e.target.value)} disabled={tabs.length === 0}>
+              {tabs.length === 0 ? (
+                <option value="">No tabs available — create one from the SMS Review &amp; Deployment Desk first</option>
+              ) : (
+                tabs.map((t) => <option key={t.key} value={t.key}>{t.label}</option>)
+              )}
             </select>
           </div>
           <div>

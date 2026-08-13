@@ -29,6 +29,33 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
+router.patch('/:tenantId/:profileId', authMiddleware, async (req, res) => {
+  try {
+    const tid = req.params.tenantId;
+    if (!canAccess(req, tid)) return res.status(403).json({ error: 'Access denied' });
+    const fields = ['name', 'version'];
+    const sets = [];
+    const vals = [];
+    for (const f of fields) {
+      if (req.body[f] !== undefined) { sets.push(`${f} = ?`); vals.push(req.body[f]); }
+    }
+    if (sets.length === 0) return res.json({ error: 'No fields to update' });
+    vals.push(req.params.profileId, tid);
+    await pool.query(`UPDATE sms_profiles SET ${sets.join(', ')} WHERE id = ? AND tenant_id = ?`, vals);
+    const [rows] = await pool.query('SELECT * FROM sms_profiles WHERE id = ?', [req.params.profileId]);
+    return res.json(rows[0]);
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+router.delete('/:tenantId/:profileId', authMiddleware, async (req, res) => {
+  try {
+    const tid = req.params.tenantId;
+    if (!canAccess(req, tid)) return res.status(403).json({ error: 'Access denied' });
+    await pool.query('DELETE FROM sms_profiles WHERE id = ? AND tenant_id = ?', [req.params.profileId, tid]);
+    return res.json({ success: true });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
 router.get('/:tenantId/:profileId/vessels', authMiddleware, async (req, res) => {
   try {
     if (!canAccess(req, req.params.tenantId)) return res.status(403).json({ error: 'Access denied' });

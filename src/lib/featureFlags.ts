@@ -1,6 +1,6 @@
 /**
  * Feature flags system — per-tenant module enablement.
- * Fully self-contained: reads from localStorage with no external network calls.
+ * Backed by an in-memory cache populated from the backend; no localStorage.
  */
 
 import { useState, useEffect, useCallback } from 'react';

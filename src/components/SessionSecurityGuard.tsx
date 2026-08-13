@@ -18,7 +18,6 @@ export function SessionSecurityGuard({ children }: { children: ReactNode }) {
   const { user, signOut, sessionToken, sessionConflict, dismissSessionConflict } = useAuth();
 
   // Read tenant security settings via the tenantUser's tenant_id
-  // For demo mode, we read from localStorage via the hook directly.
   // The tenantId comes from the auth context's tenant, but the hook
   // is also called in the shell directly. Here we just need the timeout.
   // We get the tenantId from a separate mechanism — the shells pass it

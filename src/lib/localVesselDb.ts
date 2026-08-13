@@ -104,14 +104,23 @@ async function setMeta(key: string, value: unknown): Promise<void> {
 
 // ── SMS document cache (legacy + top-down delta target) ────────────────
 
-/** Replace the full cached document set for a tenant (used on initial seed / full resync). */
+/** Replace the cached document set for a tenant (used on initial seed / full resync). Other tenants' cached rows are left untouched — the store is shared across every tenant seeded in this browser. */
 export async function cacheAllDocuments(tenantId: string, docs: SmsDocRow[]): Promise<void> {
   const db = await openDb();
   return new Promise((resolve, reject) => {
     const tx = db.transaction(STORE_DOCS, 'readwrite');
     const store = tx.objectStore(STORE_DOCS);
-    store.clear();
-    docs.forEach((d) => store.put(d));
+    const cursorReq = store.openCursor();
+    cursorReq.onsuccess = () => {
+      const cursor = cursorReq.result;
+      if (cursor) {
+        const row = cursor.value as SmsDocRow;
+        if (row.tenant_id === tenantId) cursor.delete();
+        cursor.continue();
+      } else {
+        docs.forEach((d) => store.put(d));
+      }
+    };
     tx.oncomplete = () => {
       void setMeta(`last_full_sync:${tenantId}`, new Date().toISOString());
       resolve();

@@ -123,6 +123,17 @@ CREATE TABLE IF NOT EXISTS sms_documents (
   INDEX idx_sms_docs_parent (parent_id)
 );
 
+CREATE TABLE IF NOT EXISTS sms_doc_tabs (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  tab_key VARCHAR(80) NOT NULL,
+  label VARCHAR(255) NOT NULL,
+  subtitle VARCHAR(255) NULL,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_sms_doc_tabs_tenant_key (tenant_id, tab_key)
+);
+
 CREATE TABLE IF NOT EXISTS audit_logs (
   id VARCHAR(36) PRIMARY KEY,
   tenant_id VARCHAR(36) NULL,
@@ -182,6 +193,60 @@ CREATE TABLE IF NOT EXISTS tenant_sync_config (
   updated_by VARCHAR(255),
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS tenant_security_settings (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL UNIQUE,
+  inactivity_timeout_minutes INT NOT NULL DEFAULT 15,
+  enforce_single_session BOOLEAN NOT NULL DEFAULT TRUE,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS rank_defs (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  `rank` VARCHAR(100) NOT NULL,
+  description VARCHAR(500),
+  is_custom BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_rank_defs_tenant_rank (tenant_id, `rank`)
+);
+
+CREATE TABLE IF NOT EXISTS rank_permissions (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  `rank` VARCHAR(100) NOT NULL,
+  apps JSON NOT NULL,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_rank_perms_tenant_rank (tenant_id, `rank`)
+);
+
+CREATE TABLE IF NOT EXISTS shore_role_defs (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  role VARCHAR(150) NOT NULL,
+  description VARCHAR(500),
+  is_custom BOOLEAN NOT NULL DEFAULT TRUE,
+  created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_shore_role_defs_tenant_role (tenant_id, role)
+);
+
+CREATE TABLE IF NOT EXISTS shore_role_permissions (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  role VARCHAR(150) NOT NULL,
+  actions JSON NOT NULL,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_shore_role_perms_tenant_role (tenant_id, role)
 );
 
 CREATE TABLE IF NOT EXISTS sms_document_versions (

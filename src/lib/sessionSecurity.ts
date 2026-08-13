@@ -34,8 +34,13 @@ export function useTenantSecuritySettings(tenantId: string | null | undefined): 
 
   useEffect(() => {
     if (!tenantId) { setSettings(null); setLoading(false); return; }
-    setSettings(DEFAULT_SECURITY);
-    setLoading(false);
+    let cancelled = false;
+    setLoading(true);
+    api.apiGetTenantSecuritySettings<TenantSecuritySettings>(tenantId)
+      .then((s) => { if (!cancelled) setSettings(s); })
+      .catch(() => { if (!cancelled) setSettings(DEFAULT_SECURITY); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tenantId]);
 
   return { settings, loading };

@@ -12,7 +12,7 @@ import { postSyncEvent, onSyncEvent } from '../../lib/syncChannel';
 import {
   getEffectiveDemoSmsDocs, demoCreateSmsDoc, demoRenameSmsDoc,
   demoUpdateSmsDocContent, demoApproveSmsDoc, demoApproveAllSmsDocs,
-  demoDeleteSmsDoc, getDemoCustomTabs, saveDemoCustomTabs,
+  demoDeleteSmsDoc, getDemoCustomTabs, createDemoCustomTab, renameDemoCustomTab, deleteDemoCustomTab,
   demoGetWorkspaceFrozen,
   demoGetGuardrails,
 } from '../../lib/demoData';
@@ -31,11 +31,7 @@ interface TabDef {
   custom?: boolean;
 }
 
-const BUILTIN_TABS: TabDef[] = [
-  { key: 'sms', label: 'SMS Documents', subtitle: 'Safety Management System' },
-  { key: 'fleet_circulars', label: 'Fleet Circulars', subtitle: 'Company-wide directives' },
-  { key: 'flag_state', label: 'Flag State Documents', subtitle: 'Flag authority requirements' },
-];
+// No built-in tabs — company admins create their own document tabs from scratch.
 
 interface TreeNode extends SmsDocRow {
   children: TreeNode[];
@@ -89,9 +85,9 @@ function collectFolderIds(node: TreeNode): string[] {
 
 export function SmsDpaView() {
   const { tenant, tenantUser, role } = useAuth();
-  const [tabs, setTabs] = useState<TabDef[]>(BUILTIN_TABS);
+  const [tabs, setTabs] = useState<TabDef[]>([]);
   const [customTabs, setCustomTabs] = useState<Record<string, TabDef>>({});
-  const [treeKind, setTreeKind] = useState<string>('sms');
+  const [treeKind, setTreeKind] = useState<string>('');
   const [roots, setRoots] = useState<TreeNode[]>([]);
   const [allDocCount, setAllDocCount] = useState<Record<string, number>>({});
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -121,9 +117,9 @@ export function SmsDpaView() {
 
   const [deleteProfileTarget, setDeleteProfileTarget] = useState<SmsProfileWithVessels | null>(null);
 
-  // Workspace freeze state — bridged from Super Admin via localStorage + sync events
+  // Workspace freeze state — bridged from Super Admin via sync events
   const [workspaceFrozen, setWorkspaceFrozen] = useState(false);
-  // Guardrails — bridged from Super Admin via localStorage + sync events
+  // Guardrails — bridged from Super Admin via sync events
   const [maxSubfolderDepth, setMaxSubfolderDepth] = useState(DEFAULT_MAX_DEPTH);
   const [maxUploadSizeMb, setMaxUploadSizeMb] = useState(MAX_PDF_SIZE_MB);
 
@@ -133,11 +129,13 @@ export function SmsDpaView() {
 
   async function loadCustomTabs() {
     if (!tenant) return;
-    const demoTabs = getDemoCustomTabs(tenant.id);
+    const demoTabs = await getDemoCustomTabs(tenant.id);
     const demoTabDefs: Record<string, TabDef> = {};
     for (const [k, v] of Object.entries(demoTabs)) demoTabDefs[k] = { ...v, custom: true };
     setCustomTabs(demoTabDefs);
-    setTabs([...BUILTIN_TABS, ...Object.values(demoTabDefs)]);
+    const nextTabs = Object.values(demoTabDefs);
+    setTabs(nextTabs);
+    setTreeKind((prev) => (prev && nextTabs.some((t) => t.key === prev)) ? prev : (nextTabs[0]?.key ?? ''));
   }
 
   async function loadTree() {
@@ -202,14 +200,14 @@ export function SmsDpaView() {
     if (!tenant) return;
     setApprovingId(doc.id);
     const oldVersion = tenant.sms_version;
-    demoApproveSmsDoc(tenant.id, doc.id);
+    await demoApproveSmsDoc(tenant.id, doc.id);
     // Bump fleet SMS version + build delta package (top-down baseline push)
     const newVersion = await deployBaseline(tenant.id, tenantUser!.email);
     const versionLabel = newVersion ?? oldVersion;
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `DPA approved & deployed: ${doc.label} (SMS v${oldVersion} → v${versionLabel})`, target: doc.tree_kind, location: tenant.company, severity: 'warning' });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'approved', docId: doc.id, label: doc.label, version: versionLabel } });
     setApprovingId(null);
-    loadTree(); loadAllPending(); loadAllCounts();
+    await loadTree(); await loadAllPending(); await loadAllCounts();
   }
 
   async function loadProfilesList() {
@@ -304,26 +302,26 @@ export function SmsDpaView() {
     const currentId = inlineEditId;
     cancelInlineEdit();
     if (!trimmed || trimmed === node.label || !currentId || !tenant) return;
-    demoRenameSmsDoc(tenant.id, node.id, trimmed);
+    await demoRenameSmsDoc(tenant.id, node.id, trimmed);
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Renamed: ${node.label} → ${trimmed}`, target: treeKind, location: tenant.company });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'renamed', nodeId: node.id, label: trimmed } });
-    loadTree();
+    await loadTree();
   }
 
   async function confirmDeleteNode() {
     if (!deleteFor || !tenant) return;
-    demoDeleteSmsDoc(tenant.id, deleteFor.id);
+    await demoDeleteSmsDoc(tenant.id, deleteFor.id);
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Deleted: ${deleteFor.label}`, target: treeKind, location: tenant.company, severity: 'warning' });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'deleted', nodeId: deleteFor.id, label: deleteFor.label } });
     setDeleteFor(null);
-    loadTree(); loadAllCounts(); loadCustomTabs(); loadAllPending();
+    await loadTree(); await loadAllCounts(); await loadCustomTabs(); await loadAllPending();
   }
 
   async function approveAll() {
     if (!tenant) return;
     setApproving(true);
     const oldVersion = tenant.sms_version;
-    const count = demoApproveAllSmsDocs(tenant.id);
+    const count = await demoApproveAllSmsDocs(tenant.id);
     if (count > 0) {
       // Bump fleet SMS version + build delta package (top-down baseline push)
       const newVersion = await deployBaseline(tenant.id, tenantUser!.email);
@@ -332,27 +330,25 @@ export function SmsDpaView() {
       postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'approve_all', version: versionLabel, count } });
     }
     setApproving(false);
-    loadTree(); loadAllPending();
+    await loadTree(); await loadAllPending();
   }
 
-  function addCustomTab(label: string) {
+  async function addCustomTab(label: string) {
     if (!tenant || !label.trim()) return;
     const key = `custom_${label.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 40)}_${Date.now().toString().slice(-4)}`;
-    const def: TabDef = { key, label: label.trim(), subtitle: 'Custom document group', custom: true };
-    const updated = { ...customTabs, [key]: def };
-    setCustomTabs(updated);
-    setTabs([...BUILTIN_TABS, ...Object.values(updated)]);
-    saveDemoCustomTabs(tenant.id, updated);
+    await createDemoCustomTab(tenant.id, key, label.trim(), 'Custom document group');
+    await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Tab created: ${label.trim()}`, target: key, location: tenant.company });
+    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'tab_created', label: label.trim() } });
+    await loadCustomTabs();
     setAddTabOpen(false);
     setTreeKind(key);
   }
 
   async function renameCustomTab(key: string, label: string) {
     if (!tenant || !label.trim()) return;
-    const updated = { ...customTabs, [key]: { ...customTabs[key], label: label.trim() } };
-    setCustomTabs(updated);
-    setTabs([...BUILTIN_TABS, ...Object.values(updated)]);
-    saveDemoCustomTabs(tenant.id, updated);
+    await renameDemoCustomTab(tenant.id, key, label.trim());
+    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'tab_renamed', key, label: label.trim() } });
+    await loadCustomTabs();
     setRenameTabKey(null);
   }
 
@@ -360,14 +356,12 @@ export function SmsDpaView() {
     if (!tenant) return;
     const docs = getEffectiveDemoSmsDocs(tenant.id, key);
     if (docs.length > 0) return;
-    const updated = { ...customTabs };
-    delete updated[key];
-    setCustomTabs(updated);
-    setTabs([...BUILTIN_TABS, ...Object.values(updated)]);
-    saveDemoCustomTabs(tenant.id, updated);
-    await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Tab deleted: ${customTabs[key]?.label ?? key}`, target: key, location: tenant.company, severity: 'warning' });
+    const label = customTabs[key]?.label ?? key;
+    await deleteDemoCustomTab(tenant.id, key);
+    await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Tab deleted: ${label}`, target: key, location: tenant.company, severity: 'warning' });
+    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'tab_deleted', key } });
     setDeleteTabKey(null);
-    if (treeKind === key) setTreeKind('sms');
+    await loadCustomTabs();
   }
 
   const activeTab = tabs.find((t) => t.key === treeKind);
@@ -385,32 +379,32 @@ export function SmsDpaView() {
       }
     }
     setFolderDepthError('');
-    demoCreateSmsDoc(tenant.id, { parent_id: addFolderFor.parentId, tree_kind: treeKind, label, node_kind: 'folder', content_kind: null, content: null, profile_id: activeProfile?.id });
+    await demoCreateSmsDoc(tenant.id, { parent_id: addFolderFor.parentId, tree_kind: treeKind, label, node_kind: 'folder', content_kind: null, content: null, profile_id: activeProfile?.id });
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Created folder: ${label}`, target: treeKind, location: tenant.company });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'added', label, kind: 'folder' } });
     // Auto-expand parent so the new subfolder is immediately visible as nested
     if (addFolderFor.parentId) setExpanded((s) => new Set(s).add(addFolderFor.parentId!));
     setAddFolderFor(null);
-    loadTree(); loadAllCounts(); loadAllPending();
+    await loadTree(); await loadAllCounts(); await loadAllPending();
   }
 
   async function handleAddDocument(label: string, contentKind: 'rich_text' | 'pdf', content: string, sizeBytes: number | null) {
     if (!tenant || !addDocFor || !label.trim()) return;
-    demoCreateSmsDoc(tenant.id, { parent_id: addDocFor.parentId, tree_kind: treeKind, label, node_kind: 'document', content_kind: contentKind, content, file_size_bytes: sizeBytes, profile_id: activeProfile?.id, author_name: tenantUser?.name ?? 'Company Admin', author_role: 'Company Admin', author_origin: 'Shoreside HQ' });
+    await demoCreateSmsDoc(tenant.id, { parent_id: addDocFor.parentId, tree_kind: treeKind, label, node_kind: 'document', content_kind: contentKind, content, file_size_bytes: sizeBytes, profile_id: activeProfile?.id, author_name: tenantUser?.name ?? 'Company Admin', author_role: 'Company Admin', author_origin: 'Shoreside HQ' });
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Added document: ${label}`, target: treeKind, location: tenant.company });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'added', label, kind: 'document' } });
     // Auto-expand parent so the new document is immediately visible as nested
     if (addDocFor.parentId) setExpanded((s) => new Set(s).add(addDocFor.parentId!));
     setAddDocFor(null);
-    loadTree(); loadAllCounts(); loadAllPending();
+    await loadTree(); await loadAllCounts(); await loadAllPending();
   }
 
   async function handleSaveEdit(content: string, contentKind: 'rich_text' | 'pdf', sizeBytes: number | null) {
     if (!tenant || !editorFor) return;
-    demoUpdateSmsDocContent(tenant.id, editorFor.id, content, contentKind, tenantUser?.name ?? 'Company Admin', 'Company Admin', 'Shoreside HQ', sizeBytes);
+    await demoUpdateSmsDocContent(tenant.id, editorFor.id, content, contentKind, tenantUser?.name ?? 'Company Admin', 'Company Admin', 'Shoreside HQ', sizeBytes);
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Edited: ${editorFor.label}`, target: treeKind, location: tenant.company });
     postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'edited', nodeId: editorFor.id, label: editorFor.label } });
-    setEditorFor(null); loadTree(); loadAllPending();
+    setEditorFor(null); await loadTree(); await loadAllPending();
   }
 
   function renderNode(node: TreeNode, depth: number): React.ReactNode {
@@ -700,38 +694,51 @@ export function SmsDpaView() {
       </div>
 
       {/* Tree panel */}
-      <div className="rounded-xl border border-ink-200/70 bg-white dark:border-ink-800 dark:bg-ink-900">
-        <div className="flex items-center justify-between border-b border-ink-100 px-3 py-2.5 dark:border-ink-800">
-          <div className="flex items-center gap-2">
-            <FolderTree className="h-4 w-4 text-primary-500" />
-            <div>
-              <span className="text-sm font-bold text-ink-900 dark:text-white">{activeTab?.label}</span>
-              <span className="ml-2 text-[11px] text-ink-400">{activeTab?.subtitle}</span>
-            </div>
-          </div>
+      {tabs.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-ink-300 bg-ink-50/50 py-16 text-center dark:border-ink-700 dark:bg-ink-900/30">
+          <Layers className="mx-auto h-10 w-10 text-ink-300 dark:text-ink-600" />
+          <p className="mt-3 text-sm font-semibold text-ink-500 dark:text-ink-400">No tabs yet</p>
+          <p className="mt-1 text-xs text-ink-400">Create your first document tab to start building the SMS structure.</p>
           {canEdit && (
-            <div className="flex items-center gap-2">
-              <button onClick={() => setAddDocFor({ parentId: null })} className="inline-flex items-center gap-1.5 rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-bold text-primary-700 transition hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300" title="Add a document at root level">
-                <FilePlus2 className="h-4 w-4" /> Add Document
-              </button>
-              <button onClick={() => setAddFolderFor({ parentId: null })} className="inline-flex items-center gap-1.5 rounded-lg bg-accent-50 px-3 py-1.5 text-xs font-bold text-accent-700 transition hover:bg-accent-100 dark:bg-accent-900/30 dark:text-accent-300" title="Create a new root folder">
-                <FolderPlus className="h-4 w-4" /> Create Folder
-              </button>
-            </div>
+            <button onClick={() => setAddTabOpen(true)} className="mt-4 inline-flex items-center gap-1.5 rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-bold text-primary-700 hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300">
+              <Plus className="h-3.5 w-3.5" /> New Tab
+            </button>
           )}
         </div>
-        <div className="p-2" style={{ maxHeight: '520px', overflowY: 'auto' }}>
-          {loading ? <p className="py-8 text-center text-sm text-ink-400">Loading…</p> :
-           roots.length === 0 ? (
-             <div className="py-8 text-center">
-               <FolderTree className="mx-auto h-8 w-8 text-ink-300" />
-               <p className="mt-2 text-sm text-ink-400">No documents in this tab yet.</p>
-               {canEdit && <p className="mt-1 text-xs text-ink-400">Use <strong>Create Folder</strong> or <strong>Add Document</strong> above to start building your section hierarchy.</p>}
-             </div>
-           ) :
-           roots.map((r) => renderNode(r, 0))}
+      ) : (
+        <div className="rounded-xl border border-ink-200/70 bg-white dark:border-ink-800 dark:bg-ink-900">
+          <div className="flex items-center justify-between border-b border-ink-100 px-3 py-2.5 dark:border-ink-800">
+            <div className="flex items-center gap-2">
+              <FolderTree className="h-4 w-4 text-primary-500" />
+              <div>
+                <span className="text-sm font-bold text-ink-900 dark:text-white">{activeTab?.label}</span>
+                <span className="ml-2 text-[11px] text-ink-400">{activeTab?.subtitle}</span>
+              </div>
+            </div>
+            {canEdit && (
+              <div className="flex items-center gap-2">
+                <button onClick={() => setAddDocFor({ parentId: null })} className="inline-flex items-center gap-1.5 rounded-lg bg-primary-50 px-3 py-1.5 text-xs font-bold text-primary-700 transition hover:bg-primary-100 dark:bg-primary-900/30 dark:text-primary-300" title="Add a document at root level">
+                  <FilePlus2 className="h-4 w-4" /> Add Document
+                </button>
+                <button onClick={() => setAddFolderFor({ parentId: null })} className="inline-flex items-center gap-1.5 rounded-lg bg-accent-50 px-3 py-1.5 text-xs font-bold text-accent-700 transition hover:bg-accent-100 dark:bg-accent-900/30 dark:text-accent-300" title="Create a new root folder">
+                  <FolderPlus className="h-4 w-4" /> Create Folder
+                </button>
+              </div>
+            )}
+          </div>
+          <div className="p-2" style={{ maxHeight: '520px', overflowY: 'auto' }}>
+            {loading ? <p className="py-8 text-center text-sm text-ink-400">Loading…</p> :
+             roots.length === 0 ? (
+               <div className="py-8 text-center">
+                 <FolderTree className="mx-auto h-8 w-8 text-ink-300" />
+                 <p className="mt-2 text-sm text-ink-400">No documents in this tab yet.</p>
+                 {canEdit && <p className="mt-1 text-xs text-ink-400">Use <strong>Create Folder</strong> or <strong>Add Document</strong> above to start building your section hierarchy.</p>}
+               </div>
+             ) :
+             roots.map((r) => renderNode(r, 0))}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Legend */}
       <div className="flex flex-wrap items-center gap-4 rounded-lg border border-ink-200/70 bg-ink-50 p-3 text-xs dark:border-ink-800 dark:bg-ink-900/50">

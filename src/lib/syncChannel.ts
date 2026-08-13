@@ -14,7 +14,8 @@ export type SyncEventType =
   | 'VESSELS_UPDATED'
   | 'AUDIT_LOGGED'
   | 'PROFILES_UPDATED'
-  | 'FEATURE_FLAGS_CHANGED';
+  | 'FEATURE_FLAGS_CHANGED'
+  | 'PERMISSIONS_UPDATED';
 
 export interface SyncEvent {
   type: SyncEventType;

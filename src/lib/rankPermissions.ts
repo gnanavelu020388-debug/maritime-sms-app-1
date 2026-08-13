@@ -16,6 +16,8 @@
 import { useEffect, useState } from 'react';
 import { type Rank, ALL_RANKS, CORE_RANKS } from './supabase';
 import { MODULE_KEYS, MODULE_LABELS, type ModuleKey } from './featureFlags';
+import * as api from './api';
+import { onSyncEvent } from './syncChannel';
 
 // ── Custom Rank Definitions ──────────────────────────────────────────
 
@@ -47,44 +49,16 @@ function defaultRankDefs(): RankDef[] {
   }));
 }
 
-const LS_DEMO_RANK_DEFS = 'mpc-demo-rank-defs';
-
-function getDemoRankDefs(tenantId: string): RankDef[] {
-  try {
-    const raw = localStorage.getItem(`${LS_DEMO_RANK_DEFS}-${tenantId}`);
-    if (raw) return JSON.parse(raw) as RankDef[];
-  } catch { /* ignore */ }
-  return defaultRankDefs();
+interface RankDefRow {
+  rank: string;
+  description: string | null;
+  is_custom: boolean;
+  created_at: string;
 }
 
-function saveDemoRankDefs(tenantId: string, defs: RankDef[]): void {
-  localStorage.setItem(`${LS_DEMO_RANK_DEFS}-${tenantId}`, JSON.stringify(defs));
-}
-
-export function getDemoCustomRanks(tenantId: string): RankDef[] {
-  return getDemoRankDefs(tenantId).filter((d) => d.is_custom);
-}
-
-export function demoAddCustomRank(tenantId: string, rank: string, description: string): void {
-  const defs = getDemoRankDefs(tenantId);
-  if (!defs.some((d) => d.rank === rank)) {
-    defs.push({ rank, description, is_custom: true, created_at: new Date().toISOString() });
-    saveDemoRankDefs(tenantId, defs);
-  }
-}
-
-export function demoEditCustomRank(tenantId: string, oldRank: string, newRank: string, description: string): void {
-  const defs = getDemoRankDefs(tenantId);
-  const idx = defs.findIndex((d) => d.rank === oldRank);
-  if (idx >= 0) {
-    defs[idx] = { ...defs[idx], rank: newRank, description };
-    saveDemoRankDefs(tenantId, defs);
-  }
-}
-
-export function demoDeleteCustomRank(tenantId: string, rank: string): void {
-  const defs = getDemoRankDefs(tenantId).filter((d) => !(d.rank === rank && d.is_custom));
-  saveDemoRankDefs(tenantId, defs);
+export async function getDemoCustomRanks(tenantId: string): Promise<RankDef[]> {
+  const rows = await api.apiGetRankDefs<RankDefRow>(tenantId);
+  return rows.filter((r) => r.is_custom).map((r) => ({ rank: r.rank, description: r.description ?? '', is_custom: r.is_custom, created_at: r.created_at }));
 }
 
 export function useRanksForTenant(tenantId: string | null | undefined): {
@@ -98,11 +72,29 @@ export function useRanksForTenant(tenantId: string | null | undefined): {
 
   useEffect(() => {
     if (!tenantId) { setRanks([]); setLoading(false); return; }
-    setRanks(getDemoRankDefs(tenantId));
-    setLoading(false);
+    let cancelled = false;
+    setLoading(true);
+    api.apiGetRankDefs<RankDefRow>(tenantId)
+      .then((rows) => {
+        if (cancelled) return;
+        const overrides = new Map(rows.map((r) => [r.rank, r]));
+        const merged: RankDef[] = defaultRankDefs().map((d) => {
+          const o = overrides.get(d.rank);
+          return o ? { rank: o.rank, description: o.description ?? d.description, is_custom: o.is_custom, created_at: o.created_at } : d;
+        });
+        for (const r of rows) {
+          if (!merged.some((m) => m.rank === r.rank)) {
+            merged.push({ rank: r.rank, description: r.description ?? '', is_custom: r.is_custom, created_at: r.created_at });
+          }
+        }
+        setRanks(merged);
+      })
+      .catch(() => { if (!cancelled) setRanks(defaultRankDefs()); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tenantId, tick]);
 
-  return { ranks, loading: loading, refresh: () => setTick((t) => t + 1) };
+  return { ranks, loading, refresh: () => setTick((t) => t + 1) };
 }
 
 export async function saveCustomRank(
@@ -110,8 +102,12 @@ export async function saveCustomRank(
   rank: string,
   description: string,
 ): Promise<{ error: string | null }> {
-  demoAddCustomRank(tenantId, rank, description);
-  return { error: null };
+  try {
+    await api.apiCreateRankDef(tenantId, { rank, description });
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to save rank' };
+  }
 }
 
 export async function updateCustomRank(
@@ -120,16 +116,24 @@ export async function updateCustomRank(
   newRank: string,
   description: string,
 ): Promise<{ error: string | null }> {
-  demoEditCustomRank(tenantId, oldRank, newRank, description);
-  return { error: null };
+  try {
+    await api.apiUpdateRankDef(tenantId, oldRank, { rank: newRank, description });
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to update rank' };
+  }
 }
 
 export async function deleteCustomRank(
   tenantId: string,
   rank: string,
 ): Promise<{ error: string | null }> {
-  demoDeleteCustomRank(tenantId, rank);
-  return { error: null };
+  try {
+    await api.apiDeleteRankDef(tenantId, rank);
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to delete rank' };
+  }
 }
 
 // ── App IDs are now ModuleKey — 1:1 with Super Admin feature flags ──
@@ -415,32 +419,6 @@ export const DEFAULT_RANK_PERMISSIONS: Record<string, RankPermissionMap> = {
   }),
 };
 
-// ── Demo-mode storage ────────────────────────────────────────────────
-
-const LS_DEMO_RANK_PERMS = 'mpc-demo-rank-permissions';
-
-function getDemoRankPerms(tenantId: string): Record<string, RankPermissionMap> {
-  try {
-    const raw = localStorage.getItem(LS_DEMO_RANK_PERMS);
-    if (raw) {
-      const all = JSON.parse(raw) as Record<string, Record<string, RankPermissionMap>>;
-      return all[tenantId] ?? {};
-    }
-  } catch { /* ignore */ }
-  return {};
-}
-
-function setDemoRankPerms(tenantId: string, rank: string, perms: RankPermissionMap): void {
-  try {
-    let all: Record<string, Record<string, RankPermissionMap>> = {};
-    const raw = localStorage.getItem(LS_DEMO_RANK_PERMS);
-    if (raw) all = JSON.parse(raw);
-    if (!all[tenantId]) all[tenantId] = {};
-    all[tenantId][rank] = perms;
-    localStorage.setItem(LS_DEMO_RANK_PERMS, JSON.stringify(all));
-  } catch { /* ignore */ }
-}
-
 // ── Normalize: fill missing actions with false, merge defaults ───────
 
 function normalizePerms(perms: RankPermissionMap | null | undefined): RankPermissionMap {
@@ -473,19 +451,44 @@ export function useRankPermissions(tenantId: string | null | undefined): {
 
   useEffect(() => {
     if (!tenantId) { setPermissions({}); setLoading(false); return; }
-
-    const demoPerms = getDemoRankPerms(tenantId);
-    const map: Record<string, RankPermissionMap> = {};
-    for (const rank of Object.keys(DEFAULT_RANK_PERMISSIONS)) {
-      map[rank] = demoPerms[rank]
-        ? normalizePerms(demoPerms[rank])
-        : normalizePerms(DEFAULT_RANK_PERMISSIONS[rank]);
-    }
-    setPermissions(map);
-    setLoading(false);
+    let cancelled = false;
+    setLoading(true);
+    api.apiGetRankPermissions<{ rank: string; apps: RankPermissionMap }>(tenantId)
+      .then((rows) => {
+        if (cancelled) return;
+        const overrides = new Map(rows.map((r) => [r.rank, r.apps]));
+        const map: Record<string, RankPermissionMap> = {};
+        for (const rank of Object.keys(DEFAULT_RANK_PERMISSIONS)) {
+          map[rank] = normalizePerms(overrides.get(rank) ?? DEFAULT_RANK_PERMISSIONS[rank]);
+        }
+        for (const [rank, apps] of overrides) {
+          if (!(rank in map)) map[rank] = normalizePerms(apps);
+        }
+        setPermissions(map);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const map: Record<string, RankPermissionMap> = {};
+        for (const rank of Object.keys(DEFAULT_RANK_PERMISSIONS)) map[rank] = normalizePerms(DEFAULT_RANK_PERMISSIONS[rank]);
+        setPermissions(map);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tenantId, tick]);
 
   const refresh = () => setTick((t) => t + 1);
+
+  // Live sync: another tab/role (e.g. Company Admin editing the Permissions
+  // Matrix) saving rank permissions for this tenant should refresh them here
+  // without a manual reload — matters most for the Vessel Portal launchpad.
+  useEffect(() => {
+    if (!tenantId) return;
+    const off = onSyncEvent((evt) => {
+      if (evt.tenantId !== tenantId) return;
+      if (evt.type === 'PERMISSIONS_UPDATED') refresh();
+    });
+    return off;
+  }, [tenantId]);
 
   return { permissions, loading, refresh };
 }
@@ -508,8 +511,12 @@ export async function saveRankPermission(
   rank: string,
   perms: RankPermissionMap,
 ): Promise<{ error: string | null }> {
-  setDemoRankPerms(tenantId, rank, perms);
-  return { error: null };
+  try {
+    await api.apiUpdateRankPermission(tenantId, rank, perms);
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to save permissions' };
+  }
 }
 
 // ── Permission helpers (consumed by vessel-side apps) ────────────────

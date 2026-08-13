@@ -8,20 +8,9 @@
  */
 
 import { getApiBase } from './networkContext';
+import { getToken, setToken, clearToken } from './authToken';
 
-function getToken(): string | null {
-  return localStorage.getItem('mpc-auth-token');
-}
-
-export { getToken };
-
-export function setToken(token: string): void {
-  localStorage.setItem('mpc-auth-token', token);
-}
-
-export function clearToken(): void {
-  localStorage.removeItem('mpc-auth-token');
-}
+export { getToken, setToken, clearToken };
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
@@ -273,6 +262,14 @@ export async function apiCreateSmsProfile<T>(tenantId: string, data: Record<stri
   return request<T>(`/sms-profiles/${tenantId}`, { method: 'POST', body: JSON.stringify(data) });
 }
 
+export async function apiUpdateSmsProfile<T>(tenantId: string, profileId: string, data: Record<string, unknown>): Promise<T> {
+  return request<T>(`/sms-profiles/${tenantId}/${profileId}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function apiDeleteSmsProfile(tenantId: string, profileId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/sms-profiles/${tenantId}/${profileId}`, { method: 'DELETE' });
+}
+
 export async function apiGetProfileVessels(tenantId: string, profileId: string): Promise<string[]> {
   return request<string[]>(`/sms-profiles/${tenantId}/${profileId}/vessels`);
 }
@@ -283,6 +280,24 @@ export async function apiAssignProfileVessel(tenantId: string, profileId: string
 
 export async function apiUnassignProfileVessel(tenantId: string, profileId: string, vesselId: string): Promise<{ success: boolean }> {
   return request<{ success: boolean }>(`/sms-profiles/${tenantId}/${profileId}/vessels/${vesselId}`, { method: 'DELETE' });
+}
+
+// ── SMS Doc Tabs ────────────────────────────────────────────
+
+export async function apiGetSmsDocTabs<T>(tenantId: string): Promise<T[]> {
+  return request<T[]>(`/sms-doc-tabs/${tenantId}`);
+}
+
+export async function apiCreateSmsDocTab<T>(tenantId: string, data: Record<string, unknown>): Promise<T> {
+  return request<T>(`/sms-doc-tabs/${tenantId}`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdateSmsDocTab<T>(tenantId: string, tabKey: string, data: Record<string, unknown>): Promise<T> {
+  return request<T>(`/sms-doc-tabs/${tenantId}/${tabKey}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function apiDeleteSmsDocTab(tenantId: string, tabKey: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/sms-doc-tabs/${tenantId}/${tabKey}`, { method: 'DELETE' });
 }
 
 // ── Files (GCS) ───────────────────────────────────────────
@@ -363,6 +378,68 @@ export async function apiGetSyncConfig<T>(tenantId: string): Promise<T> {
 
 export async function apiUpdateSyncConfig<T>(tenantId: string, data: { auto_sync_interval_hours: number; manual_replicate_enabled: boolean }): Promise<T> {
   return request<T>(`/sync-config/${tenantId}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// ── Tenant Security Settings ────────────────────────────────
+
+export async function apiGetTenantSecuritySettings<T>(tenantId: string): Promise<T> {
+  return request<T>(`/tenant-security/${tenantId}`);
+}
+
+export async function apiUpdateTenantSecuritySettings<T>(tenantId: string, data: { inactivity_timeout_minutes: number; enforce_single_session: boolean }): Promise<T> {
+  return request<T>(`/tenant-security/${tenantId}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+// ── Rank Permissions ─────────────────────────────────────────
+
+export async function apiGetRankDefs<T>(tenantId: string): Promise<T[]> {
+  return request<T[]>(`/rank-permissions/${tenantId}/defs`);
+}
+
+export async function apiCreateRankDef<T>(tenantId: string, data: { rank: string; description: string }): Promise<T> {
+  return request<T>(`/rank-permissions/${tenantId}/defs`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdateRankDef<T>(tenantId: string, rank: string, data: { rank?: string; description?: string }): Promise<T> {
+  return request<T>(`/rank-permissions/${tenantId}/defs/${encodeURIComponent(rank)}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function apiDeleteRankDef(tenantId: string, rank: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/rank-permissions/${tenantId}/defs/${encodeURIComponent(rank)}`, { method: 'DELETE' });
+}
+
+export async function apiGetRankPermissions<T>(tenantId: string): Promise<T[]> {
+  return request<T[]>(`/rank-permissions/${tenantId}/perms`);
+}
+
+export async function apiUpdateRankPermission<T>(tenantId: string, rank: string, apps: Record<string, unknown>): Promise<T> {
+  return request<T>(`/rank-permissions/${tenantId}/perms/${encodeURIComponent(rank)}`, { method: 'PUT', body: JSON.stringify({ apps }) });
+}
+
+// ── Shore Role Permissions ───────────────────────────────────
+
+export async function apiGetShoreRoleDefs<T>(tenantId: string): Promise<T[]> {
+  return request<T[]>(`/shore-roles/${tenantId}/defs`);
+}
+
+export async function apiCreateShoreRoleDef<T>(tenantId: string, data: { role: string; description: string }): Promise<T> {
+  return request<T>(`/shore-roles/${tenantId}/defs`, { method: 'POST', body: JSON.stringify(data) });
+}
+
+export async function apiUpdateShoreRoleDef<T>(tenantId: string, role: string, data: { role?: string; description?: string }): Promise<T> {
+  return request<T>(`/shore-roles/${tenantId}/defs/${encodeURIComponent(role)}`, { method: 'PATCH', body: JSON.stringify(data) });
+}
+
+export async function apiDeleteShoreRoleDef(tenantId: string, role: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/shore-roles/${tenantId}/defs/${encodeURIComponent(role)}`, { method: 'DELETE' });
+}
+
+export async function apiGetShoreRolePermissions<T>(tenantId: string): Promise<T[]> {
+  return request<T[]>(`/shore-roles/${tenantId}/perms`);
+}
+
+export async function apiUpdateShoreRolePermission<T>(tenantId: string, role: string, actions: Record<string, unknown>): Promise<T> {
+  return request<T>(`/shore-roles/${tenantId}/perms/${encodeURIComponent(role)}`, { method: 'PUT', body: JSON.stringify({ actions }) });
 }
 
 // ── Sessions ──────────────────────────────────────────────

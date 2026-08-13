@@ -12,6 +12,8 @@
 import { useEffect, useState } from 'react';
 
 import { MODULE_KEYS, MODULE_LABELS, type ModuleKey } from './featureFlags';
+import * as api from './api';
+import { onSyncEvent, postSyncEvent } from './syncChannel';
 
 // ── Shoreside Role Definitions ───────────────────────────────────────
 
@@ -293,71 +295,6 @@ export const FLEET_SCOPE_OPTIONS: { value: FleetScope; label: string; descriptio
   { value: 'specific', label: 'Specific Sub-Fleets / Vessels', description: 'Restricted to selected vessels only (Technical Superintendents)' },
 ];
 
-// ── Demo-mode storage ────────────────────────────────────────────────
-
-const LS_DEMO_SHORE_DEFS = 'mpc-demo-shore-role-defs';
-const LS_DEMO_SHORE_PERMS = 'mpc-demo-shore-permissions';
-
-function getDemoShoreDefs(tenantId: string): ShoreRoleDef[] {
-  try {
-    const raw = localStorage.getItem(`${LS_DEMO_SHORE_DEFS}-${tenantId}`);
-    if (raw) return JSON.parse(raw) as ShoreRoleDef[];
-  } catch { /* ignore */ }
-  return DEFAULT_SHORE_ROLES;
-}
-
-function saveDemoShoreDefs(tenantId: string, defs: ShoreRoleDef[]): void {
-  localStorage.setItem(`${LS_DEMO_SHORE_DEFS}-${tenantId}`, JSON.stringify(defs));
-}
-
-export function getDemoCustomShoreRoles(tenantId: string): ShoreRoleDef[] {
-  return getDemoShoreDefs(tenantId).filter((d) => d.is_custom);
-}
-
-export function demoAddCustomShoreRole(tenantId: string, role: string, description: string): void {
-  const defs = getDemoShoreDefs(tenantId);
-  if (!defs.some((d) => d.role === role)) {
-    defs.push({ role, description, is_custom: true, created_at: new Date().toISOString() });
-    saveDemoShoreDefs(tenantId, defs);
-  }
-}
-
-export function demoEditCustomShoreRole(tenantId: string, oldRole: string, newRole: string, description: string): void {
-  const defs = getDemoShoreDefs(tenantId);
-  const idx = defs.findIndex((d) => d.role === oldRole);
-  if (idx >= 0) {
-    defs[idx] = { ...defs[idx], role: newRole, description };
-    saveDemoShoreDefs(tenantId, defs);
-  }
-}
-
-export function demoDeleteCustomShoreRole(tenantId: string, role: string): void {
-  const defs = getDemoShoreDefs(tenantId).filter((d) => !(d.role === role && d.is_custom));
-  saveDemoShoreDefs(tenantId, defs);
-}
-
-function getDemoShorePerms(tenantId: string): Record<string, ShorePermissionMap> {
-  try {
-    const raw = localStorage.getItem(LS_DEMO_SHORE_PERMS);
-    if (raw) {
-      const all = JSON.parse(raw) as Record<string, Record<string, ShorePermissionMap>>;
-      return all[tenantId] ?? {};
-    }
-  } catch { /* ignore */ }
-  return {};
-}
-
-function setDemoShorePerms(tenantId: string, role: string, perms: ShorePermissionMap): void {
-  try {
-    let all: Record<string, Record<string, ShorePermissionMap>> = {};
-    const raw = localStorage.getItem(LS_DEMO_SHORE_PERMS);
-    if (raw) all = JSON.parse(raw);
-    if (!all[tenantId]) all[tenantId] = {};
-    all[tenantId][role] = perms;
-    localStorage.setItem(LS_DEMO_SHORE_PERMS, JSON.stringify(all));
-  } catch { /* ignore */ }
-}
-
 // ── Normalize helper ─────────────────────────────────────────────────
 
 function emptyShoreActions(): ShoreActionMap {
@@ -376,6 +313,13 @@ function normalizeShorePerms(perms: ShorePermissionMap | null | undefined): Shor
 
 // ── Hook: load all shore role definitions for a tenant ───────────────
 
+interface ShoreRoleDefRow {
+  role: string;
+  description: string | null;
+  is_custom: boolean;
+  created_at: string;
+}
+
 export function useShoreRolesForTenant(tenantId: string | null | undefined): {
   roles: ShoreRoleDef[];
   loading: boolean;
@@ -387,8 +331,26 @@ export function useShoreRolesForTenant(tenantId: string | null | undefined): {
 
   useEffect(() => {
     if (!tenantId) { setRoles([]); setLoading(false); return; }
-    setRoles(DEFAULT_SHORE_ROLES);
-    setLoading(false);
+    let cancelled = false;
+    setLoading(true);
+    api.apiGetShoreRoleDefs<ShoreRoleDefRow>(tenantId)
+      .then((rows) => {
+        if (cancelled) return;
+        const overrides = new Map(rows.map((r) => [r.role, r]));
+        const merged: ShoreRoleDef[] = DEFAULT_SHORE_ROLES.map((d) => {
+          const o = overrides.get(d.role);
+          return o ? { role: o.role, description: o.description ?? d.description, is_custom: o.is_custom, created_at: o.created_at } : d;
+        });
+        for (const r of rows) {
+          if (!merged.some((m) => m.role === r.role)) {
+            merged.push({ role: r.role, description: r.description ?? '', is_custom: r.is_custom, created_at: r.created_at });
+          }
+        }
+        setRoles(merged);
+      })
+      .catch(() => { if (!cancelled) setRoles(DEFAULT_SHORE_ROLES); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tenantId, tick]);
 
   return { roles, loading, refresh: () => setTick((t) => t + 1) };
@@ -407,16 +369,45 @@ export function useShoreRolePermissions(tenantId: string | null | undefined): {
 
   useEffect(() => {
     if (!tenantId) { setPermissions({}); setLoading(false); return; }
-
-    const map: Record<string, ShorePermissionMap> = {};
-    for (const role of Object.keys(DEFAULT_SHORE_PERMISSIONS)) {
-      map[role] = normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[role]);
-    }
-    setPermissions(map);
-    setLoading(false);
+    let cancelled = false;
+    setLoading(true);
+    api.apiGetShoreRolePermissions<{ role: string; actions: ShorePermissionMap }>(tenantId)
+      .then((rows) => {
+        if (cancelled) return;
+        const overrides = new Map(rows.map((r) => [r.role, r.actions]));
+        const map: Record<string, ShorePermissionMap> = {};
+        for (const role of Object.keys(DEFAULT_SHORE_PERMISSIONS)) {
+          map[role] = normalizeShorePerms(overrides.get(role) ?? DEFAULT_SHORE_PERMISSIONS[role]);
+        }
+        for (const [role, perms] of overrides) {
+          if (!(role in map)) map[role] = normalizeShorePerms(perms);
+        }
+        setPermissions(map);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        const map: Record<string, ShorePermissionMap> = {};
+        for (const role of Object.keys(DEFAULT_SHORE_PERMISSIONS)) map[role] = normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[role]);
+        setPermissions(map);
+      })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [tenantId, tick]);
 
-  return { permissions, loading, refresh: () => setTick((t) => t + 1) };
+  const refresh = () => setTick((t) => t + 1);
+
+  // Live sync: another tab/role saving shore-role permissions for this tenant
+  // should refresh them here without a manual reload.
+  useEffect(() => {
+    if (!tenantId) return;
+    const off = onSyncEvent((evt) => {
+      if (evt.tenantId !== tenantId) return;
+      if (evt.type === 'PERMISSIONS_UPDATED') refresh();
+    });
+    return off;
+  }, [tenantId]);
+
+  return { permissions, loading, refresh };
 }
 
 // ── Save a single shore role's permissions ───────────────────────────
@@ -426,7 +417,13 @@ export async function saveShoreRolePermission(
   role: string,
   perms: ShorePermissionMap,
 ): Promise<{ error: string | null }> {
-  return { error: null };
+  try {
+    await api.apiUpdateShoreRolePermission(tenantId, role, perms);
+    postSyncEvent({ type: 'PERMISSIONS_UPDATED', tenantId, payload: { role } });
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to save permissions' };
+  }
 }
 
 // ── CRUD for custom shore role definitions ───────────────────────────
@@ -436,7 +433,12 @@ export async function saveCustomShoreRole(
   role: string,
   description: string,
 ): Promise<{ error: string | null }> {
-  return { error: null };
+  try {
+    await api.apiCreateShoreRoleDef(tenantId, { role, description });
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to save role' };
+  }
 }
 
 export async function updateCustomShoreRole(
@@ -445,14 +447,24 @@ export async function updateCustomShoreRole(
   newRole: string,
   description: string,
 ): Promise<{ error: string | null }> {
-  return { error: null };
+  try {
+    await api.apiUpdateShoreRoleDef(tenantId, oldRole, { role: newRole, description });
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to update role' };
+  }
 }
 
 export async function deleteCustomShoreRole(
   tenantId: string,
   role: string,
 ): Promise<{ error: string | null }> {
-  return { error: null };
+  try {
+    await api.apiDeleteShoreRoleDef(tenantId, role);
+    return { error: null };
+  } catch (e) {
+    return { error: e instanceof Error ? e.message : 'Failed to delete role' };
+  }
 }
 
 // ── Permission helpers ───────────────────────────────────────────────

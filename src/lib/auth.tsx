@@ -29,6 +29,7 @@ import {
 } from "./demoData";
 import * as api from "./api";
 import { initializeDataCache, isCacheInitialized } from "./dataCache";
+import { useNetwork } from "./networkContext";
 
 export type { Session, User } from "./supabase";
 
@@ -293,6 +294,7 @@ async function resolveFromApi(userObj: {
 }
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  const { clearQueue } = useNetwork();
   const [state, setState] = useState<AuthState>({
     user: null,
     session: null,
@@ -390,6 +392,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const res = await api.apiGetMe();
         if (!res.user) {
           api.clearToken();
+          clearQueue();
           setState((s) => ({ ...s, loading: false }));
           return;
         }
@@ -413,6 +416,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         }
       } catch {
         api.clearToken();
+        clearQueue();
         if (mounted) setState((s) => ({ ...s, loading: false }));
       }
     });
@@ -493,6 +497,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       await clearSessionToken(state.user.id);
     }
     api.clearToken();
+    clearQueue();
     setState({
       user: null,
       session: null,

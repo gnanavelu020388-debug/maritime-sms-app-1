@@ -45,6 +45,7 @@ import {
   type ShoreRoleDef, type ShorePermissionMap, type ShoreAccordionGroup,
 } from '../../lib/shoreRoles';
 import { Modal } from '../../components/Modal';
+import { postSyncEvent } from '../../lib/syncChannel';
 
 const APP_ICON_MAP: Record<AppId, React.ComponentType<{ className?: string }>> = {
   sms_documentation: FileCheck2,
@@ -207,7 +208,8 @@ export function PermissionsMatrixView() {
     if (error) {
       showToast(`Failed to save ${rank}: ${error}`, false);
     } else {
-      showToast(`${rank} permissions saved — applies on next vessel login`, true);
+      showToast(`${rank} permissions saved`, true);
+      postSyncEvent({ type: 'PERMISSIONS_UPDATED', tenantId: tenant.id, payload: { rank } });
       refresh();
     }
   }
@@ -311,6 +313,7 @@ export function PermissionsMatrixView() {
           saveRankPermission(tenant?.id ?? '', rank, localPerms[rank] ?? {}).then(({ error }) => {
             setSavingRank(null);
             if (!error) {
+              if (tenant?.id) postSyncEvent({ type: 'PERMISSIONS_UPDATED', tenantId: tenant.id, payload: { rank } });
               refresh();
               window.dispatchEvent(new CustomEvent('permissions-saved-complete'));
             }

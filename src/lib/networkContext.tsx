@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, useCallback, type ReactNode } from 'react';
+import { getToken as getAuthToken } from './authToken';
 
 export type NetworkMode = 'online' | 'offline';
 
@@ -9,6 +10,8 @@ export interface QueuedAction {
   body: unknown;
   queuedAt: number;
   description?: string;
+  /** Auth token active when this action was queued — flushed only under the same session. */
+  token: string | null;
 }
 
 export interface NetworkContextValue {
@@ -128,11 +131,12 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     persistMode(next);
   }, [persistMode]);
 
-  const enqueueAction = useCallback((action: Omit<QueuedAction, 'id' | 'queuedAt'>) => {
+  const enqueueAction = useCallback((action: Omit<QueuedAction, 'id' | 'queuedAt' | 'token'>) => {
     const queued: QueuedAction = {
       ...action,
       id: `qa-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
       queuedAt: Date.now(),
+      token: getAuthToken(),
     };
     setQueuedActions((prev) => {
       const next = [...prev, queued];
@@ -151,12 +155,20 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
     const current = [...queuedActions];
     if (current.length === 0) return { synced: 0, failed: 0 };
 
-    const token = localStorage.getItem('mpc-auth-token');
+    const token = getAuthToken();
     let synced = 0;
     let failed = 0;
     const remaining: QueuedAction[] = [];
 
-    for (const action of current) {
+    // Actions queued under a different (or no longer active) session must never
+    // fire under the current user's identity — drop them instead of flushing.
+    const stale = current.filter((a) => a.token !== token);
+    if (stale.length > 0) {
+      console.warn(`[NetworkContext] dropping ${stale.length} queued action(s) from a different session`);
+    }
+    const own = current.filter((a) => a.token === token);
+
+    for (const action of own) {
       try {
         const res = await fetch(`${CLOUD_BASE}${action.path}`, {
           method: action.method,

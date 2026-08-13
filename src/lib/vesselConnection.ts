@@ -37,7 +37,11 @@ export interface SyncStatusInfo {
 const DEFAULT_SERVER_URL = 'http://vessel-server.local:8080';
 const HEARTBEAT_INTERVAL_MS = 20_000;
 const HEARTBEAT_TIMEOUT_MS = 5_000;
-const STATE_KEY = 'mpc-vessel-connection';
+const STATE_KEY_PREFIX = 'mpc-vessel-connection';
+
+function stateKey(tenantId: string): string {
+  return `${STATE_KEY_PREFIX}-${tenantId}`;
+}
 
 const listeners = new Set<(state: VesselConnectionState) => void>();
 let currentState: VesselConnectionState = {
@@ -49,11 +53,12 @@ let currentState: VesselConnectionState = {
   serverReachable: false,
 };
 let heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+let activeTenantId: string | null = null;
 
-function loadPersistedState(): VesselConnectionState {
+function loadPersistedState(tenantId: string): VesselConnectionState {
   if (typeof localStorage === 'undefined') return currentState;
   try {
-    const raw = localStorage.getItem(STATE_KEY);
+    const raw = localStorage.getItem(stateKey(tenantId));
     if (!raw) return currentState;
     const persisted = JSON.parse(raw) as Partial<VesselConnectionState>;
     return { ...currentState, ...persisted, lastHeartbeatAt: null, lastHeartbeatOk: false };
@@ -62,12 +67,12 @@ function loadPersistedState(): VesselConnectionState {
   }
 }
 
-function persistState(state: VesselConnectionState): void {
+function persistState(tenantId: string, state: VesselConnectionState): void {
   if (typeof localStorage === 'undefined') return;
   try {
     const { lastHeartbeatAt, lastHeartbeatOk, ...persistable } = state;
     void lastHeartbeatAt; void lastHeartbeatOk;
-    localStorage.setItem(STATE_KEY, JSON.stringify(persistable));
+    localStorage.setItem(stateKey(tenantId), JSON.stringify(persistable));
   } catch {
     // ignore storage errors
   }
@@ -75,6 +80,10 @@ function persistState(state: VesselConnectionState): void {
 
 function notify(): void {
   listeners.forEach((fn) => fn(currentState));
+}
+
+function persistActiveState(): void {
+  if (activeTenantId) persistState(activeTenantId, currentState);
 }
 
 /** In the browser sandbox, we simulate the local vessel server /health probe. */
@@ -111,13 +120,13 @@ export function setConnectionMode(mode: ConnectionMode): void {
     mode,
     failoverCount: mode === 'CLOUD_DIRECT' ? currentState.failoverCount + 1 : currentState.failoverCount,
   };
-  persistState(currentState);
+  persistActiveState();
   notify();
 }
 
 export function setServerUrl(url: string): void {
   currentState = { ...currentState, serverUrl: url };
-  persistState(currentState);
+  persistActiveState();
   notify();
 }
 
@@ -146,8 +155,9 @@ async function runHeartbeat(): Promise<void> {
   void wasReachable;
 }
 
-export function startConnectionMonitor(serverUrl: string = DEFAULT_SERVER_URL): () => void {
-  currentState = { ...loadPersistedState(), serverUrl };
+export function startConnectionMonitor(tenantId: string, serverUrl: string = DEFAULT_SERVER_URL): () => void {
+  activeTenantId = tenantId;
+  currentState = { ...loadPersistedState(tenantId), serverUrl };
   notify();
 
   // Initial heartbeat shortly after start
@@ -163,6 +173,7 @@ export function startConnectionMonitor(serverUrl: string = DEFAULT_SERVER_URL): 
 
 export function stopConnectionMonitor(): void {
   if (heartbeatTimer) { clearInterval(heartbeatTimer); heartbeatTimer = null; }
+  activeTenantId = null;
 }
 
 /** Get a combined sync+connection status snapshot for UI display. */

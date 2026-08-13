@@ -14,8 +14,12 @@ import smsDocRoutes from './routes/smsDocuments.js';
 import auditRoutes from './routes/auditLogs.js';
 import featureFlagRoutes from './routes/featureFlags.js';
 import smsProfileRoutes from './routes/smsProfiles.js';
+import smsDocTabRoutes from './routes/smsDocTabs.js';
 import fileRoutes from './routes/files.js';
 import syncConfigRoutes from './routes/syncConfig.js';
+import tenantSecurityRoutes from './routes/tenantSecurity.js';
+import rankPermissionRoutes from './routes/rankPermissions.js';
+import shoreRoleRoutes from './routes/shoreRoles.js';
 import sessionRoutes from './routes/sessions.js';
 import bannerRoutes from './routes/banner.js';
 import vesselSyncRoutes from './routes/vesselSync.js';
@@ -37,7 +41,7 @@ const PORT = process.env.PORT || 8080;
 app.use(cors({
   origin: true,
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Client-Info'],
 }));
 app.use(express.json({ limit: '50mb' }));
@@ -53,8 +57,12 @@ app.use('/api/sms-documents', smsDocRoutes);
 app.use('/api/audit-logs', auditRoutes);
 app.use('/api/feature-flags', featureFlagRoutes);
 app.use('/api/sms-profiles', smsProfileRoutes);
+app.use('/api/sms-doc-tabs', smsDocTabRoutes);
 app.use('/api/files', fileRoutes);
 app.use('/api/sync-config', syncConfigRoutes);
+app.use('/api/tenant-security', tenantSecurityRoutes);
+app.use('/api/rank-permissions', rankPermissionRoutes);
+app.use('/api/shore-roles', shoreRoleRoutes);
 app.use('/api/sessions', sessionRoutes);
 app.use('/api/banner', bannerRoutes);
 app.use('/api/vessel-sync', vesselSyncRoutes);

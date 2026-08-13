@@ -224,6 +224,11 @@ export async function demoSetUserStatus(tenantId: string, userId: string, status
   await dataCache.refreshTenantData(tenantId);
 }
 
+export async function demoUpdateUserProfile(tenantId: string, userId: string, data: { name?: string; email?: string; employee_id?: string | null; rank?: string; status?: string }): Promise<void> {
+  await api.apiUpdateUser<TenantUserRow>(tenantId, userId, data);
+  await dataCache.refreshTenantData(tenantId);
+}
+
 export async function demoDeactivateUser(tenantId: string, userId: string): Promise<void> {
   await api.apiDeactivateUser(tenantId, userId);
   await dataCache.refreshTenantData(tenantId);
@@ -392,14 +397,25 @@ export function demoCloneMasterSms(_tenantId: string): void {
 
 // ── Custom tabs ─────────────────────────────────────────────
 
-const customTabsCache = new Map<string, Record<string, { key: string; label: string; subtitle: string; custom?: boolean }>>();
-
-export function getDemoCustomTabs(tenantId: string): Record<string, { key: string; label: string; subtitle: string; custom?: boolean }> {
-  return customTabsCache.get(tenantId) ?? {};
+export async function getDemoCustomTabs(tenantId: string): Promise<Record<string, { key: string; label: string; subtitle: string; custom?: boolean }>> {
+  const rows = await api.apiGetSmsDocTabs<{ tab_key: string; label: string; subtitle: string | null }>(tenantId);
+  const out: Record<string, { key: string; label: string; subtitle: string; custom?: boolean }> = {};
+  for (const r of rows) {
+    out[r.tab_key] = { key: r.tab_key, label: r.label, subtitle: r.subtitle ?? 'Custom document group', custom: true };
+  }
+  return out;
 }
 
-export function saveDemoCustomTabs(tenantId: string, tabs: Record<string, { key: string; label: string; subtitle: string; custom?: boolean }>): void {
-  customTabsCache.set(tenantId, tabs);
+export async function createDemoCustomTab(tenantId: string, key: string, label: string, subtitle: string): Promise<void> {
+  await api.apiCreateSmsDocTab(tenantId, { tab_key: key, label, subtitle });
+}
+
+export async function renameDemoCustomTab(tenantId: string, key: string, label: string): Promise<void> {
+  await api.apiUpdateSmsDocTab(tenantId, key, { label });
+}
+
+export async function deleteDemoCustomTab(tenantId: string, key: string): Promise<void> {
+  await api.apiDeleteSmsDocTab(tenantId, key);
 }
 
 // ── Audit logs ──────────────────────────────────────────────

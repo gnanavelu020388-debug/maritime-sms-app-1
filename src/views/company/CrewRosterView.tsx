@@ -25,7 +25,7 @@ import { logAudit } from '../../lib/audit';
 import { postSyncEvent, onSyncEvent } from '../../lib/syncChannel';
 import {
   getEffectiveDemoUsers, getEffectiveDemoVessels, getEffectiveDemoAssignments,
-  demoSignOff, demoSignOn, demoCreateUser, demoDeactivateUser, demoSetUserStatus, demoDeleteUser,
+  demoSignOff, demoSignOn, demoCreateUser, demoDeactivateUser, demoSetUserStatus, demoUpdateUserProfile, demoDeleteUser,
 } from '../../lib/demoData';
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { CREW_STATUS, useRanksForTenant, type RankDef } from '../../lib/rankPermissions';
@@ -193,66 +193,66 @@ export function CrewRosterView() {
   // ── Actions ────────────────────────────────────────────────────────
   async function approveSignOn(u: TenantUserRow, vessel: VesselRow) {
     setBusy(u.id);
-    demoSetUserStatus(tenant!.id, u.id, 'active');
-    demoSignOn(tenant!.id, u.id, vessel.id, u.rank);
+    await demoSetUserStatus(tenant!.id, u.id, 'active');
+    await demoSignOn(tenant!.id, u.id, vessel.id, u.rank);
     await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Sign-On Approved: ${u.name} → ${u.rank} on ${vessel.name}`, target: u.email, location: vessel.name });
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_on_approved', userId: u.id, vessel: vessel.name } });
     setBusy(null);
-    load();
+    await load();
   }
 
   async function signOff(r: PersonnelRow) {
     if (!r.assignment) return;
     setBusy(r.user.id);
-    demoSignOff(tenant!.id, r.assignment.id);
-    demoSetUserStatus(tenant!.id, r.user.id, 'active');
+    await demoSignOff(tenant!.id, r.assignment.id);
+    await demoSetUserStatus(tenant!.id, r.user.id, 'active');
     await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Sign-Off: ${r.user.name} from ${r.vesselName}`, target: r.user.email, location: r.vesselName ?? '', severity: 'warning' });
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_off', userId: r.user.id, vessel: r.vesselName } });
     setBusy(null);
-    load();
+    await load();
   }
 
   async function toggleLock(u: TenantUserRow) {
     setLockBusy(u.id);
     const isLocked = u.status === 'locked';
     const next = isLocked ? 'active' : 'locked';
-    demoSetUserStatus(tenant!.id, u.id, next);
+    await demoSetUserStatus(tenant!.id, u.id, next);
     await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `${isLocked ? 'Unlocked' : 'Locked'}: ${u.name}`, target: u.email, severity: isLocked ? 'info' : 'warning' });
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'status_change', userId: u.id } });
     setLockBusy(null);
-    load();
+    await load();
   }
 
   async function confirmDeactivate(u: TenantUserRow) {
     setBusy(u.id);
-    demoDeactivateUser(tenant!.id, u.id);
+    await demoDeactivateUser(tenant!.id, u.id);
     await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `Account deactivated: ${u.name} (${u.email})`, target: u.email, severity: 'warning' });
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'deactivated', userId: u.id } });
     setBusy(null);
     setDeactivateFor(null);
-    load();
+    await load();
   }
 
   async function confirmDelete(u: TenantUserRow) {
     setBusy(u.id);
-    demoDeleteUser(tenant!.id, u.id);
+    await demoDeleteUser(tenant!.id, u.id);
     await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `User PERMANENTLY DELETED: ${u.name} (${u.email})`, target: u.email, severity: 'critical' });
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'deleted', userId: u.id } });
     setBusy(null);
     setDeleteFor(null);
     showToast(`${u.name} has been permanently deleted from the system.`, true);
-    load();
+    await load();
   }
 
   async function saveEdit(data: { name: string; email: string; employee_id: string | null; rank: Rank; status: string }) {
     if (!editing || !tenant) return;
     setBusy(editing.id);
-    demoSetUserStatus(tenant.id, editing.id, data.status);
+    await demoUpdateUserProfile(tenant.id, editing.id, { name: data.name, email: data.email, employee_id: data.employee_id, rank: data.rank, status: data.status });
     await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'security', action: `User edited: ${data.name}`, target: data.email });
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant.id, payload: { action: 'edited', name: data.name } });
     setBusy(null);
     setEditing(null);
-    load();
+    await load();
   }
 
   function showToast(msg: string, ok: boolean) {
@@ -564,7 +564,7 @@ export function CrewRosterView() {
               ? (data.rank === 'Company Admin' ? 'company_admin' : 'dpa')
               : 'vessel';
             const status = isShoreside ? 'invited' : CREW_STATUS.PENDING_SIGN_ON;
-            const newUserId = demoCreateUser(tenant.id, {
+            await demoCreateUser(tenant.id, {
               name: data.name, email: data.email, employee_id: data.employeeId,
               passport_number: null, seaman_book_number: null, nationality: null,
               rank: data.rank, role, status,
@@ -581,7 +581,7 @@ export function CrewRosterView() {
             showToast(isShoreside
               ? `${data.name} registered as ${data.rank} (Shoreside). They will receive an invitation email.`
               : `${data.name} registered as ${data.rank}. Status: PENDING_SIGN_ON — cannot log in until signed on.`, true);
-            load();
+            await load();
           }}
         />
       )}

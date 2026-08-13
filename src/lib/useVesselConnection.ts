@@ -22,7 +22,7 @@ export function useVesselConnection(tenantId: string | undefined) {
   // Start the heartbeat monitor + subscribe to connection state changes
   useEffect(() => {
     if (!tenantId) return;
-    const stopMonitor = startConnectionMonitor();
+    const stopMonitor = startConnectionMonitor(tenantId);
     const unsubConn = subscribeToConnectionState(setConn);
 
     // Load initial sync status

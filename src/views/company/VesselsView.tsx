@@ -10,6 +10,7 @@ import { Modal } from '../../components/Modal';
 import { Badge } from '../../components/Badge';
 import { DataTable, type Column } from '../../components/DataTable';
 import { useFleetScope } from '../../lib/useFleetScope';
+import { refreshTenantData } from '../../lib/dataCache';
 
 interface FleetRow extends VesselRow {
   crewOnboard: number;
@@ -78,7 +79,7 @@ export function VesselsView() {
       // Check for new DPA-approved circulars/amendments under this vessel's profile
       const newDocCount = await countApprovedDocsForProfile(tenant!.id, r.profileId, r.last_sync_at ?? undefined);
       const now = new Date().toISOString();
-      demoUpdateVesselSync(tenant!.id, r.id, profileVersion);
+      await demoUpdateVesselSync(tenant!.id, r.id, profileVersion);
       await logAudit({
         tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'sms',
         action: `Manual SMS Synchronization Triggered: ${r.name}${newDocCount > 0 ? ` — ${newDocCount} new approved document(s) synced` : ' — no new documents'}`,
@@ -95,12 +96,12 @@ export function VesselsView() {
   }
 
   async function confirmDelete(v: VesselRow) {
-    demoDeleteVessel(tenant!.id, v.id);
+    await demoDeleteVessel(tenant!.id, v.id);
     await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel deleted: ${v.name} (IMO ${v.imo_number})`, target: v.imo_number, location: v.name, severity: 'critical' });
     postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_deleted', vesselId: v.id } });
     postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_deleted', vesselId: v.id } });
     setDeleteFor(null);
-    load();
+    await load();
   }
 
   const columns: Column<FleetRow>[] = [
@@ -359,7 +360,7 @@ export function VesselsView() {
             const effectiveProfileId = profileId ?? null;
             const profile = profiles.find((p) => p.id === effectiveProfileId);
             const version = profile?.version ?? tenant.sms_version;
-            const newVesselId = demoCreateVessel(tenant.id, v, version);
+            const newVesselId = await demoCreateVessel(tenant.id, v, version);
             if (effectiveProfileId) await assignVesselToProfile(tenant.id, effectiveProfileId, newVesselId);
             await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel profile created: ${v.name}`, target: v.imo_number, location: v.name });
             postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_created', name: v.name } });
@@ -385,7 +386,7 @@ export function VesselsView() {
           currentProfileId={editForProfileId}
           onClose={() => { setEditFor(null); setEditForProfileId(null); }}
           onSave={async (v, profileId) => {
-            demoUpdateVessel(tenant.id, editFor.id, v);
+            await demoUpdateVessel(tenant.id, editFor.id, v);
             await assignVesselToProfile(tenant.id, profileId ?? '', editFor.id);
             await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel profile updated: ${v.name}`, target: v.imo_number, location: v.name });
             postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_edited', vesselId: editFor.id, profileId } });
@@ -412,7 +413,7 @@ export function VesselsView() {
           onSync={() => { doSync(smsStatusFor); }}
           syncing={syncing === smsStatusFor.id}
           onSaveVersion={async (version: string) => {
-            demoUpdateVesselSync(tenant.id, smsStatusFor.id, version);
+            await demoUpdateVesselSync(tenant.id, smsStatusFor.id, version);
             await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Vessel SMS version set to v${version} for ${smsStatusFor.name}`, target: smsStatusFor.imo_number, location: smsStatusFor.name });
             postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_version_set', vesselId: smsStatusFor.id, version } });
             setSmsStatusFor(null);
@@ -570,10 +571,23 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
 
   useEffect(() => { loadManning(); }, [vessel.id]);
 
+  // Keep the drawer live while open: another tab/role signing crew on/off this
+  // vessel (or elsewhere in the fleet) should refresh the onboard/ashore lists.
+  useEffect(() => {
+    if (!tenant) return;
+    const off = onSyncEvent((evt) => {
+      if (evt.tenantId !== tenant.id) return;
+      if (evt.type === 'CREW_UPDATED') {
+        refreshTenantData(tenant.id).then(() => loadManning());
+      }
+    });
+    return off;
+  }, [tenant, vessel.id]);
+
   async function handleSignOff(row: ManningCrew) {
     if (!row.assignment) return;
     setBusy(row.user.id);
-    demoSignOff(tenant!.id, row.assignment.id);
+    await demoSignOff(tenant!.id, row.assignment.id);
     await logAudit({
       tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew',
       action: `Sign-Off: ${row.user.name} (${row.assignment.rank}) from ${vessel.name}`,
@@ -582,12 +596,12 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_off', userId: row.user.id, vessel: vessel.name } });
     setBusy(null);
     onChanged();
-    loadManning();
+    await loadManning();
   }
 
   async function handleSignOn(user: TenantUserRow) {
     setBusy(user.id);
-    demoSignOn(tenant!.id, user.id, vessel.id, user.rank);
+    await demoSignOn(tenant!.id, user.id, vessel.id, user.rank);
     await logAudit({
       tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew',
       action: `Sign-On: ${user.name} → ${user.rank} on ${vessel.name}`,
@@ -596,7 +610,7 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
     postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_on', userId: user.id, vessel: vessel.name, rank: user.rank } });
     setBusy(null);
     onChanged();
-    loadManning();
+    await loadManning();
   }
 
   return (
