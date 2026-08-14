@@ -524,7 +524,7 @@ export function SmsApprovalsView() {
         </div>
 
         {/* Right: Document reviewer */}
-        <div className="flex min-h-[420px] flex-col min-h-0 rounded-xl border border-ink-200/70 bg-white dark:border-ink-800 dark:bg-ink-900 lg:min-h-0">
+        <div className="flex flex-col min-h-0 rounded-xl border border-ink-200/70 bg-white dark:border-ink-800 dark:bg-ink-900 lg:min-h-0">
           {!selectedDoc ? (
             <div className="flex flex-1 flex-col items-center justify-center py-16">
               <FileEdit className="h-12 w-12 text-ink-300" />
