@@ -58,7 +58,7 @@ jobs:
             --platform managed \
             --allow-unauthenticated \
             --service-account "${{ secrets.GCS_RUNTIME_SERVICE_ACCOUNT }}" \
-            --set-env-vars NODE_ENV=production,JWT_SECRET=${{ secrets.JWT_SECRET }},DB_HOST=${{ secrets.DB_HOST }},DB_PORT=${{ secrets.DB_PORT }},DB_USER=${{ secrets.DB_USER }},DB_PASSWORD=${{ secrets.DB_PASSWORD }},DB_NAME=${{ secrets.DB_NAME }},GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}
+            --set-env-vars "NODE_ENV=production,JWT_SECRET=${{ secrets.JWT_SECRET }},DB_HOST=${{ secrets.DB_HOST }},DB_PORT=${{ secrets.DB_PORT }},DB_USER=${{ secrets.DB_USER }},DB_PASSWORD=${{ secrets.DB_PASSWORD }},DB_NAME=${{ secrets.DB_NAME }},GCS_BUCKET_NAME=${{ secrets.GCS_BUCKET_NAME }}"
           if [ -n "${CLOUD_SQL_CONNECTION_NAME:-}" ]; then
             gcloud run services update $CLOUD_RUN_SERVICE \
               --add-cloudsql-instances "$CLOUD_SQL_CONNECTION_NAME" \
