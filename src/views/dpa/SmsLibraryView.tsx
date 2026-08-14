@@ -13,7 +13,7 @@ const DPA_SMS_PERMS: RankPermissionMap = {
 };
 
 export function SmsLibraryView() {
-  const { tenant, activeAssignment, tenantUser, refresh } = useAuth();
+  const { tenant, activeAssignment, tenantUser } = useAuth();
   if (!tenant) return null;
 
   const rawShoreRoleName = tenantUser?.rank ?? 'DPA';
@@ -33,7 +33,7 @@ export function SmsLibraryView() {
         <span className="text-xs font-semibold text-ink-500">SMS Authorities:</span>
         {canApprove && <Badge tone="success" className="!text-[10px]">Approve</Badge>}
         {canEdit && <Badge tone="info" className="!text-[10px]">Edit</Badge>}
-        {canUpload && <Badge tone="primary" className="!text-[10px]">Upload</Badge>}
+        {canUpload && <Badge tone="accent" className="!text-[10px]">Upload</Badge>}
 
       </div>
 

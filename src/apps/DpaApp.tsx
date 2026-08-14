@@ -15,7 +15,7 @@ import { useFeatureFlags } from '../lib/featureFlags';
 
 export function DpaApp() {
   const { tenant } = useAuth();
-  const { isEnabled, loading: flagsLoading } = useFeatureFlags(tenant?.id);
+  const { isEnabled } = useFeatureFlags(tenant?.id);
   const [active, setActive] = useState<DpaSection>('dashboard');
   const [blockedSection, setBlockedSection] = useState<DpaSection | null>(null);
 

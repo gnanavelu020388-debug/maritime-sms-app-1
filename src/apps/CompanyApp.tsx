@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { AlertTriangle, Loader2 } from 'lucide-react';
+import { AlertTriangle } from 'lucide-react';
 import { CompanyShell, type CompanySection } from '../layouts/CompanyShell';
 import { CompanyOverview } from '../views/company/CompanyOverview';
 import { VesselsView } from '../views/company/VesselsView';
@@ -15,7 +15,7 @@ import { useFeatureFlags } from '../lib/featureFlags';
 
 export function CompanyApp() {
   const { tenant } = useAuth();
-  const { isEnabled, loading: flagsLoading } = useFeatureFlags(tenant?.id);
+  const { isEnabled } = useFeatureFlags(tenant?.id);
   const [active, setActive] = useState<CompanySection>('overview');
   const [blockedSection, setBlockedSection] = useState<CompanySection | null>(null);
   const [pendingNav, setPendingNav] = useState<CompanySection | null>(null);

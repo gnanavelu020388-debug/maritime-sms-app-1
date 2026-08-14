@@ -28,7 +28,10 @@ import backupRoutes from './routes/backups.js';
 import platformStaffRoutes from './routes/platformStaff.js';
 import errorLogRoutes from './routes/errorLogs.js';
 import smsTemplateRoutes from './routes/smsTemplates.js';
+import internalJobRoutes from './routes/internalJobs.js';
+import platformSettingsRoutes from './routes/platformSettings.js';
 import pool from './db.js';
+import { recordRequestDuration } from './metrics.js';
 
 dotenv.config();
 
@@ -46,6 +49,17 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
+// Records real response times for the "API traffic (p95)" dashboard
+// metric — see server/metrics.js.
+app.use((req, res, next) => {
+  const start = process.hrtime.bigint();
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - start) / 1e6;
+    recordRequestDuration(ms);
+  });
+  next();
+});
 
 // ── API routes ──────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
@@ -71,6 +85,8 @@ app.use('/api/backups', backupRoutes);
 app.use('/api/platform-staff', platformStaffRoutes);
 app.use('/api/error-logs', errorLogRoutes);
 app.use('/api/sms-templates', smsTemplateRoutes);
+app.use('/api/internal', internalJobRoutes);
+app.use('/api/platform', platformSettingsRoutes);
 
 // ── Health check ────────────────────────────────────────────
 app.get('/api/health', (_req, res) => res.json({ status: 'ok', timestamp: new Date().toISOString() }));
@@ -88,7 +104,26 @@ async function initSchema() {
     const schema = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
     const statements = schema.split(';').map(s => s.trim()).filter(s => s.length > 0);
     for (const stmt of statements) {
-      await pool.query(stmt);
+      try {
+        await pool.query(stmt);
+      } catch (stmtErr) {
+        // A single statement (e.g. an ALTER already applied in a prior run)
+        // failing shouldn't block the rest of the schema from initializing.
+        console.error('[DB] Schema statement failed, continuing:', stmtErr.message);
+      }
+    }
+    await pool.query(
+      "INSERT IGNORE INTO platform_settings (setting_key, setting_value) VALUES ('platform_storage_pool_gb', '500')",
+    );
+    // MySQL (unlike MariaDB) has no `ADD COLUMN IF NOT EXISTS` — check
+    // information_schema instead so this stays safe to run on every boot.
+    const [[{ hasStatusCol }]] = await pool.query(
+      `SELECT COUNT(*) AS hasStatusCol FROM information_schema.columns
+       WHERE table_schema = DATABASE() AND table_name = 'tenant_storage_cache' AND column_name = 'status'`,
+    );
+    if (!hasStatusCol) {
+      await pool.query("ALTER TABLE tenant_storage_cache ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'NORMAL'");
+      console.log('[DB] Added tenant_storage_cache.status column');
     }
     console.log('[DB] Schema initialized');
   } catch (err) {
@@ -99,6 +134,9 @@ async function initSchema() {
 app.listen(PORT, async () => {
   console.log(`[Server] Maritime Platform API running on port ${PORT}`);
   await initSchema();
+  // Periodic storage refresh runs via Cloud Scheduler hitting
+  // POST /api/internal/storage/refresh — not an in-process setInterval,
+  // which would run duplicated across Cloud Run's autoscaled instances.
 });
 
 export default app;

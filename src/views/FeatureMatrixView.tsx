@@ -6,7 +6,7 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Grid3x3, RefreshCw, Save, CheckCircle2, XCircle, Loader2, Zap,
+  Grid3x3, Save, CheckCircle2, XCircle, Loader2, Zap,
   Search, Clock, AlertTriangle, Pencil, Check,
 } from 'lucide-react';
 import type { Capabilities } from '../lib/permissions';

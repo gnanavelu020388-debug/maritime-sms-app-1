@@ -1,4 +1,4 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import {
   ShieldCheck, Play, RotateCcw, AlertTriangle, Lock, CheckCircle2, FileJson, Server, Clock, ArrowRight, ShieldAlert, Settings2, ChevronDown, ChevronRight, Search, Trash2,
 } from 'lucide-react';
@@ -366,15 +366,6 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
           }}
         />
       )}
-    </div>
-  );
-}
-
-function Row({ icon, label, value }: { icon: ReactNode; label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="flex items-center gap-1.5 text-ink-500">{icon}{label}</span>
-      <span className="font-semibold text-ink-800 dark:text-ink-100">{value}</span>
     </div>
   );
 }

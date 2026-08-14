@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
-  Rocket, Building2, Users, Plus, Shield, Ship, FileText, Eye,
-  Loader2, CheckCircle2, ExternalLink, RefreshCw, Trash2, KeyRound,
+  Rocket, Building2, Users, Plus, Shield, FileText, Eye,
+  Loader2, ExternalLink, RefreshCw, Trash2, KeyRound,
 } from 'lucide-react';
 import { type TenantRow, type TenantUserRow, type Rank } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
@@ -145,7 +145,6 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
         <div className="space-y-4">
           {tenants.map((t) => {
             const users = usersByTenant[t.id] ?? [];
-            const usagePct = t.vessels_max > 0 ? 0 : 0; // vessels counted elsewhere
             return (
               <div key={t.id} className="rounded-xl border border-ink-200/70 bg-white shadow-sm dark:border-ink-800 dark:bg-ink-900">
                 <div className="flex flex-col gap-3 border-b border-ink-100 p-4 sm:flex-row sm:items-center sm:justify-between dark:border-ink-800">

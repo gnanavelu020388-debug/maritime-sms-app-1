@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   ShieldCheck, Briefcase, Ship, Lock, Eye, Layers, AlertTriangle, CheckCircle2,
-  Unlock, RotateCcw, Sliders, Save, History, ShieldAlert, Loader2, ChevronRight,
+  Unlock, RotateCcw, Sliders, Save, History, ShieldAlert, ChevronRight,
   Globe, Building2, Wifi, Table2, Pencil, Search,
 } from 'lucide-react';
 import { TenantInspectionBar } from '../components/TenantInspectionBar';
@@ -10,13 +10,13 @@ import { useAuth } from '../lib/auth';
 import { CriticalActionWizard } from '../components/CriticalActionWizard';
 import { Modal } from '../components/Modal';
 import { postSyncEvent } from '../lib/syncChannel';
-import { demoSetWorkspaceFrozen, demoGetWorkspaceFrozen, demoSetGuardrails, demoGetGuardrails } from '../lib/demoData';
+import { demoSetWorkspaceFrozen, demoGetWorkspaceFrozen, demoSetGuardrails } from '../lib/demoData';
 import { relativeTime } from '../constants';
 import { apiGetSmsSnapshots, apiRollbackSmsSnapshot } from '../lib/api';
 import { logAudit } from '../lib/audit';
 import type { SmsSnapshotRow } from '../lib/supabase';
 import type { Capabilities } from '../lib/permissions';
-import type { Tenant, SmsSnapshot, TenantGuardrails, PlanTier } from '../types';
+import type { SmsSnapshot, PlanTier } from '../types';
 
 export function SmsView({ caps: _caps }: { caps: Capabilities }) {
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);

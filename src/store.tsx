@@ -227,7 +227,12 @@ function reducer(state: State, action: Action): State {
           monthlyRevenue: Number(row.monthly_revenue), createdAt: row.created_at, contractExpires: row.contract_expires,
           vessels: { used: row.vesselsUsed, max: row.vessels_max },
           seats: { used: row.seatsUsed, max: row.seats_max },
-          storageGb: { used: bytesToGb(row.storage_bytes_used), max: row.storage_gb_max },
+          storageGb: {
+            used: bytesToGb(row.storage_bytes_used), max: row.storage_gb_max,
+            remaining: row.storage_remaining_gb ?? Math.max(0, row.storage_gb_max - bytesToGb(row.storage_bytes_used)),
+            percentage: row.storage_percentage ?? 0,
+            status: row.storage_status ?? 'NORMAL',
+          },
         };
       });
       const newOnes: Tenant[] = action.rows.filter((r) => !existingIds.has(r.id)).map((row) => ({
@@ -236,7 +241,12 @@ function reducer(state: State, action: Action): State {
         plan: row.plan as PlanTier, status: row.status as TenantStatus,
         seats: { used: row.seatsUsed, max: row.seats_max },
         vessels: { used: row.vesselsUsed, max: row.vessels_max },
-        storageGb: { used: bytesToGb(row.storage_bytes_used), max: row.storage_gb_max },
+        storageGb: {
+          used: bytesToGb(row.storage_bytes_used), max: row.storage_gb_max,
+          remaining: row.storage_remaining_gb ?? Math.max(0, row.storage_gb_max - bytesToGb(row.storage_bytes_used)),
+          percentage: row.storage_percentage ?? 0,
+          status: row.storage_status ?? 'NORMAL',
+        },
         modules: row.modules as ModuleKey[], mfaEnforced: row.mfa_enforced,
         createdAt: row.created_at, contractExpires: row.contract_expires,
         monthlyRevenue: Number(row.monthly_revenue), region: row.region,

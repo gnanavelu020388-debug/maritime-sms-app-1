@@ -9,7 +9,7 @@ import { logAudit } from '../../lib/audit';
 import { postSyncEvent } from '../../lib/syncChannel';
 
 export function EmergencyControlsPanel({
-  tenantId, vesselId, vesselName, actorEmail, actorRank,
+  tenantId, vesselId, vesselName, actorEmail, actorRank: _actorRank,
 }: {
   tenantId: string;
   vesselId: string | null;

@@ -1,7 +1,6 @@
 import type { SmsDocRow } from './supabase';
 import {
   getLocalSmsVersion,
-  setLocalSmsVersion,
   getLocalDocuments,
   cacheAllDocuments,
   isCacheSeeded,

@@ -21,6 +21,7 @@ This repository includes a GitHub Actions workflow at `.github/workflows/gcp-clo
 - `DB_PASSWORD`
 - `DB_NAME`
 - `GCS_BUCKET_NAME`
+- `GCS_RUNTIME_SERVICE_ACCOUNT` (the Cloud Run runtime identity, e.g. `maritime-backend@<project>.iam.gserviceaccount.com` — needs `roles/storage.objectUser` on the bucket, `roles/iam.serviceAccountTokenCreator` on itself for signed URLs, `roles/cloudsql.client`, and `roles/logging.logWriter`)
 - `CLOUD_SQL_CONNECTION_NAME` (optional, use if your service connects to Cloud SQL via Unix socket)
 
 You can configure secrets on GitHub under `Settings > Secrets and variables > Actions`.
@@ -44,6 +45,7 @@ The repository also includes `cloudbuild.yaml` so you can use Google Cloud Build
    - `_DB_NAME` = your database name
    - `_JWT_SECRET` = your server JWT secret
    - `_GCS_BUCKET_NAME` = your Cloud Storage bucket name
+   - `_GCS_RUNTIME_SERVICE_ACCOUNT` = the Cloud Run runtime service account (needs `roles/storage.objectUser` on the bucket, `roles/iam.serviceAccountTokenCreator` on itself, `roles/cloudsql.client`, `roles/logging.logWriter`)
    - `_CLOUD_SQL_CONNECTION_NAME` = optional Cloud SQL instance connection name for Cloud Run socket attachment
 6. In Cloud Run, the trigger will deploy the service with the specified env vars automatically.
 

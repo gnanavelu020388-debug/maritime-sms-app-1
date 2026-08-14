@@ -5,7 +5,7 @@
  */
 
 import { useEffect, useState } from 'react';
-import { Shield, Clock, Monitor, Save, Loader2 } from 'lucide-react';
+import { Clock, Monitor, Save, Loader2 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import {
   useTenantSecuritySettings,

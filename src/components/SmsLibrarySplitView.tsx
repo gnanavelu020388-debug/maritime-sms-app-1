@@ -56,7 +56,6 @@ import {
   type SmsProfile,
 } from "../lib/smsProfiles";
 import { useFleetScope } from "../lib/useFleetScope";
-import { getLocalSmsVersion } from "../lib/localVesselDb";
 import { onSyncEvent, postSyncEvent } from "../lib/syncChannel";
 import { enqueueSyncEntry } from "../lib/syncService";
 import { Modal } from "../components/Modal";
@@ -666,7 +665,7 @@ export function SmsLibrarySplitView({
     if (!tenantId) return;
     const effectiveProfileId =
       vesselProfile?.id ?? (enableProfileSelector ? activeProfileId : null);
-    let allDocs: SmsDocRow[] = getEffectiveDemoSmsDocs(
+    const allDocs: SmsDocRow[] = getEffectiveDemoSmsDocs(
       tenantId,
       undefined,
       effectiveProfileId,

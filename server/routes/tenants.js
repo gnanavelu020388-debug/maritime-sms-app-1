@@ -5,23 +5,36 @@ import { authMiddleware, requireSuperAdmin } from '../middleware/auth.js';
 
 const router = Router();
 
+const BYTES_PER_GB = 1024 ** 3;
+
 function parseTenant(row) {
   if (!row) return null;
+  const storageGbMax = Number(row.storage_gb_max);
+  const storageBytesUsed = Number(row.storage_bytes_used || 0);
+  const limitBytes = storageGbMax * BYTES_PER_GB;
+  const usedGb = storageBytesUsed / BYTES_PER_GB;
+  const remainingGb = Math.max(0, storageGbMax - usedGb);
+  const percentage = limitBytes > 0 ? Math.round((storageBytesUsed / limitBytes) * 1000) / 10 : 0;
   return {
     ...row,
     modules: typeof row.modules === 'string' ? JSON.parse(row.modules) : (row.modules || []),
     monthly_revenue: Number(row.monthly_revenue),
-    storage_gb_max: Number(row.storage_gb_max),
-    storage_bytes_used: Number(row.storage_bytes_used || 0),
+    storage_gb_max: storageGbMax,
+    storage_bytes_used: storageBytesUsed,
+    storage_status: row.storage_status || 'NORMAL',
+    storage_remaining_gb: remainingGb,
+    storage_percentage: percentage,
   };
 }
 
-// Storage usage isn't tracked with a running counter — it's summed on read
-// from sms_documents.file_size_bytes, which is only populated for PDF
-// uploads that pass their size through (the upload UI doesn't do this yet).
+// Storage usage comes from tenant_storage_cache, populated by listing each
+// tenant's GCS prefix (server/jobs/refreshStorageUsage.js and the quota
+// reservation in server/routes/files.js) rather than a live bucket call on
+// every request.
 const TENANTS_WITH_STORAGE_SQL = `
-  SELECT t.*, COALESCE((SELECT SUM(d.file_size_bytes) FROM sms_documents d WHERE d.tenant_id = t.id), 0) AS storage_bytes_used
+  SELECT t.*, COALESCE(c.bytes_used, 0) AS storage_bytes_used, c.status AS storage_status
   FROM tenants t
+  LEFT JOIN tenant_storage_cache c ON c.tenant_id = t.id
 `;
 
 router.get('/', authMiddleware, async (req, res) => {

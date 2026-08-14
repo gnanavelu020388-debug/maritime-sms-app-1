@@ -55,9 +55,6 @@ export function ModuleLaunchpad({ tenantId, activeModule, onSelectModule, compac
     );
   }
 
-  const enabledModules = allModules.filter((m) => m.enabled);
-  const disabledModules = allModules.filter((m) => !m.enabled);
-
   if (allModules.length === 0) {
     return (
       <div className="rounded-lg border border-dashed border-ink-200 p-6 text-center text-sm text-ink-400 dark:border-ink-700 dark:text-ink-500">

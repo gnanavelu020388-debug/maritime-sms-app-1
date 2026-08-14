@@ -14,10 +14,10 @@
 
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import {
-  Users, Plus, Anchor, MapPin, Clock, Lock, Unlock, Shield, Building2,
-  CheckCircle2, Ban, LogIn, LogOut, Loader2, Search, ChevronDown, ChevronRight,
+  Users, Anchor, MapPin, Lock, Unlock, Shield, Building2,
+  CheckCircle2, Ban, LogOut, Loader2, Search, ChevronDown, ChevronRight,
   Ship, Filter, UserPlus, Clock3, AlertCircle, Pencil, Trash2,
-  Globe, Target, Mail, Trash, X,
+  Globe, Target, Mail, Trash,
 } from 'lucide-react';
 import { type TenantUserRow, type CrewAssignmentRow, type VesselRow, type Rank } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth';
@@ -28,8 +28,8 @@ import {
   demoSignOff, demoSignOn, demoCreateUser, demoDeactivateUser, demoSetUserStatus, demoUpdateUserProfile, demoDeleteUser,
 } from '../../lib/demoData';
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
-import { CREW_STATUS, useRanksForTenant, type RankDef } from '../../lib/rankPermissions';
-import { useShoreRolesForTenant, type FleetScope, resolveShoreRoleName } from '../../lib/shoreRoles';
+import { CREW_STATUS, useRanksForTenant } from '../../lib/rankPermissions';
+import { useShoreRolesForTenant, type FleetScope } from '../../lib/shoreRoles';
 import { Modal } from '../../components/Modal';
 import { Badge } from '../../components/Badge';
 

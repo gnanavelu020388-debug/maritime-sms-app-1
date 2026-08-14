@@ -1,4 +1,4 @@
-import { Ship, FileText, Users, Shield, ArrowRight, TrendingUp, CheckCircle2, Clock, Anchor } from 'lucide-react';
+import { Ship, Shield, ArrowRight, TrendingUp, CheckCircle2, Clock, Anchor, AlertTriangle } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
 import { getEffectiveDemoUsers, getEffectiveDemoSmsDocs, getEffectiveDemoAssignments, getEffectiveDemoVessels } from '../../lib/demoData';
 import { useFleetScope } from '../../lib/useFleetScope';
@@ -9,6 +9,7 @@ import { ShoreLaunchpadView } from '../../components/ShoreLaunchpadView';
 import { useFeatureFlags, type ModuleKey } from '../../lib/featureFlags';
 import { onSyncEvent } from '../../lib/syncChannel';
 import { refreshTenantData } from '../../lib/dataCache';
+import { formatGb } from '../../constants';
 
 export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection) => void }) {
   const { tenant, tenantUser } = useAuth();
@@ -101,6 +102,14 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
         ))}
       </div>
 
+      {tenant?.storage_status && tenant.storage_status !== 'NORMAL' && (
+        <StorageStatusBanner
+          status={tenant.storage_status}
+          usedGb={(tenant.storage_bytes_used ?? 0) / (1024 ** 3)}
+          maxGb={tenant.storage_gb_max ?? 0}
+        />
+      )}
+
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-ink-200/70 bg-white p-5 dark:border-ink-800 dark:bg-ink-900">
           <div className="mb-3 flex items-center gap-2">
@@ -110,6 +119,12 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
           <div className="space-y-3">
             <UsageBar label="Vessels" used={stats.vessels} max={tenant?.vessels_max ?? 0} />
             <UsageBar label="Users" used={stats.users} max={tenant?.seats_max ?? 0} />
+            <UsageBar
+              label="Document Storage"
+              used={Math.round(((tenant?.storage_bytes_used ?? 0) / (1024 ** 3)) * 100) / 100}
+              max={tenant?.storage_gb_max ?? 0}
+              unit="GB"
+            />
           </div>
         </div>
 
@@ -130,14 +145,58 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
   );
 }
 
-function UsageBar({ label, used, max }: { label: string; used: number; max: number }) {
+function StorageStatusBanner({
+  status,
+  usedGb,
+  maxGb,
+}: {
+  status: 'WARNING' | 'LIMIT_REACHED' | 'OVER_LIMIT';
+  usedGb: number;
+  maxGb: number;
+}) {
+  const copy: Record<typeof status, { tone: string; title: string; message: string }> = {
+    WARNING: {
+      tone: 'warning',
+      title: 'Storage usage is approaching your company limit.',
+      message: `Your company has used ${formatGb(usedGb)} of its ${formatGb(maxGb)} document storage limit.`,
+    },
+    LIMIT_REACHED: {
+      tone: 'danger',
+      title: 'Storage limit reached.',
+      message: `Your company has used ${formatGb(usedGb)} of its ${formatGb(maxGb)} document storage limit. New document uploads are currently unavailable. Please contact your administrator to increase the storage limit.`,
+    },
+    OVER_LIMIT: {
+      tone: 'danger',
+      title: 'Storage limit exceeded.',
+      message: `Your company has used ${formatGb(usedGb)} of its ${formatGb(maxGb)} document storage limit. New document uploads remain disabled until usage is reduced or the limit is increased.`,
+    },
+  };
+  const { tone, title, message } = copy[status];
+  return (
+    <div
+      className={`flex items-start gap-2.5 rounded-xl border p-3 text-sm ${
+        tone === 'danger'
+          ? 'border-danger-200 bg-danger-50 text-danger-700 dark:border-danger-800 dark:bg-danger-900/20 dark:text-danger-300'
+          : 'border-warning-200 bg-warning-50 text-warning-700 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-300'
+      }`}
+    >
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+      <div>
+        <p className="font-semibold">{title}</p>
+        <p className="mt-0.5 text-xs opacity-90">{message}</p>
+      </div>
+    </div>
+  );
+}
+
+function UsageBar({ label, used, max, unit }: { label: string; used: number; max: number; unit?: string }) {
   const pct = max > 0 ? Math.min(100, (used / max) * 100) : 0;
   const tone = pct > 90 ? 'bg-danger-500' : pct > 75 ? 'bg-warning-500' : 'bg-primary-500';
   return (
     <div>
       <div className="mb-1 flex justify-between text-xs">
         <span className="text-ink-600 dark:text-ink-300">{label}</span>
-        <span className="font-semibold text-ink-800 dark:text-white">{used} / {max}</span>
+        <span className="font-semibold text-ink-800 dark:text-white">{used} / {max}{unit ? ` ${unit}` : ''}</span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-ink-200 dark:bg-ink-700">
         <div className={`h-full rounded-full ${tone} transition-all`} style={{ width: `${pct}%` }} />

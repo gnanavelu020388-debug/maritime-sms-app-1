@@ -15,12 +15,12 @@ export { getToken, setToken, clearToken };
 const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
 function getNetworkMode(): 'online' | 'offline' {
-  const fn = (window as Record<string, unknown>).__networkMode as (() => 'online' | 'offline') | undefined;
+  const fn = (window as unknown as Record<string, unknown>).__networkMode as (() => 'online' | 'offline') | undefined;
   return fn ? fn() : 'online';
 }
 
 function enqueueOfflineAction(path: string, method: string, body: unknown): void {
-  const fn = (window as Record<string, unknown>).__networkEnqueueAction as ((a: { path: string; method: string; body: unknown }) => void) | undefined;
+  const fn = (window as unknown as Record<string, unknown>).__networkEnqueueAction as ((a: { path: string; method: string; body: unknown }) => void) | undefined;
   if (fn) fn({ path, method, body });
 }
 
@@ -57,7 +57,7 @@ async function request<T>(
     // Only treat 401 as an expired session when the request
     // actually started with an authenticated session.
     if (token) {
-      const onExpired = (window as Record<string, unknown>)
+      const onExpired = (window as unknown as Record<string, unknown>)
         .__mpcAuthExpired as (() => void) | undefined;
 
       onExpired?.();
@@ -302,6 +302,14 @@ export async function apiDeleteSmsDocTab(tenantId: string, tabKey: string): Prom
 
 // ── Files (GCS) ───────────────────────────────────────────
 
+export class ApiFileError extends Error {
+  code?: string;
+  constructor(message: string, code?: string) {
+    super(message);
+    this.code = code;
+  }
+}
+
 export async function apiUploadFile(tenantId: string, docId: string, file: File): Promise<{ gcsUri: string; fileName: string; contentType: string; size: number }> {
   const formData = new FormData();
   formData.append('file', file);
@@ -313,13 +321,47 @@ export async function apiUploadFile(tenantId: string, docId: string, file: File)
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: formData,
   });
-  if (!res.ok) throw new Error('Upload failed');
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Upload failed' }));
+    throw new ApiFileError(body.error || 'Upload failed', body.code);
+  }
   return res.json();
 }
 
 export async function apiGetSignedUrl(filePath: string): Promise<string> {
   const res = await request<{ url: string }>(`/files/signed-url?filePath=${encodeURIComponent(filePath)}`);
   return res.url;
+}
+
+// ── Platform storage (Super Admin) ─────────────────────────
+
+export interface PlatformStorage {
+  actualUsageBytes: number;
+  poolBytes: number;
+  remainingBytes: number;
+  percentage: number;
+  computedAt: string | null;
+}
+
+export async function apiGetPlatformStorage(): Promise<PlatformStorage> {
+  return request<PlatformStorage>('/platform/storage');
+}
+
+export async function apiSetPlatformStoragePool(poolGb: number): Promise<{ platform_storage_pool_gb: number }> {
+  return request<{ platform_storage_pool_gb: number }>('/platform/storage', {
+    method: 'PUT',
+    body: JSON.stringify({ platform_storage_pool_gb: poolGb }),
+  });
+}
+
+export interface PlatformHealth {
+  cpuPercent: number;
+  apiP95Ms: number;
+  computedAt: string | null;
+}
+
+export async function apiGetPlatformHealth(): Promise<PlatformHealth> {
+  return request<PlatformHealth>('/platform/health');
 }
 
 // ── Vessel Sync State (unified sync engine) ────────────────

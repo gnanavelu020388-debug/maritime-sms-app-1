@@ -165,13 +165,6 @@ function moduleFull(moduleKey: ModuleKey): Record<string, boolean> {
   return { [moduleAccess(moduleKey, 'view')]: true, [moduleAccess(moduleKey, 'edit')]: true, [moduleAccess(moduleKey, 'full')]: true };
 }
 
-/** Grant view for all modules. */
-function allModulesView(): Record<string, boolean> {
-  const r: Record<string, boolean> = {};
-  for (const mk of MODULE_KEYS) Object.assign(r, moduleView(mk));
-  return r;
-}
-
 /** Grant full control for all modules. */
 function allModulesFull(): Record<string, boolean> {
   const r: Record<string, boolean> = {};

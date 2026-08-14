@@ -87,7 +87,7 @@ function persistActiveState(): void {
 }
 
 /** In the browser sandbox, we simulate the local vessel server /health probe. */
-async function pingHealth(serverUrl: string): Promise<boolean> {
+async function pingHealth(_serverUrl: string): Promise<boolean> {
   // In production this would be: fetch(`${serverUrl}/health`, { signal: controller })
   // In the browser simulation, we treat the local IndexedDB cache as the "vessel server".
   // If the cache has been seeded (has a local SMS version), the "server" is up.
@@ -150,7 +150,7 @@ async function runHeartbeat(): Promise<void> {
     setConnectionMode('VESSEL_SERVER_LAN');
   }
 
-  persistState(currentState);
+  if (activeTenantId) persistState(activeTenantId, currentState);
   notify();
   void wasReachable;
 }

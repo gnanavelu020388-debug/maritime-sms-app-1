@@ -114,7 +114,7 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
       if (!cloudReachable && modeRef.current === 'online') {
         console.log('[NetworkContext] auto-failover: cloud unreachable → switching to OFFLINE');
         persistMode('offline');
-      } else if (cloudReachable && modeRef.current === 'offline' && modeRef.current !== 'online') {
+      } else if (cloudReachable && modeRef.current === 'offline') {
         // Don't auto-switch back to online — let user confirm via banner
         console.log('[NetworkContext] cloud restored — awaiting user confirmation to go ONLINE');
       }
@@ -201,9 +201,9 @@ export function NetworkProvider({ children }: { children: ReactNode }) {
 
   // ── Expose enqueue + flush to the API client via a global ref ────────
   useEffect(() => {
-    (window as Record<string, unknown>).__networkEnqueueAction = enqueueAction;
-    (window as Record<string, unknown>).__networkFlushQueue = flushQueue;
-    (window as Record<string, unknown>).__networkMode = () => modeRef.current;
+    (window as unknown as Record<string, unknown>).__networkEnqueueAction = enqueueAction;
+    (window as unknown as Record<string, unknown>).__networkFlushQueue = flushQueue;
+    (window as unknown as Record<string, unknown>).__networkMode = () => modeRef.current;
   }, [enqueueAction, flushQueue]);
 
   const value: NetworkContextValue = {

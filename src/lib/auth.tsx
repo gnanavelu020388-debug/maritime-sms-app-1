@@ -224,18 +224,33 @@ async function resolveFromApi(userObj: {
     }
     if (userObj.tenant_id) {
       try {
-        const tenant = await api.apiGetTenant(userObj.tenant_id);
-        const tenantUser = userObj
-          ? ({
+        const tenant = await api.apiGetTenant<TenantRow>(userObj.tenant_id);
+        const resolvedRole: Exclude<PlatformRole, "super_admin"> =
+          userObj.role === "company_admin" || userObj.role === "dpa" || userObj.role === "vessel"
+            ? userObj.role
+            : "vessel";
+        const tenantUser: TenantUserRow | null = userObj
+          ? {
               id: userObj.id,
               tenant_id: userObj.tenant_id,
+              auth_uid: null,
               name: userObj.name || "",
               email: userObj.email,
+              employee_id: null,
+              passport_number: null,
+              seaman_book_number: null,
+              nationality: null,
               rank: userObj.rank || "Crew",
-              role: (userObj.role as any) || "vessel",
-            } as any)
+              role: resolvedRole,
+              status: "active",
+              fleet_scope: "global",
+              assigned_vessel_ids: [],
+              assigned_fleet_profile_ids: [],
+              created_at: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+            }
           : null;
-        let activeAssignment = null;
+        let activeAssignment: ActiveAssignment | null = null;
         if (tenantUser && tenantUser.role === "vessel") {
           // attempt to locate an active assignment from demo fallback (best-effort)
           const assignments = getEffectiveDemoAssignments(tenantUser.tenant_id);
@@ -260,7 +275,7 @@ async function resolveFromApi(userObj: {
           }
         }
         const rankPermissions =
-          (tenantUser && (DEFAULT_RANK_PERMISSIONS as any)[tenantUser.rank]) ??
+          (tenantUser && DEFAULT_RANK_PERMISSIONS[tenantUser.rank]) ??
           null;
         const adminName =
           tenantUser && tenantUser.rank === "DPA"
@@ -270,8 +285,8 @@ async function resolveFromApi(userObj: {
           role: tenantUser?.role ?? null,
           internalRole: null,
           adminName,
-          tenant: tenant as any,
-          tenantUser: tenantUser as any,
+          tenant,
+          tenantUser,
           activeAssignment,
           rankPermissions,
         };
@@ -335,9 +350,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         mustChangePassword: false,
       });
     };
-    (window as Record<string, unknown>).__mpcAuthExpired = handleAuthExpired;
+    (window as unknown as Record<string, unknown>).__mpcAuthExpired = handleAuthExpired;
     return () => {
-      delete (window as Record<string, unknown>).__mpcAuthExpired;
+      delete (window as unknown as Record<string, unknown>).__mpcAuthExpired;
     };
   }, []);
 
@@ -357,7 +372,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return;
       }
       // prefer server-provided role/tenant information when available
-      const resolved = await resolveFromApi(res.user as any);
+      const resolved = await resolveFromApi(res.user);
       const user = buildUser(res.user.id, res.user.email);
       const session = buildSession(user, api.getToken() ?? "");
       const token = await registerNewSessionToken(res.user.id);
@@ -397,7 +412,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return;
         }
         const resolved =
-          (await resolveFromApi(res.user as any)) ??
+          (await resolveFromApi(res.user)) ??
           resolveRoleAndTenant(res.user.id, res.user.email);
         const user = buildUser(res.user.id, res.user.email);
         const session = buildSession(user, token);
@@ -437,7 +452,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       // prefer API-resolved role/tenant
       const resolved =
-        (await resolveFromApi(apiUser as any)) ||
+        (await resolveFromApi(apiUser)) ||
         resolveRoleAndTenant(uid, email);
       const user = buildUser(uid, email);
       const session = buildSession(user, token);

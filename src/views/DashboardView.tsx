@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Building2, Ship, Users, Wifi, WifiOff, HardDrive, DollarSign, TrendingUp, TrendingDown,
-  Megaphone, Radio, Gauge, ArrowUpRight, Server, Loader2, X,
+  Building2, Ship, Wifi, WifiOff, HardDrive, DollarSign, TrendingUp, TrendingDown,
+  Megaphone, Radio, Gauge, ArrowUpRight, Server, Loader2, X, Pencil, Check,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { ProgressBar } from '../components/ProgressBar';
@@ -26,6 +26,22 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
   const [activeBanners, setActiveBanners] = useState<BannerData[]>([]);
   const [bannersLoading, setBannersLoading] = useState(true);
   const [publishBusy, setPublishBusy] = useState(false);
+  const [platformStorage, setPlatformStorage] = useState<api.PlatformStorage | null>(null);
+  const [platformHealth, setPlatformHealth] = useState<api.PlatformHealth | null>(null);
+  const [poolEditing, setPoolEditing] = useState(false);
+  const [poolInput, setPoolInput] = useState('');
+  const [poolSaving, setPoolSaving] = useState(false);
+
+  useEffect(() => {
+    api.apiGetPlatformStorage().then(setPlatformStorage).catch(() => {
+      // Non-fatal — dashboard still renders with tenant-sum storage figures
+      // if the platform-wide endpoint is unavailable (e.g. non-super-admin).
+    });
+    api.apiGetPlatformHealth().then(setPlatformHealth).catch(() => {
+      // Non-fatal — falls back to a static 0 reading (see ResourceRow below)
+      // if the platform-wide endpoint is unavailable (e.g. non-super-admin).
+    });
+  }, []);
 
   const realTenants = useMemo(() => tenants.filter((t) => isRealTenantId(t.id)), [tenants]);
 
@@ -87,11 +103,52 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
     }
   }
 
+  function startPoolEdit() {
+    if (!platformStorage) return;
+    setPoolInput(String(Math.round(platformStorage.poolBytes / (1024 ** 3))));
+    setPoolEditing(true);
+  }
+
+  async function handleSavePool() {
+    const poolGb = Number(poolInput);
+    if (!poolGb || poolGb <= 0) {
+      toast({ tone: 'danger', title: 'Invalid value', message: 'Enter a positive number of GB.' });
+      return;
+    }
+    setPoolSaving(true);
+    try {
+      const previousGb = platformStorage ? Math.round(platformStorage.poolBytes / (1024 ** 3)) : null;
+      await api.apiSetPlatformStoragePool(poolGb);
+      const updated = await api.apiGetPlatformStorage();
+      setPlatformStorage(updated);
+      await logAudit({
+        actorEmail: user?.email ?? 'super-admin',
+        category: 'system',
+        action: `Platform storage pool updated${previousGb != null ? ` from ${previousGb}GB` : ''} to ${poolGb}GB`,
+        target: 'platform',
+      });
+      toast({ tone: 'success', title: 'Storage pool updated', message: `Platform pool set to ${formatGb(poolGb)}.` });
+      setPoolEditing(false);
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Update failed', message: (err as Error).message });
+    } finally {
+      setPoolSaving(false);
+    }
+  }
+
   const kpis = useMemo(() => {
     const activeTenants = tenants.filter((t) => t.status === 'active').length;
     const totalShips = tenants.reduce((s, t) => s + t.vessels.used, 0);
     const totalUsers = tenants.reduce((s, t) => s + t.seats.used, 0);
-    const totalStorageUsed = tenants.reduce((s, t) => s + t.storageGb.used, 0);
+    // Prefer the bucket-wide actual usage (read directly from GCS via
+    // /platform/storage) over summing each tenant's own usage, which is
+    // pre-rounded to 0.01GB (see bytesToGb in store.tsx) — at MB-scale
+    // quotas that rounding drops most tenants' usage to 0 before the sum,
+    // undercounting the total. Falls back to the per-tenant sum if the
+    // platform-wide endpoint isn't available (e.g. non-super-admin).
+    const totalStorageUsed = platformStorage
+      ? platformStorage.actualUsageBytes / (1024 ** 3)
+      : tenants.reduce((s, t) => s + t.storageGb.used, 0);
     const totalStorageMax = tenants.reduce((s, t) => s + t.storageGb.max, 0);
     // Archived tenants are excluded from active subscription revenue.
     const revenue = tenants
@@ -100,7 +157,7 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
     const onlineShips = Math.round(totalShips * 0.81);
     const offlineShips = totalShips - onlineShips;
     return { activeTenants, totalTenants: tenants.length, totalShips, totalUsers, totalStorageUsed, totalStorageMax, revenue, onlineShips, offlineShips };
-  }, [tenants]);
+  }, [tenants, platformStorage]);
 
   return (
     <div className="space-y-6">
@@ -277,9 +334,78 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <Card title="Platform Resource Health" subtitle="Real-time infrastructure indicators" icon={<Gauge className="h-4 w-4" />}>
           <div className="space-y-4">
-            <ResourceRow icon={<Server className="h-4 w-4" />} label="CPU utilization" value={42} unit="%" tone="success" />
-            <ResourceRow icon={<HardDrive className="h-4 w-4" />} label="Storage allocation" value={68} unit="%" tone="warning" />
-            <ResourceRow icon={<Radio className="h-4 w-4" />} label="API traffic (p95)" value={31} unit="%" tone="success" />
+            <ResourceRow
+              icon={<Server className="h-4 w-4" />}
+              label="CPU utilization"
+              value={platformHealth?.cpuPercent ?? 0}
+              unit="%"
+              tone={!platformHealth ? 'success' : platformHealth.cpuPercent >= 85 ? 'danger' : platformHealth.cpuPercent >= 60 ? 'warning' : 'success'}
+            />
+            {platformStorage ? (
+              <div>
+                <ResourceRow
+                  icon={<HardDrive className="h-4 w-4" />}
+                  label="GCS storage pool"
+                  value={platformStorage.percentage}
+                  unit="%"
+                  tone={platformStorage.percentage >= 100 ? 'danger' : platformStorage.percentage >= 80 ? 'warning' : 'success'}
+                />
+                {poolEditing ? (
+                  <div className="mt-2 flex items-center gap-1.5 pl-6">
+                    <input
+                      type="number"
+                      min={1}
+                      className="input h-7 w-24 py-1 text-xs"
+                      value={poolInput}
+                      onChange={(e) => setPoolInput(e.target.value)}
+                      autoFocus
+                    />
+                    <span className="text-[11px] text-ink-400">GB pool</span>
+                    <button
+                      onClick={handleSavePool}
+                      disabled={poolSaving}
+                      className="btn-primary rounded-md px-2 py-1 text-[11px] disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Save"
+                    >
+                      {poolSaving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                    </button>
+                    <button
+                      onClick={() => setPoolEditing(false)}
+                      disabled={poolSaving}
+                      className="btn-ghost rounded-md p-1 disabled:cursor-not-allowed disabled:opacity-50"
+                      title="Cancel"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="mt-1 flex items-center justify-between gap-2 pl-6">
+                    <p className="text-[11px] text-ink-400">
+                      {formatGb(platformStorage.actualUsageBytes / (1024 ** 3))} used of {formatGb(platformStorage.poolBytes / (1024 ** 3))} allocated · {formatGb(platformStorage.remainingBytes / (1024 ** 3))} remaining
+                    </p>
+                    {caps.billingEdit && (
+                      <button
+                        onClick={startPoolEdit}
+                        className="shrink-0 rounded p-1 text-ink-400 hover:bg-primary-50 hover:text-primary-600 dark:hover:bg-primary-900/30 dark:hover:text-primary-300"
+                        title="Edit allocated storage pool"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <ResourceRow icon={<HardDrive className="h-4 w-4" />} label="GCS storage pool" value={0} unit="%" tone="success" />
+            )}
+            <ResourceRow
+              icon={<Radio className="h-4 w-4" />}
+              label="API traffic (p95)"
+              value={platformHealth?.apiP95Ms ?? 0}
+              max={500}
+              unit="ms"
+              tone={!platformHealth ? 'success' : platformHealth.apiP95Ms >= 400 ? 'danger' : platformHealth.apiP95Ms >= 200 ? 'warning' : 'success'}
+            />
           </div>
         </Card>
 
@@ -287,7 +413,9 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
           <div className="space-y-3">
             {tenants.map((t) => {
               const overVessels = t.vessels.used > t.vessels.max;
-              const overStorage = t.storageGb.used > t.storageGb.max;
+              const overStorage = t.storageGb.status
+                ? t.storageGb.status === 'OVER_LIMIT' || t.storageGb.status === 'LIMIT_REACHED'
+                : t.storageGb.used > t.storageGb.max;
               const nearSeats = t.seats.used / t.seats.max > 0.9;
               if (!overVessels && !overStorage && !nearSeats) return null;
               return (
@@ -388,7 +516,7 @@ function KpiCard({
   );
 }
 
-function ResourceRow({ icon, label, value, unit, tone }: { icon: React.ReactNode; label: string; value: number; unit: string; tone: 'success' | 'warning' | 'danger' }) {
+function ResourceRow({ icon, label, value, unit, tone, max = 100 }: { icon: React.ReactNode; label: string; value: number; unit: string; tone: 'success' | 'warning' | 'danger'; max?: number }) {
   return (
     <div>
       <div className="mb-1.5 flex items-center justify-between">
@@ -398,7 +526,7 @@ function ResourceRow({ icon, label, value, unit, tone }: { icon: React.ReactNode
         </span>
         <span className={`text-sm font-bold ${tone === 'success' ? 'text-success-600 dark:text-success-400' : tone === 'warning' ? 'text-warning-600 dark:text-warning-400' : 'text-danger-600 dark:text-danger-400'}`}>{value}{unit}</span>
       </div>
-      <ProgressBar value={value} tone={tone} size="sm" />
+      <ProgressBar value={value} max={max} tone={tone} size="sm" />
     </div>
   );
 }

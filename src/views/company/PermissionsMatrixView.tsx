@@ -17,13 +17,12 @@
 import { useEffect, useState, useMemo } from 'react';
 import {
   Shield, Save, Loader2, ChevronDown, ChevronRight, Lock,
-  UtensilsCrossed, Moon, ShieldCheck, LifeBuoy, Award, Check,
+  UtensilsCrossed, ShieldCheck, Award, Check,
   RotateCcw, Eye, EyeOff, Info, Plus, Pencil, Trash2, X,
   Ship, Building2, Navigation, Users, BookOpen, BarChart3,
   ShieldAlert, SatelliteDish, FileCheck2, Clock, Layers, Ban, Zap,
 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
-import { type Rank } from '../../lib/supabase';
 import { useFeatureFlags } from '../../lib/featureFlags';
 import {
   APP_IDS, APP_LABELS, APP_ACTIONS, APP_PRESETS, appsForTenant,
@@ -32,16 +31,15 @@ import {
   emptyActionsFor, allTrueActionsFor,
   useRanksForTenant, saveCustomRank, updateCustomRank, deleteCustomRank,
   DEFAULT_RANK_DESCRIPTIONS,
-  type AppId, type ActionMap, type RankPermissionMap, type AppPermission,
+  type AppId, type ActionMap, type RankPermissionMap,
   type RankDef,
 } from '../../lib/rankPermissions';
 import {
-  SHORE_ACTIONS, DEFAULT_SHORE_PERMISSIONS, DEFAULT_SHORE_ROLES,
+  DEFAULT_SHORE_ROLES,
   useShoreRolesForTenant, useShoreRolePermissions, saveShoreRolePermission,
   saveCustomShoreRole, updateCustomShoreRole, deleteCustomShoreRole,
-  SHORE_MODULE_ACTIONS, ALL_SHORE_ACTION_KEYS, shoreModuleActionsByModule,
+  ALL_SHORE_ACTION_KEYS, shoreModuleActionsByModule,
   SHORE_ACCORDION_GROUPS, shoreActionsByGroup, dpaFullAuthority,
-  isModuleActionKey, parseModuleActionKey,
   type ShoreRoleDef, type ShorePermissionMap, type ShoreAccordionGroup,
 } from '../../lib/shoreRoles';
 import { Modal } from '../../components/Modal';
@@ -1072,7 +1070,7 @@ export function PermissionsMatrixView() {
                             {group.key === 'modules' && (
                               <div className="space-y-3">
                                 {moduleGroups.map((modGroup) => {
-                                  const modIcon = APP_ICON_MAP[modGroup.moduleKey as AppId] ?? Shield;
+                                  const ModIcon = APP_ICON_MAP[modGroup.moduleKey as AppId] ?? Shield;
                                   const isUnlicensed = flags && !flags.has(modGroup.moduleKey);
                                   const viewKey = `mod:${modGroup.moduleKey}:view`;
                                   const editKey = `mod:${modGroup.moduleKey}:edit`;
@@ -1087,7 +1085,7 @@ export function PermissionsMatrixView() {
                                   if (isUnlicensed) {
                                     return (
                                       <div key={modGroup.moduleKey} className="flex items-center gap-2 rounded-lg border border-dashed border-ink-200 bg-ink-50/30 p-3 dark:border-ink-700 dark:bg-ink-900/20">
-                                        <modIcon className="h-4 w-4 text-ink-300" />
+                                        <ModIcon className="h-4 w-4 text-ink-300" />
                                         <span className="text-sm font-medium text-ink-400">{modGroup.moduleLabel}</span>
                                         <span className="ml-auto flex items-center gap-1 text-[10px] font-bold uppercase text-ink-400">
                                           <Lock className="h-3 w-3" /> Unlicensed by Super Admin
@@ -1099,7 +1097,7 @@ export function PermissionsMatrixView() {
                                   return (
                                     <div key={modGroup.moduleKey} className="rounded-lg border border-ink-100 bg-white p-3 dark:border-ink-800 dark:bg-ink-800/50">
                                       <div className="mb-2 flex items-center gap-2">
-                                        <modIcon className="h-4 w-4 text-teal-600" />
+                                        <ModIcon className="h-4 w-4 text-teal-600" />
                                         <span className="text-sm font-semibold text-ink-800 dark:text-ink-200">{modGroup.moduleLabel}</span>
                                       </div>
                                       <div className="grid grid-cols-3 gap-2">

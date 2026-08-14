@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react';
 import {
   FileText, Clock, CheckCircle2, ArrowRight, Shield, Layers, BookOpen, Ship,
-  RefreshCw, Cloud, Server, AlertTriangle, Activity,
 } from 'lucide-react';
 import { useAuth } from '../../lib/auth';
-import { type SmsDocRow, type VesselRow } from '../../lib/supabase';
+import { type VesselRow } from '../../lib/supabase';
 import { getEffectiveDemoSmsDocs, getEffectiveDemoVessels } from '../../lib/demoData';
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { useFleetScope } from '../../lib/useFleetScope';

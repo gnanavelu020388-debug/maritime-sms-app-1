@@ -1,8 +1,8 @@
 import { useState, useMemo, useEffect } from 'react';
 import {
   Search, ChevronDown, Building2, Folder, FileText, ChevronRight,
-  CheckCircle2, Clock, Upload, Wifi, WifiOff, Loader2, Lock, FileUp,
-  Eye, Calendar, User, Layers, Ship,
+  CheckCircle2, Clock, Loader2, Lock, FileUp,
+  Eye, Calendar, Layers, Ship,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { relativeTime } from '../constants';
@@ -202,7 +202,8 @@ function TenantSmsMirror({ tenant, activeTree, onTreeChange }: {
   useEffect(() => { loadTree(); }, [dataTenantId, activeTree, activeProfileId, syncTick]);
 
   const stats = useMemo(() => {
-    let docs = 0, folders = 0, pending = 0, synced = 0, pendingSat = 0;
+    let docs = 0, folders = 0, pending = 0;
+    const synced = 0, pendingSat = 0;
     function walk(n: MirrorNode) {
       if (n.node_kind === 'folder') folders++; else docs++;
       if (n.approval_state === 'pending_dpa') pending++;

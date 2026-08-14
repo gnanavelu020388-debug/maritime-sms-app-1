@@ -26,7 +26,7 @@ export interface SyncEvent {
 type Listener = (event: SyncEvent) => void;
 
 let channel: BroadcastChannel | null = null;
-let listeners: Set<Listener> = new Set();
+const listeners: Set<Listener> = new Set();
 
 function getChannel(): BroadcastChannel | null {
   if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return null;

@@ -21,7 +21,6 @@ import {
   useFeatureFlags, useModuleDefinitions, getDisplayName, type ModuleKey,
 } from '../lib/featureFlags';
 import { getShorePermsForRole, resolveShoreRoleName, canDoShore, type ShorePermissionMap } from '../lib/shoreRoles';
-import { roleLabel } from '../lib/auth-utils';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   FileCheck2, Clock, UtensilsCrossed, Award, SatelliteDish, Navigation,
@@ -163,7 +162,7 @@ export function ShoreLaunchpadView({
   showBackButton = false,
   accent = 'primary',
 }: ShoreLaunchpadViewProps) {
-  const { tenant, tenantUser, role } = useAuth();
+  const { tenant, tenantUser } = useAuth();
   const { isEnabled } = useFeatureFlags(tenant?.id);
   const { defs } = useModuleDefinitions();
   const [isLaunchpadOpen, setIsLaunchpadOpen] = useState(false);

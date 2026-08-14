@@ -1,7 +1,7 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
 import { ShieldCheck, Filter, Eye, Lock, AlertOctagon, ScrollText, Download, ShieldAlert, ChevronRight, ChevronDown, User, Mail, Globe, Target, Clock, GitCompare } from 'lucide-react';
 import { Card } from '../components/Card';
-import { Badge, StatusBadge } from '../components/Badge';
+import { Badge } from '../components/Badge';
 import { useStore } from '../store';
 import { relativeTime, formatUtc } from '../constants';
 import type { AuditEvent, AuditCategory, InternalUser } from '../types';

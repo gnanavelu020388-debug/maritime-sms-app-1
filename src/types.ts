@@ -20,11 +20,15 @@ export type PlanTier = 'Standard' | 'Professional' | 'Enterprise' | 'Custom';
 export type TenantStatus = 'active' | 'suspended' | 'trial' | 'provisioning' | 'archived';
 
 export type ModuleKey =
+  | 'sms_documentation'
+  | 'rest_hours'
+  | 'haccp_galley'
+  | 'certification_manager'
+  | 'satellite_sync'
   | 'voyage_logging'
   | 'crew_matrix'
   | 'electronic_logbooks'
   | 'advanced_analytics'
-  | 'satellite_sync'
   | 'risk_assessment';
 
 export interface Tenant {
@@ -41,7 +45,11 @@ export interface Tenant {
   status: TenantStatus;
   seats: { used: number; max: number };
   vessels: { used: number; max: number };
-  storageGb: { used: number; max: number };
+  storageGb: {
+    used: number; max: number;
+    remaining?: number; percentage?: number;
+    status?: 'NORMAL' | 'WARNING' | 'LIMIT_REACHED' | 'OVER_LIMIT';
+  };
   modules: ModuleKey[];
   mfaEnforced: boolean;
   createdAt: string;

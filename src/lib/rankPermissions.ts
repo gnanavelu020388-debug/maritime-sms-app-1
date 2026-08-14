@@ -315,11 +315,6 @@ export function allTrueActionsFor(app: AppId): ActionMap {
 
 // ── Default permissions per rank ─────────────────────────────────────
 
-function preset(app: AppId, presetLabel: string): AppPermission {
-  const p = APP_PRESETS[app].find((x) => x.label === presetLabel)!;
-  return { visible: presetLabel !== 'Hidden', actions: { ...p.actions } };
-}
-
 /** Generate a "Full Access" permission for a module. */
 function fullAccess(app: AppId): AppPermission {
   return { visible: true, actions: allTrueActionsFor(app) };

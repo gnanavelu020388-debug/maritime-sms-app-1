@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Ship, Plus, Ban, Anchor, Clock, RefreshCw, Trash2, Loader2, AlertTriangle, Hash, Users, LogIn, LogOut, FileText, CheckCircle2, X, Info, Pencil, Layers } from 'lucide-react';
-import { type VesselRow, type CrewAssignmentRow, type TenantUserRow, type Rank, ALL_RANKS } from '../../lib/supabase';
+import { Ship, Plus, Ban, Anchor, Clock, RefreshCw, Trash2, Loader2, AlertTriangle, Hash, Users, LogIn, LogOut, FileText, CheckCircle2, Info, Pencil, Layers } from 'lucide-react';
+import { type VesselRow, type CrewAssignmentRow, type TenantUserRow } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth';
 import { logAudit } from '../../lib/audit';
 import { postSyncEvent, onSyncEvent } from '../../lib/syncChannel';
@@ -78,7 +78,6 @@ export function VesselsView() {
       const profileVersion = r.profileVersion ?? tenant!.sms_version;
       // Check for new DPA-approved circulars/amendments under this vessel's profile
       const newDocCount = await countApprovedDocsForProfile(tenant!.id, r.profileId, r.last_sync_at ?? undefined);
-      const now = new Date().toISOString();
       await demoUpdateVesselSync(tenant!.id, r.id, profileVersion);
       await logAudit({
         tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'sms',

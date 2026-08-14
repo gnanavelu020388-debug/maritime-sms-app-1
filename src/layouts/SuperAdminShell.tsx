@@ -16,8 +16,7 @@ import { ProvisioningView } from '../views/ProvisioningView';
 import { FeatureMatrixView } from '../views/FeatureMatrixView';
 import type { SectionId } from '../types';
 import type { User, PlatformRole, InternalRole } from '../lib/supabase';
-import { roleLabel } from '../lib/auth-utils';
-import { INTERNAL_ROLE_LABEL, INTERNAL_ROLE_SUMMARY, canAccessSection, capabilitiesFor, type Capabilities } from '../lib/permissions';
+import { INTERNAL_ROLE_LABEL, INTERNAL_ROLE_SUMMARY, canAccessSection, capabilitiesFor } from '../lib/permissions';
 import { LogOut, Lock } from 'lucide-react';
 import { refreshAllTenants, refreshTenantData } from '../lib/dataCache';
 import { getEffectiveDemoTenants, getEffectiveDemoUsers, getEffectiveDemoVessels } from '../lib/demoData';
@@ -32,7 +31,7 @@ export function SuperAdminShell(props: { user: User; role: PlatformRole; interna
   );
 }
 
-function SuperAdminShellInner({ user, role, internalRole, onSignOut }: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
+function SuperAdminShellInner({ user, internalRole, onSignOut }: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
   const { dispatch } = useStore();
   const [active, setActive] = useState<SectionId>('dashboard');
   const [sidebarOpen, setSidebarOpen] = useState(false);

@@ -108,7 +108,7 @@ export function VesselShell({
 
   const versionLabel = localVersion ?? tenant?.sms_version ?? '—';
 
-  const [vesselProfile, setVesselProfile] = useState<SmsProfile | null>(null);
+  const [_vesselProfile, setVesselProfile] = useState<SmsProfile | null>(null);
   useEffect(() => {
     const vesselId = activeAssignment?.vessel_id ?? currentVessel?.id;
     if (!tenant?.id || !vesselId) { setVesselProfile(null); return; }
@@ -145,6 +145,8 @@ export function VesselShell({
 
   const isMasterOrChiefEng = crewRank === 'Master' || crewRank === 'Chief Engineer';
 
+  const { defs } = useModuleDefinitions();
+
   if (tenant && currentUserObj && accessibleVessels.length === 0 && !activeAssignment) {
     return (
       <StoreProvider>
@@ -168,7 +170,6 @@ export function VesselShell({
     );
   }
 
-  const { defs } = useModuleDefinitions();
   const activeModuleLabel = activeModule ? getDisplayName(activeModule, defs) : null;
 
   const isInModule = activeModule !== null || drawerSection !== null;

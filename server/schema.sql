@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS tenants (
   status VARCHAR(50) NOT NULL DEFAULT 'provisioning',
   vessels_max INT NOT NULL DEFAULT 5,
   seats_max INT NOT NULL DEFAULT 25,
-  storage_gb_max BIGINT NOT NULL DEFAULT 50,
+  storage_gb_max DECIMAL(12,6) NOT NULL DEFAULT 50,
   monthly_revenue DECIMAL(10,2) NOT NULL DEFAULT 0,
   region VARCHAR(50) NOT NULL DEFAULT 'EMEA',
   mfa_enforced BOOLEAN NOT NULL DEFAULT TRUE,
@@ -32,6 +32,51 @@ CREATE TABLE IF NOT EXISTS tenants (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   contract_expires TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Widen storage_gb_max from BIGINT to DECIMAL so quotas can express
+-- sub-GB values (e.g. MB-scale demo quotas) — no-op on fresh installs
+-- (already DECIMAL above), upgrades existing databases in place.
+ALTER TABLE tenants MODIFY COLUMN storage_gb_max DECIMAL(12,6) NOT NULL DEFAULT 50;
+
+-- Cached GCS storage usage per tenant, refreshed by Cloud Scheduler hitting
+-- POST /api/internal/storage/refresh (server/jobs/refreshStorageUsage.js) and
+-- incrementally after each upload/delete — avoids listing the bucket on
+-- every /tenants request.
+CREATE TABLE IF NOT EXISTS tenant_storage_cache (
+  tenant_id VARCHAR(36) PRIMARY KEY,
+  bytes_used BIGINT NOT NULL DEFAULT 0,
+  status VARCHAR(20) NOT NULL DEFAULT 'NORMAL',
+  computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE
+);
+
+-- Single-row cache of platform-wide GCS usage (sum across all tenants/
+-- prefixes), refreshed alongside tenant_storage_cache.
+CREATE TABLE IF NOT EXISTS platform_storage_cache (
+  id TINYINT PRIMARY KEY DEFAULT 1,
+  bytes_used BIGINT NOT NULL DEFAULT 0,
+  computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Simple key/value store for platform-wide configuration, e.g. the
+-- application-level storage pool (GCS has no fixed "total capacity" to read
+-- from the GCP API, so this is a business-configured allocation).
+CREATE TABLE IF NOT EXISTS platform_settings (
+  setting_key VARCHAR(100) PRIMARY KEY,
+  setting_value TEXT NOT NULL,
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- Single-row cache of this instance's live process metrics (CPU% from
+-- process.cpuUsage() deltas, API p95 response time from an in-process
+-- request-timing ring buffer — see server/metrics.js), refreshed whenever
+-- GET /api/platform/health is polled.
+CREATE TABLE IF NOT EXISTS platform_metrics_cache (
+  id TINYINT PRIMARY KEY DEFAULT 1,
+  cpu_percent DECIMAL(5,2) NOT NULL DEFAULT 0,
+  api_p95_ms INT NOT NULL DEFAULT 0,
+  computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS tenant_users (

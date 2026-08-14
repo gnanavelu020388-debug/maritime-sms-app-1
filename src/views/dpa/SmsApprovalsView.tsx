@@ -2,8 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import {
   FileText, Clock, CheckCircle2, XCircle, Loader2,
   ChevronDown, ChevronRight, Folder, FileEdit, Printer, Shield, Layers,
-  Ship, Inbox, Filter, ExternalLink, Upload, Pencil, PenTool, Eye,
-  AlertCircle, FilePlus2, X, Save, BookOpen, UserCircle, Trash2,
+  Ship, Inbox, Filter, ExternalLink, Upload, Pencil, PenTool,
+  AlertCircle, AlertTriangle, FilePlus2, Save, BookOpen, UserCircle, Trash2,
 } from 'lucide-react';
 import { type SmsDocRow } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth';
@@ -71,7 +71,7 @@ export function SmsApprovalsView() {
   const [selectedDoc, setSelectedDoc] = useState<SmsDocRow | null>(null);
   const [rejectMode, setRejectMode] = useState(false);
   const [rejectComments, setRejectComments] = useState('');
-  const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approvingId, _setApprovingId] = useState<string | null>(null);
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [workspaceFrozen, setWorkspaceFrozen] = useState(false);
   const [profiles, setProfiles] = useState<SmsProfileWithVessels[]>([]);
@@ -111,7 +111,7 @@ export function SmsApprovalsView() {
     : null;
   const canApprove = canDoShore(shorePerms, 'approve_sms');
   const canEdit = canDoShore(shorePerms, 'edit_sms');
-  const canUpload = canDoShore(shorePerms, 'upload_sms');
+  const _canUpload = canDoShore(shorePerms, 'upload_sms');
   const canDeploy = canDoShore(shorePerms, 'deploy_sms');
 
   const loadPending = useCallback(() => {

@@ -52,7 +52,7 @@ type BreachType = "vessels" | "storage" | "seats";
 function detectBreaches(t: Tenant): BreachType[] {
   const out: BreachType[] = [];
   if (t.vessels.used > t.vessels.max) out.push("vessels");
-  if (t.storageGb.used > t.storageGb.max) out.push("storage");
+  if (t.storageGb.status === "OVER_LIMIT" || t.storageGb.used > t.storageGb.max) out.push("storage");
   if (t.seats.used / t.seats.max > 0.9) out.push("seats");
   return out;
 }
@@ -483,7 +483,6 @@ function UpgradeModal({
   onClose: () => void;
   onConfirm: (plan: PlanTier) => void;
 }) {
-  const currentDefs = PLAN_DEFAULTS[tenant.plan];
   const targetDefs = PLAN_DEFAULTS[selectedPlan];
   const rows: {
     label: string;

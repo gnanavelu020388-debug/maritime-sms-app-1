@@ -21,7 +21,6 @@ import {
   loadProfiles, createProfile, deleteProfile,
   getVesselsForTenant, type SmsProfileWithVessels,
 } from '../../lib/smsProfiles';
-import { getLocalSmsVersion } from '../../lib/localVesselDb';
 import { deployBaseline } from '../../lib/deployBaseline';
 
 interface TabDef {
@@ -1192,7 +1191,7 @@ function ContentEditor({ node, onClose, onSave, maxUploadMb }: { node: TreeNode;
 /* ── SMS Fleet Scope Bar ────────────────────────────────────────────────── */
 
 function SmsFleetScopeBar({
-  profiles, activeProfile, onSelect, onCreate, onDelete, canEdit, canManageProfiles,
+  profiles, activeProfile, onSelect, onCreate, onDelete, canEdit: _canEdit, canManageProfiles,
   dropdownOpen, setDropdownOpen, tenantId, refreshKey,
 }: {
   profiles: SmsProfileWithVessels[];

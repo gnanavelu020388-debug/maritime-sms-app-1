@@ -55,6 +55,9 @@ export interface TenantRow {
   updated_at: string;
   // Summed from sms_documents.file_size_bytes on read — not a stored counter.
   storage_bytes_used?: number;
+  storage_status?: 'NORMAL' | 'WARNING' | 'LIMIT_REACHED' | 'OVER_LIMIT';
+  storage_remaining_gb?: number;
+  storage_percentage?: number;
 }
 
 export interface TenantUserRow {

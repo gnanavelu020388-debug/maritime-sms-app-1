@@ -1,7 +1,7 @@
 import { useAuth } from '../../lib/auth';
 import { SmsLibrarySplitView } from '../../components/SmsLibrarySplitView';
 import {
-  ShieldX, Anchor, BookX, Ship, Lock, ArrowRight, ArrowLeft,
+  ShieldX, Anchor, BookX, Lock, ArrowRight,
   FileCheck2, Clock, UtensilsCrossed, Award, SatelliteDish, Navigation,
   Users, BookOpen, BarChart3, ShieldAlert,
   type LucideIcon,
@@ -150,7 +150,7 @@ function getModuleColor(key: string): ModuleColor {
 }
 
 export function VesselPortalView({
-  activeModule, onReturnToDashboard, drawerSection, onClearDrawerSection,
+  activeModule, onReturnToDashboard: _onReturnToDashboard, drawerSection, onClearDrawerSection,
   lastSyncAt, localVersion,
 }: {
   activeModule: ModuleKey | null;
@@ -294,7 +294,7 @@ export function VesselPortalView({
   }
 
   // ── Other live modules (placeholder for now) ──────────────────────
-  if (activeModule && LIVE_MODULES.includes(activeModule) && activeModule !== 'sms_documentation') {
+  if (activeModule && LIVE_MODULES.includes(activeModule)) {
     const mc = getModuleColor(activeModule);
     const Icon = ICON_MAP[MODULE_LABELS[activeModule].icon] ?? FileCheck2;
     return (

@@ -243,7 +243,7 @@ export function getEffectiveDemoVessels(tenantId: string): VesselRow[] {
 export async function demoCreateVessel(
   tenantId: string,
   data: { name: string; imo_number: string; call_sign: string | null; flag_state: string | null; port_of_registry: string | null; gross_tonnage: number | null; kw_power: number | null; vessel_type: string | null; class_society: string | null; satellite_provider?: string | null },
-  smsVersion: string,
+  _smsVersion: string,
 ): Promise<string> {
   const v = await api.apiCreateVessel<VesselRow>(tenantId, {
     name: data.name, imo_number: data.imo_number, call_sign: data.call_sign,

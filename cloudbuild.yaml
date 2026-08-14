@@ -15,6 +15,7 @@ steps:
           --region "${_CLOUD_RUN_REGION}" \
           --platform managed \
           --allow-unauthenticated \
+          --service-account "${_GCS_RUNTIME_SERVICE_ACCOUNT}" \
           --set-env-vars "$ENV_VARS"
         if [ -n "${_CLOUD_SQL_CONNECTION_NAME}" ]; then
           gcloud run services update "${_CLOUD_RUN_SERVICE}" \
@@ -33,5 +34,6 @@ substitutions:
   _DB_PASSWORD: 'your-db-password'
   _DB_NAME: 'maritime_platform'
   _JWT_SECRET: 'change-me-to-a-strong-random-secret'
-  _GCS_BUCKET_NAME: 'maritime-platform-docs'
+  _GCS_BUCKET_NAME: 'maritime-sms-platform-docs'
+  _GCS_RUNTIME_SERVICE_ACCOUNT: 'maritime-backend@maritime-sms-platform-1.iam.gserviceaccount.com'
   _CLOUD_SQL_CONNECTION_NAME: ''

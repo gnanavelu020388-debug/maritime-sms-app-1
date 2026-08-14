@@ -11,7 +11,6 @@ import {
   RotateCcw,
   ArchiveRestore,
   Trash2,
-  ExternalLink,
   Grid3x3,
   Loader2,
   Eye,
@@ -23,10 +22,7 @@ import { Toggle } from "../components/Toggle";
 import { Badge, StatusBadge } from "../components/Badge";
 import { ProgressBar } from "../components/ProgressBar";
 import { DataTable, type Column } from "../components/DataTable";
-import {
-  CriticalActionWizard,
-  type CriticalTarget,
-} from "../components/CriticalActionWizard";
+import { CriticalActionWizard } from "../components/CriticalActionWizard";
 import { useStore } from "../store";
 import { useAuth } from "../lib/auth";
 import { PLAN_DEFAULTS, PLAN_TIERS, formatUtc } from "../constants";
@@ -328,7 +324,9 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       render: (t) => {
         const overV = t.vessels.used > t.vessels.max;
         const overS = t.seats.used > t.seats.max;
-        const overG = t.storageGb.used > t.storageGb.max;
+        const overG = t.storageGb.status
+          ? t.storageGb.status === "OVER_LIMIT" || t.storageGb.status === "LIMIT_REACHED"
+          : t.storageGb.used > t.storageGb.max;
         return (
           <div className="space-y-1 py-0.5">
             <MiniLimit

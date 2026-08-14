@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import {
-  X, Lock, Unlock, RotateCcw, Sliders, Save, AlertTriangle, CheckCircle2,
-  History, ShieldAlert, Loader2, ChevronRight,
+  X, Lock, Unlock, RotateCcw, Sliders, Save, AlertTriangle,
+  History, ShieldAlert, ChevronRight,
 } from 'lucide-react';
 import { useStore } from '../store';
 import { Modal } from './Modal';

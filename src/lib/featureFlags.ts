@@ -5,10 +5,8 @@
 
 import { useState, useEffect, useCallback } from 'react';
 import {
-  getDemoFeatureFlags,
   getDemoFeatureFlagsForTenant,
   demoSetFeatureFlag,
-  getDemoSyncConfigForTenant,
   demoSetSyncConfig,
   getDemoModuleDefs,
   demoSetModuleDef,

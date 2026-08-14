@@ -3,7 +3,7 @@ import { Wifi, WifiOff, Cloud, HardDrive, ChevronDown, RefreshCw, CheckCircle2, 
 import { useNetwork } from '../lib/networkContext';
 
 export function NetworkStatusBadge({ compact = false }: { compact?: boolean }) {
-  const { mode, online, checking, lastChecked, pendingActions, toggleMode, checkHealth, setMode, flushQueue } = useNetwork();
+  const { mode, online, checking, lastChecked, pendingActions, checkHealth, setMode, flushQueue } = useNetwork();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 

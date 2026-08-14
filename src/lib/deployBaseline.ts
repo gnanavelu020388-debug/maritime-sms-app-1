@@ -1,10 +1,10 @@
-import { bumpVersion, buildAndStoreDelta } from './deltaPackager';
+import { bumpVersion } from './deltaPackager';
 import { getDemoTenant, demoUpdateTenantSmsVersion } from './demoData';
 import { postSyncEvent } from './syncChannel';
 
 export async function deployBaseline(
   tenantId: string,
-  deployedByEmail: string,
+  _deployedByEmail: string,
 ): Promise<string | null> {
   const tenant = getDemoTenant(tenantId);
   const newVersion = bumpVersion(tenant.sms_version);
