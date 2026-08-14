@@ -30,6 +30,8 @@ import { Badge } from "../components/Badge";
 import { DataTable, type Column } from "../components/DataTable";
 import { Modal } from "../components/Modal";
 import { useStore } from "../store";
+import { useAuth } from "../lib/auth";
+import { logAudit } from "../lib/audit";
 import {
   formatGb,
   formatBytes,
@@ -43,6 +45,7 @@ import {
   getEffectiveDemoTenants,
   getEffectiveDemoVessels,
   getEffectiveDemoSmsDocs,
+  isRealTenantId,
 } from "../lib/demoData";
 import * as api from "../lib/api";
 
@@ -59,10 +62,20 @@ function detectBreaches(t: Tenant): BreachType[] {
 
 export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
   const { tenants, errorLogs, dispatch, toast } = useStore();
+  const { user } = useAuth();
   const [copied, setCopied] = useState<string | null>(null);
   const [upgradeFor, setUpgradeFor] = useState<Tenant | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<PlanTier>("Professional");
   const [breachFilter, setBreachFilter] = useState<"all" | BreachType>("all");
+  const [collisions, setCollisions] = useState<api.SyncCollisionRow[]>([]);
+  const [collisionsLoading, setCollisionsLoading] = useState(true);
+
+  useEffect(() => {
+    api.apiGetSyncCollisions(10)
+      .then(setCollisions)
+      .catch(() => {})
+      .finally(() => setCollisionsLoading(false));
+  }, []);
 
   const breaches = useMemo(
     () =>
@@ -297,7 +310,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
 
       <Card
         title="Offline Data Collision Logic Guard"
-        subtitle="Backend deduplication rule for offline sync (bottom-up vessel reports)"
+        subtitle="Real write collisions detected on the bottom-up vessel sync outbox"
         icon={<ShieldAlert className="h-4 w-4" />}
       >
         <div className="space-y-3">
@@ -306,46 +319,39 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
               Deduplication rule
             </p>
             <p className="mt-1.5 text-sm text-ink-700 dark:text-ink-200">
-              When duplicate forms arrive from distinct vessels (e.g. Report
-              #1002), the engine automatically appends a unique index pattern to
-              prevent cross-over overwrites.
+              When a vessel queues a second unsynced write for the same document/record
+              before the first one reaches shore, the engine records the collision here and
+              resolves it latest-wins — the newer queued entry is what ships on check-in.
             </p>
-            <div className="mt-3 rounded-lg bg-white p-3 font-mono text-xs dark:bg-ink-900">
-              <span className="text-ink-400">original:</span>{" "}
-              <span className="text-ink-700 dark:text-ink-200">
-                Report-1002
-              </span>
-              <br />
-              <span className="text-ink-400">deduped:</span>{" "}
-              <span className="font-bold text-accent-600 dark:text-accent-400">
-                [VesselName]-Report-1002
-              </span>
-            </div>
           </div>
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-              Recent dedup events
+              Recent collision events
             </p>
-            {[
-              { vessel: "VALLE STAR", report: "VALLE-STAR-Report-1002" },
-              {
-                vessel: "PACIFIC HORIZON",
-                report: "PACIFIC-HORIZON-Report-1002",
-              },
-              { vessel: "NORDIC BREEZE", report: "NORDIC-BREEZE-Report-1002" },
-            ].map((d) => (
-              <div
-                key={d.report}
-                className="flex items-center justify-between rounded-lg border border-ink-200/70 p-2.5 dark:border-ink-800"
-              >
-                <span className="font-mono text-xs text-ink-600 dark:text-ink-300">
-                  {d.report}
-                </span>
-                <Badge tone="success" dot>
-                  Indexed
-                </Badge>
-              </div>
-            ))}
+            {collisionsLoading ? (
+              <p className="py-4 text-center text-xs text-ink-400">Loading…</p>
+            ) : collisions.length === 0 ? (
+              <p className="rounded-lg border border-dashed border-ink-200 p-4 text-center text-xs text-ink-400 dark:border-ink-700">
+                No write collisions detected across the fleet.
+              </p>
+            ) : (
+              collisions.map((c) => (
+                <div
+                  key={c.id}
+                  className="flex items-center justify-between rounded-lg border border-ink-200/70 p-2.5 dark:border-ink-800"
+                >
+                  <div className="min-w-0">
+                    <span className="font-mono text-xs text-ink-600 dark:text-ink-300">
+                      {c.vessel_name} · {c.module_key}:{c.entity_id}
+                    </span>
+                    <p className="text-[11px] text-ink-400">{c.company} · {relativeTime(c.detected_at)}</p>
+                  </div>
+                  <Badge tone="success" dot>
+                    {c.resolution === "latest_wins" ? "Latest wins" : c.resolution}
+                  </Badge>
+                </div>
+              ))
+            )}
           </div>
           <div className="flex items-center gap-2 rounded-lg bg-success-50/60 p-3 text-xs text-success-700 dark:bg-success-900/20 dark:text-success-300">
             <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
@@ -420,7 +426,27 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
           selectedPlan={selectedPlan}
           onSelectPlan={setSelectedPlan}
           onClose={() => setUpgradeFor(null)}
-          onConfirm={(plan) => {
+          onConfirm={async (plan) => {
+            const d = PLAN_DEFAULTS[plan];
+            if (isRealTenantId(upgradeFor.id)) {
+              try {
+                await api.apiUpdateTenant(upgradeFor.id, {
+                  plan, vessels_max: d.vessels, seats_max: d.seats, storage_gb_max: d.storageGb, monthly_revenue: d.monthly,
+                });
+              } catch (err) {
+                toast({ tone: "danger", title: "Upgrade failed", message: (err as Error).message });
+                return;
+              }
+              await logAudit({
+                tenantId: upgradeFor.id,
+                actorEmail: user?.email ?? "super-admin",
+                category: "billing",
+                action: `Plan tier changed to ${plan}: ${upgradeFor.company}`,
+                target: upgradeFor.company,
+                before: { plan: upgradeFor.plan, vessels_max: upgradeFor.vessels.max, seats_max: upgradeFor.seats.max, storage_gb_max: upgradeFor.storageGb.max },
+                after: { plan, vessels_max: d.vessels, seats_max: d.seats, storage_gb_max: d.storageGb },
+              });
+            }
             dispatch({ type: "TENANT_SET_PLAN", id: upgradeFor.id, plan });
             toast({
               tone: "success",
@@ -481,7 +507,7 @@ function UpgradeModal({
   selectedPlan: PlanTier;
   onSelectPlan: (p: PlanTier) => void;
   onClose: () => void;
-  onConfirm: (plan: PlanTier) => void;
+  onConfirm: (plan: PlanTier) => void | Promise<void>;
 }) {
   const targetDefs = PLAN_DEFAULTS[selectedPlan];
   const rows: {

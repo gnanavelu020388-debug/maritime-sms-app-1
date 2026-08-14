@@ -24,13 +24,17 @@ router.get('/:tenantId', authMiddleware, async (req, res) => {
 
 router.post('/', authMiddleware, async (req, res) => {
   try {
-    const { tenant_id, actor_email, category, action, target, severity } = req.body;
+    const { tenant_id, actor_email, category, action, target, severity, before_data, after_data } = req.body;
     const id = uuidv4();
     await pool.query(
-      'INSERT INTO audit_logs (id, tenant_id, actor_user_id, actor_email, category, action, target, severity) VALUES (?,?,?,?,?,?,?,?)',
-      [id, tenant_id || null, req.user.id || null, actor_email, category, action, target || null, severity || 'info'],
+      'INSERT INTO audit_logs (id, tenant_id, actor_user_id, actor_email, category, action, target, severity, before_data, after_data) VALUES (?,?,?,?,?,?,?,?,?,?)',
+      [
+        id, tenant_id || null, req.user.id || null, actor_email, category, action, target || null, severity || 'info',
+        before_data ? JSON.stringify(before_data) : null,
+        after_data ? JSON.stringify(after_data) : null,
+      ],
     );
-    return res.status(201).json({ success: true });
+    return res.status(201).json({ success: true, id });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 

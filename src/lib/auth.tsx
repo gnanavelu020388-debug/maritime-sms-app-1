@@ -2,6 +2,7 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -54,7 +55,12 @@ export interface AuthContextValue extends AuthState {
   signIn: (
     email: string,
     password: string,
-  ) => Promise<{ error: string | null }>;
+  ) => Promise<{
+    error: string | null;
+    mfaRequired?: boolean;
+    mfaSetupRequired?: boolean;
+    mfaToken?: string;
+  }>;
   signUp: (
     email: string,
     password: string,
@@ -65,6 +71,18 @@ export interface AuthContextValue extends AuthState {
   refresh: () => Promise<void>;
   dismissSessionConflict: () => void;
   clearMustChangePassword: () => void;
+  completeMfaLogin: (
+    mfaToken: string,
+    codeOrBackup: { code: string } | { backupCode: string },
+  ) => Promise<{ error: string | null }>;
+  mfaSetupInit: (
+    mfaToken: string,
+  ) => Promise<{ error: string | null; secret?: string; otpauthUrl?: string }>;
+  mfaSetupVerify: (
+    mfaToken: string,
+    code: string,
+  ) => Promise<{ error: string | null; backupCodes?: string[] }>;
+  finalizeMfaSetup: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -440,37 +458,92 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  // Shared by a direct (no-MFA) login and the two MFA completion paths
+  // (login/verify, setup/verify) — all three end with an identical
+  // AuthLoginResponse from the server.
+  async function finishLogin(apiUser: api.AuthLoginResponse["user"], token: string) {
+    const uid = apiUser.id;
+    if (!isCacheInitialized()) {
+      await initializeDataCache();
+    }
+    const resolved =
+      (await resolveFromApi(apiUser)) || resolveRoleAndTenant(uid, apiUser.email);
+    const user = buildUser(uid, apiUser.email);
+    const session = buildSession(user, token);
+    const sessionToken = await registerNewSessionToken(uid);
+    setState({
+      user,
+      session,
+      ...resolved,
+      loading: false,
+      error: null,
+      sessionToken,
+      sessionConflict: false,
+      mustChangePassword: !!apiUser.mustChangePassword,
+    });
+  }
+
   const signIn = async (email: string, password: string) => {
     try {
       const result = await api.apiLogin(email, password);
-      const { user: apiUser, token } = result;
-      const uid = apiUser.id;
-
-      if (!isCacheInitialized()) {
-        await initializeDataCache();
+      if ("mfaRequired" in result && result.mfaRequired) {
+        return { error: null, mfaRequired: true, mfaToken: result.mfaToken };
       }
-
-      // prefer API-resolved role/tenant
-      const resolved =
-        (await resolveFromApi(apiUser)) ||
-        resolveRoleAndTenant(uid, email);
-      const user = buildUser(uid, email);
-      const session = buildSession(user, token);
-      const sessionToken = await registerNewSessionToken(uid);
-      setState({
-        user,
-        session,
-        ...resolved,
-        loading: false,
-        error: null,
-        sessionToken,
-        sessionConflict: false,
-        mustChangePassword: !!apiUser.mustChangePassword,
-      });
+      if ("mfaSetupRequired" in result && result.mfaSetupRequired) {
+        return { error: null, mfaSetupRequired: true, mfaToken: result.mfaToken };
+      }
+      const { user: apiUser, token } = result as api.AuthLoginResponse;
+      await finishLogin(apiUser, token);
       return { error: null };
     } catch (err) {
       return { error: (err as Error).message || "Invalid email or password." };
     }
+  };
+
+  const completeMfaLogin = async (
+    mfaToken: string,
+    codeOrBackup: { code: string } | { backupCode: string },
+  ) => {
+    try {
+      const result = await api.apiMfaLoginVerify(mfaToken, codeOrBackup);
+      await finishLogin(result.user, result.token);
+      return { error: null };
+    } catch (err) {
+      return { error: (err as Error).message || "Incorrect code." };
+    }
+  };
+
+  const mfaSetupInit = async (mfaToken: string) => {
+    try {
+      const { secret, otpauthUrl } = await api.apiMfaSetupInit(mfaToken);
+      return { error: null, secret, otpauthUrl };
+    } catch (err) {
+      return { error: (err as Error).message || "Could not start MFA setup." };
+    }
+  };
+
+  // MFA setup completes the login on the server (a full session token comes
+  // back immediately), but the UI still needs one more screen — the
+  // one-time backup codes — before it's appropriate to flip global auth
+  // state and let the app router swap AuthView out from under that screen.
+  // The verified session is held here until finalizeMfaSetup() is called.
+  const pendingMfaSessionRef = useRef<{ user: api.AuthLoginResponse["user"]; token: string } | null>(null);
+
+  const mfaSetupVerify = async (mfaToken: string, code: string) => {
+    try {
+      const result = await api.apiMfaSetupVerify(mfaToken, code);
+      pendingMfaSessionRef.current = { user: result.user, token: result.token };
+      return { error: null, backupCodes: result.backupCodes };
+    } catch (err) {
+      return { error: (err as Error).message || "Incorrect code." };
+    }
+  };
+
+  const finalizeMfaSetup = async () => {
+    const pending = pendingMfaSessionRef.current;
+    if (!pending) return;
+    pendingMfaSessionRef.current = null;
+    await finishLogin(pending.user, pending.token);
   };
 
   const signUp = async (
@@ -549,6 +622,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         refresh,
         dismissSessionConflict,
         clearMustChangePassword,
+        completeMfaLogin,
+        mfaSetupInit,
+        mfaSetupVerify,
+        finalizeMfaSetup,
       }}
     >
       {children}

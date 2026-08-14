@@ -12,8 +12,9 @@ import { useAuth } from '../lib/auth';
 import { formatGb, relativeTime, formatUtc } from '../constants';
 import type { BackupSnapshot, Tenant } from '../types';
 import type { Capabilities } from '../lib/permissions';
-import { apiCreateBackup, apiRestoreBackup, apiDeleteBackup } from '../lib/api';
+import { apiCreateBackup, apiRestoreBackup, apiDeleteBackup, apiUpdateTenant } from '../lib/api';
 import { logAudit } from '../lib/audit';
+import { refreshTenantData } from '../lib/dataCache';
 import type { BackupSnapshotRow } from '../lib/supabase';
 
 function mapBackupRow(row: BackupSnapshotRow, company: string): BackupSnapshot {
@@ -25,24 +26,13 @@ function mapBackupRow(row: BackupSnapshotRow, company: string): BackupSnapshot {
   };
 }
 
-type BackupFreq = '6h' | '12h' | '24h' | 'custom';
-
-const FREQ_LABELS: Record<BackupFreq, string> = {
-  '6h': 'Every 6 Hours',
-  '12h': 'Every 12 Hours',
-  '24h': 'Every 24 Hours (Daily)',
-  'custom': 'Custom',
-};
-
 export function BackupsView({ caps }: { caps: Capabilities }) {
   const { backups, tenants, dispatch, toast } = useStore();
   const { user } = useAuth();
   const [manualOpen, setManualOpen] = useState(false);
   const [restoreFor, setRestoreFor] = useState<BackupSnapshot | null>(null);
   const [deleteSnap, setDeleteSnap] = useState<BackupSnapshot | null>(null);
-  const [backupFreq, setBackupFreq] = useState<BackupFreq>('24h');
-  const [freqOpen, setFreqOpen] = useState(false);
-  const [customHrs, setCustomHrs] = useState(48);
+  const [freqFor, setFreqFor] = useState<Tenant | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
 
@@ -65,7 +55,6 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
   const triggerManual = async (tenant: Tenant) => {
     const row = await apiCreateBackup<BackupSnapshotRow>({
       tenant_id: tenant.id,
-      size_gb: +((tenant.storageGb.used) * 0.045).toFixed(2),
       type: 'manual',
       status: 'completed',
       expiry: new Date(Date.now() + 30 * 86400000).toISOString(),
@@ -84,55 +73,6 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
           <p className="text-sm text-ink-500 dark:text-ink-400">Isolated snapshots & high-security restore — strictly scoped by Company ID.</p>
         </div>
         <div className="flex items-center gap-2">
-          {/* Auto-Backup Frequency Selector */}
-          <div className="relative">
-            <button
-              onClick={() => setFreqOpen((o) => !o)}
-              className="btn-secondary"
-              title="Auto-backup frequency"
-            >
-              <Clock className="h-4 w-4" /> {FREQ_LABELS[backupFreq]} <ChevronDown className="h-3.5 w-3.5" />
-            </button>
-            {freqOpen && (
-              <>
-                <div className="fixed inset-0 z-10" onClick={() => setFreqOpen(false)} />
-                <div className="absolute right-0 z-20 mt-1 w-64 rounded-xl border border-ink-200 bg-white p-1.5 shadow-elev-3 dark:border-ink-800 dark:bg-ink-900">
-                  <p className="px-2 py-1.5 text-[10px] font-bold uppercase tracking-wide text-ink-400">Auto-Backup Frequency</p>
-                  {(['6h', '12h', '24h', 'custom'] as BackupFreq[]).map((f) => (
-                    <button
-                      key={f}
-                      onClick={() => { setBackupFreq(f); if (f !== 'custom') { setFreqOpen(false); toast({ tone: 'info', title: 'Backup frequency updated', message: `Auto-backup set to ${FREQ_LABELS[f]}.` }); } }}
-                      className={`flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-sm transition-colors ${
-                        backupFreq === f ? 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'text-ink-700 hover:bg-ink-50 dark:text-ink-200 dark:hover:bg-ink-800'
-                      }`}
-                    >
-                      {FREQ_LABELS[f]}
-                      {backupFreq === f && <CheckCircle2 className="h-4 w-4" />}
-                    </button>
-                  ))}
-                  {backupFreq === 'custom' && (
-                    <div className="mt-1.5 border-t border-ink-200 px-2.5 pt-2 dark:border-ink-800">
-                      <label className="label">Custom interval (hours)</label>
-                      <div className="flex items-center gap-2">
-                        <input
-                          type="number"
-                          min={1}
-                          max={168}
-                          value={customHrs}
-                          onChange={(e) => setCustomHrs(+e.target.value)}
-                          className="input py-1.5"
-                        />
-                        <button
-                          onClick={() => { setFreqOpen(false); toast({ tone: 'info', title: 'Custom frequency set', message: `Auto-backup every ${customHrs} hours.` }); }}
-                          className="btn-primary px-3 py-1.5 text-xs"
-                        >Set</button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </>
-            )}
-          </div>
           <button onClick={() => setManualOpen(true)} disabled={!caps.backupRestore} className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"><Play className="h-4 w-4" /> Manual snapshot</button>
         </div>
       </div>
@@ -214,16 +154,17 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
                               <Play className="h-3 w-3" /> Snapshot
                             </button>
                             <button
-                              onClick={() => toast({ tone: 'info', title: 'Logs opened', message: `Backup log for ${row.tenant.company} (${row.tenant.id}).` })}
+                              onClick={() => setExpandedId(row.tenant.id)}
                               className="btn-ghost rounded-lg p-1.5 text-xs"
-                              title="View logs"
+                              title="View snapshot log"
                             >
                               <FileJson className="h-3.5 w-3.5" />
                             </button>
                             <button
-                              onClick={() => toast({ tone: 'info', title: 'Frequency config', message: `${row.tenant.company} auto-backup: ${FREQ_LABELS[backupFreq]}.` })}
-                              className="btn-ghost rounded-lg p-1.5 text-xs"
-                              title="Configure frequency"
+                              onClick={() => setFreqFor(row.tenant)}
+                              disabled={!caps.backupRestore}
+                              className="btn-ghost rounded-lg p-1.5 text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                              title={row.tenant.autoBackupIntervalHours ? `Auto-backup every ${row.tenant.autoBackupIntervalHours}h` : 'Auto-backup disabled'}
                             >
                               <Settings2 className="h-3.5 w-3.5" />
                             </button>
@@ -322,11 +263,41 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
           snapshot={restoreFor}
           onClose={() => setRestoreFor(null)}
           onConfirm={async () => {
-            await apiRestoreBackup(restoreFor.id);
+            const result = await apiRestoreBackup<{ restoredCounts?: Record<string, number> }>(restoreFor.id);
             dispatch({ type: 'BACKUP_RESTORE', snapshotId: restoreFor.id });
-            await logAudit({ tenantId: restoreFor.tenantId, actorEmail: user?.email ?? 'unknown', category: 'backup', action: `Isolated restore executed: ${restoreFor.company}`, target: restoreFor.company, severity: 'critical' });
-            toast({ tone: 'danger', title: 'Isolated restore executed', message: `${restoreFor.company} data restored from ${restoreFor.id}. Logged to audit ledger.` });
+            // The restore genuinely rewrote this tenant's users/vessels/
+            // assignments/SMS documents — refresh the shared cache so any
+            // other open view reflects the restored data immediately.
+            await refreshTenantData(restoreFor.tenantId);
+            const counts = result.restoredCounts;
+            const summary = counts
+              ? Object.entries(counts).map(([t, n]) => `${n} ${t.replace(/_/g, ' ')}`).join(', ')
+              : null;
+            await logAudit({
+              tenantId: restoreFor.tenantId, actorEmail: user?.email ?? 'unknown', category: 'backup',
+              action: `Isolated restore executed: ${restoreFor.company}`, target: restoreFor.company, severity: 'critical',
+              before: { data_state: 'current (live)' }, after: { data_state: `restored from ${restoreFor.id}`, ...counts },
+            });
+            toast({ tone: 'danger', title: 'Isolated restore executed', message: summary ? `${restoreFor.company} restored: ${summary}.` : `${restoreFor.company} data restored from ${restoreFor.id}.` });
             setRestoreFor(null);
+          }}
+        />
+      )}
+
+      {freqFor && (
+        <FrequencyModal
+          tenant={freqFor}
+          onClose={() => setFreqFor(null)}
+          onSave={async (hours) => {
+            await apiUpdateTenant(freqFor.id, { auto_backup_interval_hours: hours });
+            dispatch({ type: 'TENANT_UPDATE', id: freqFor.id, patch: { autoBackupIntervalHours: hours } });
+            await logAudit({
+              tenantId: freqFor.id, actorEmail: user?.email ?? 'unknown', category: 'backup',
+              action: `Auto-backup frequency ${hours ? `set to ${hours}h` : 'disabled'}: ${freqFor.company}`, target: freqFor.company, severity: 'info',
+              before: { auto_backup_interval_hours: freqFor.autoBackupIntervalHours ?? null }, after: { auto_backup_interval_hours: hours },
+            });
+            toast({ tone: 'success', title: 'Auto-backup frequency updated', message: hours ? `${freqFor.company}: every ${hours}h.` : `${freqFor.company}: auto-backup disabled.` });
+            setFreqFor(null);
           }}
         />
       )}
@@ -430,6 +401,69 @@ function ManualSnapshotModal({ tenants, onClose, onCreate }: { tenants: Tenant[]
           </div>
         </div>
       )}
+    </Modal>
+  );
+}
+
+const FREQ_PRESETS: { hours: number | null; label: string }[] = [
+  { hours: 6, label: 'Every 6 hours' },
+  { hours: 12, label: 'Every 12 hours' },
+  { hours: 24, label: 'Every 24 hours (daily)' },
+  { hours: null, label: 'Disabled' },
+];
+
+function FrequencyModal({ tenant, onClose, onSave }: { tenant: Tenant; onClose: () => void; onSave: (hours: number | null) => Promise<void> }) {
+  const [hours, setHours] = useState<number | null>(tenant.autoBackupIntervalHours ?? null);
+  const [custom, setCustom] = useState(hours != null && !FREQ_PRESETS.some((p) => p.hours === hours) ? hours : 48);
+  const [isCustom, setIsCustom] = useState(hours != null && !FREQ_PRESETS.some((p) => p.hours === hours));
+  const [saving, setSaving] = useState(false);
+
+  const save = async () => {
+    setSaving(true);
+    try { await onSave(isCustom ? custom : hours); } finally { setSaving(false); }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Configure Auto-Backup Frequency"
+      subtitle={`${tenant.company} · ${tenant.id}`}
+      icon={<Clock className="h-5 w-5" />}
+      footer={<><button onClick={onClose} className="btn-secondary">Cancel</button><button onClick={save} disabled={saving} className="btn-primary">{saving ? 'Saving…' : 'Save'}</button></>}
+    >
+      <div className="space-y-2">
+        {FREQ_PRESETS.map((p) => (
+          <button
+            key={p.label}
+            onClick={() => { setIsCustom(false); setHours(p.hours); }}
+            className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors ${
+              !isCustom && hours === p.hours ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'border-ink-200 text-ink-700 hover:bg-ink-50 dark:border-ink-800 dark:text-ink-200 dark:hover:bg-ink-800'
+            }`}
+          >
+            {p.label}
+            {!isCustom && hours === p.hours && <CheckCircle2 className="h-4 w-4" />}
+          </button>
+        ))}
+        <button
+          onClick={() => setIsCustom(true)}
+          className={`flex w-full items-center justify-between rounded-lg border px-3 py-2 text-sm transition-colors ${
+            isCustom ? 'border-primary-400 bg-primary-50 text-primary-700 dark:border-primary-700 dark:bg-primary-900/30 dark:text-primary-300' : 'border-ink-200 text-ink-700 hover:bg-ink-50 dark:border-ink-800 dark:text-ink-200 dark:hover:bg-ink-800'
+          }`}
+        >
+          Custom interval
+          {isCustom && <CheckCircle2 className="h-4 w-4" />}
+        </button>
+        {isCustom && (
+          <div className="pl-1">
+            <label className="label">Hours between backups</label>
+            <input type="number" min={1} max={168} value={custom} onChange={(e) => setCustom(+e.target.value)} className="input" />
+          </div>
+        )}
+        <p className="pt-2 text-xs text-ink-500 dark:text-ink-400">
+          Runs via the same internal scheduler as storage refresh (POST /api/internal/backups/auto-run). {tenant.lastAutoBackupAt ? `Last auto-backup ${relativeTime(tenant.lastAutoBackupAt)}.` : 'No auto-backup has run yet.'}
+        </p>
+      </div>
     </Modal>
   );
 }

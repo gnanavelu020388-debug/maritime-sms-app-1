@@ -3,6 +3,9 @@ import { Shield, Download, FileText, Filter, Eye, EyeOff } from 'lucide-react';
 import { type AuditLogRow } from '../../lib/supabase';
 import { useAuth } from '../../lib/auth';
 import { getDemoAuditLogs } from '../../lib/demoData';
+import { prependCachedAuditLog } from '../../lib/dataCache';
+import { AUDIT_LOCAL_EVENT } from '../../lib/audit';
+import { onSyncEvent } from '../../lib/syncChannel';
 import { Badge } from '../../components/Badge';
 
 export function CompanyAuditView() {
@@ -23,6 +26,35 @@ export function CompanyAuditView() {
   }
 
   useEffect(() => { load(); }, [tenant, filterCat]);
+
+  // logAudit() already prepends into this tab's own cache before dispatching
+  // the CustomEvent below (see src/lib/audit.ts), so on the tab that
+  // performed the action a plain reload picks it up immediately. A
+  // genuinely different browser tab has its own separate in-memory cache
+  // that write never touched, so the cross-tab BroadcastChannel branch
+  // below builds its own copy from the event payload first — same approach
+  // store.tsx uses to keep the Super Admin ledger live across tabs.
+  useEffect(() => {
+    if (!tenant) return;
+    type AuditPayload = { actorEmail: string; category: string; action: string; target?: string; location?: string; severity?: 'info' | 'warning' | 'critical'; before?: Record<string, unknown>; after?: Record<string, unknown> };
+    const handleLocal = (e: Event) => {
+      const { tenantId } = (e as CustomEvent).detail as { tenantId: string | null };
+      if (tenantId === tenant.id) load();
+    };
+    window.addEventListener(AUDIT_LOCAL_EVENT, handleLocal);
+    const off = onSyncEvent((evt) => {
+      if (evt.type !== 'AUDIT_LOGGED' || evt.tenantId !== tenant.id) return;
+      const p = evt.payload as AuditPayload;
+      prependCachedAuditLog(tenant.id, {
+        id: `remote-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+        tenant_id: tenant.id, actor_user_id: null, actor_email: p.actorEmail, category: p.category, action: p.action,
+        target: p.target ?? null, ip_address: null, location: p.location ?? null, severity: p.severity ?? 'info',
+        before_data: p.before ?? null, after_data: p.after ?? null, created_at: new Date().toISOString(),
+      });
+      load();
+    });
+    return () => { window.removeEventListener(AUDIT_LOCAL_EVENT, handleLocal); off(); };
+  }, [tenant, filterCat]);
 
   const filtered = logs.filter((l) => {
     if (!search) return true;

@@ -7,6 +7,7 @@ import { type TenantUserRow, type Rank } from '../../lib/supabase';
 import { getEffectiveDemoUsers, getEffectiveDemoAssignments } from '../../lib/demoData';
 import { logAudit } from '../../lib/audit';
 import { postSyncEvent } from '../../lib/syncChannel';
+import { apiEmergencyResetUserPassword } from '../../lib/api';
 
 export function EmergencyControlsPanel({
   tenantId, vesselId, vesselName, actorEmail, actorRank: _actorRank,
@@ -48,29 +49,28 @@ export function EmergencyControlsPanel({
     setTimeout(() => setToast(null), 6000);
   }
 
-  function generateOtp(): string {
-    const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
-    let otp = '';
-    for (let i = 0; i < 8; i++) otp += chars[Math.floor(Math.random() * chars.length)];
-    return otp;
-  }
-
   async function handleGeneratePasswordReset(user: TenantUserRow) {
     setBusy(true);
-    const otp = generateOtp();
-    setGeneratedOtp(otp);
-
-    await logAudit({
-      tenantId,
-      actorEmail,
-      category: 'security',
-      action: `EMERGENCY PASSWORD RESET: Master ${actorEmail} generated temporary OTP for ${user.name} (${user.rank}) on ${vesselName}.`,
-      target: user.email,
-      location: vesselName,
-      severity: 'critical',
-    });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId, payload: { action: 'password_reset', userId: user.id, vessel: vesselName } });
-    setBusy(false);
+    try {
+      const { tempPassword } = await apiEmergencyResetUserPassword(tenantId, user.id);
+      setGeneratedOtp(tempPassword);
+      await logAudit({
+        tenantId,
+        actorEmail,
+        category: 'security',
+        action: `EMERGENCY PASSWORD RESET: Master ${actorEmail} reset the password for ${user.name} (${user.rank}) on ${vesselName}. They must set a new password on next sign-in.`,
+        target: user.email,
+        location: vesselName,
+        severity: 'critical',
+        before: { password: '(previous credential)' },
+        after: { password: '(reset — must_change_password = true)' },
+      });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId, payload: { action: 'password_reset', userId: user.id, vessel: vesselName } });
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to reset password.', false);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleMasterHandover() {

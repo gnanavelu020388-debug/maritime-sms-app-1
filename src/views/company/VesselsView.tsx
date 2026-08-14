@@ -477,6 +477,15 @@ function VesselForm({ profiles, editVessel, currentProfileId, onClose, onSave }:
   });
   const [selectedProfileId, setSelectedProfileId] = useState<string>(currentProfileId ?? '');
 
+  // currentProfileId arrives asynchronously (fetched after the modal is
+  // already open — see the Edit button handler), so the useState initializer
+  // above captures a stale/null value on first render. Re-sync once the real
+  // value lands, otherwise the dropdown shows "no profile" even when one is
+  // assigned, making a successful save look like it didn't persist.
+  useEffect(() => {
+    setSelectedProfileId(currentProfileId ?? '');
+  }, [currentProfileId]);
+
   return (
     <Modal
       open onClose={onClose} title={isEdit ? 'Edit Vessel Profile' : 'Create Vessel Profile'} subtitle={isEdit ? editVessel!.name : 'Core identifiers & technical specs'} icon={<Ship className="h-5 w-5" />} size="lg"

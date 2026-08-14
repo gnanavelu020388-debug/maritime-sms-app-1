@@ -74,9 +74,12 @@ export function FeatureMatrixView({ caps }: { caps: Capabilities }) {
     setTenants(demoTenants);
     const f: FlagMap = {};
     const s: Record<string, SyncConfigState> = {};
-    demoTenants.forEach((t) => {
-      // Read from the persistent demo store so toggles survive navigation.
-      const overrides = getDemoFeatureFlagsForTenant(t.id);
+    // Fetch each tenant's persisted overrides from the backend (cached after
+    // the first read) — a tenant that hasn't been toggled yet this session
+    // must still reflect its real saved enable/disable state, not the
+    // all-enabled default.
+    await Promise.all(demoTenants.map(async (t) => {
+      const overrides = await getDemoFeatureFlagsForTenant(t.id);
       f[t.id] = {} as FlagMap[string];
       MODULE_KEYS.forEach((k) => {
         const explicit = overrides.get(k);
@@ -87,7 +90,7 @@ export function FeatureMatrixView({ caps }: { caps: Capabilities }) {
         intervalHours: sc?.auto_sync_interval_hours ?? 6,
         manualReplicate: sc?.manual_replicate_enabled ?? true,
       };
-    });
+    }));
     setFlags(f);
     setSyncStates(s);
     setLoading(false);

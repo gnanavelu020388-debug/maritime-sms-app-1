@@ -1,46 +1,47 @@
 import type { SmsDocRow } from './supabase';
+import { apiGetDocVersions, apiCreateDocVersion, apiRestoreDocVersion, type DocVersionRow } from './api';
 
-export interface DocVersionRow {
-  id: string;
-  tenant_id: string;
-  document_id: string;
-  revision: number;
-  version_label: string;
-  content: string | null;
-  content_kind: string;
-  uploaded_by: string | null;
-  created_at: string;
-}
+export type { DocVersionRow };
 
+// Snapshots a document's CURRENT (pre-overwrite) state into a real
+// sms_document_versions row. Call this before applying new content — see
+// server/routes/smsDocuments.js POST /:tenantId/:docId/versions, which
+// reads the document's live row itself rather than trusting the caller's
+// copy of it (so `doc` here only needs to identify which document).
 export async function saveDocumentVersion(
-  _tenantId: string,
+  tenantId: string,
   doc: SmsDocRow,
   uploadedBy: string
 ): Promise<DocVersionRow | null> {
-  return {
-    id: `local-v-${Date.now()}`,
-    tenant_id: _tenantId,
-    document_id: doc.id,
-    revision: parseInt(doc.version.replace(/^v/, '').split('.')[1] ?? '1', 10),
-    version_label: doc.version,
-    content: doc.content,
-    content_kind: doc.content_kind ?? 'rich_text',
-    uploaded_by: uploadedBy,
-    created_at: new Date().toISOString(),
-  };
+  try {
+    return await apiCreateDocVersion(tenantId, doc.id, uploadedBy);
+  } catch (err) {
+    console.error('[saveDocumentVersion] API error:', err);
+    return null;
+  }
 }
 
 export async function fetchDocumentVersions(
-  _tenantId: string,
-  _documentId: string
+  tenantId: string,
+  documentId: string
 ): Promise<DocVersionRow[]> {
-  return [];
+  try {
+    return await apiGetDocVersions(tenantId, documentId);
+  } catch (err) {
+    console.error('[fetchDocumentVersions] API error:', err);
+    return [];
+  }
 }
 
 export async function restoreDocumentVersion(
-  _tenantId: string,
-  _documentId: string,
-  _revision: number
+  tenantId: string,
+  documentId: string,
+  revision: number
 ): Promise<{ content: string | null; version_label: string } | null> {
-  return null;
+  try {
+    return await apiRestoreDocVersion(tenantId, documentId, revision);
+  } catch (err) {
+    console.error('[restoreDocumentVersion] API error:', err);
+    return null;
+  }
 }

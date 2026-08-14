@@ -79,6 +79,19 @@ CREATE TABLE IF NOT EXISTS platform_metrics_cache (
   computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
 );
 
+-- Append-only history of the same readings as platform_metrics_cache, one
+-- row per GET /api/platform/health poll — lets the dashboard's date-range
+-- filter (24h/7d/30d, see GET /api/platform/metrics/history) show real
+-- range-scoped averages/deltas instead of only the latest snapshot.
+CREATE TABLE IF NOT EXISTS platform_metrics_history (
+  id BIGINT AUTO_INCREMENT PRIMARY KEY,
+  cpu_percent DECIMAL(5,2) NOT NULL,
+  api_p95_ms INT NOT NULL,
+  storage_bytes_used BIGINT NOT NULL,
+  captured_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  INDEX idx_platform_metrics_history_captured_at (captured_at)
+);
+
 CREATE TABLE IF NOT EXISTS tenant_users (
   id VARCHAR(36) PRIMARY KEY,
   tenant_id VARCHAR(36) NOT NULL,
@@ -509,4 +522,134 @@ CREATE TABLE IF NOT EXISTS sms_snapshots (
   created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
   FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
   INDEX idx_sms_snapshots_tenant (tenant_id)
+);
+
+-- ════════════════════════════════════════════════════════════════════
+-- Reality-audit fixes — real backing state for controls that previously
+-- only existed in the browser (workspace freeze/guardrails, MFA, backup
+-- restore, tier config, sync collision detection, galley headcount, real
+-- platform-staff credentials, billing reminders). ADD COLUMN statements
+-- below are not re-runnable cleanly (MySQL has no "ADD COLUMN IF NOT
+-- EXISTS"), but server/index.js already runs every schema statement in a
+-- try/catch-and-continue loop, so a duplicate-column error on the 2nd+ boot
+-- is expected and harmless — matches the existing convention in this file.
+-- ════════════════════════════════════════════════════════════════════
+
+-- Per-tenant workspace governance, settable by a Super Admin and enforced
+-- for real in server/routes/smsDocuments.js and server/routes/files.js
+-- (a frozen workspace rejects writes with 423 Locked — guardrails reject
+-- uploads/nesting that exceed the configured limits).
+ALTER TABLE tenants ADD COLUMN workspace_frozen BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tenants ADD COLUMN max_subfolder_depth INT NOT NULL DEFAULT 4;
+ALTER TABLE tenants ADD COLUMN max_upload_size_mb INT NOT NULL DEFAULT 50;
+-- NULL = auto-backup disabled for this tenant. Consumed by the internal
+-- job in server/routes/internalJobs.js (POST /api/internal/backups/auto-run),
+-- triggered on the same Cloud Scheduler pattern as storage refresh.
+ALTER TABLE tenants ADD COLUMN auto_backup_interval_hours INT NULL;
+ALTER TABLE tenants ADD COLUMN last_auto_backup_at TIMESTAMP NULL;
+
+-- Real TOTP (RFC 6238) MFA enrollment per crew/shore user — see
+-- server/routes/mfa.js. mfa_secret is only set once verified — a login for
+-- a tenant with mfa_enforced=TRUE and mfa_enabled=FALSE here is issued a
+-- setup-only token instead of a full session token.
+ALTER TABLE tenant_users ADD COLUMN mfa_enabled BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE tenant_users ADD COLUMN mfa_secret VARCHAR(64) NULL;
+ALTER TABLE tenant_users ADD COLUMN mfa_backup_codes JSON NULL;
+
+-- Gives platform_staff roster entries a real login credential (previously
+-- roster-only, see the table's own comment above) so "Reset password" can
+-- actually rotate a credential instead of being a no-op.
+ALTER TABLE platform_staff ADD COLUMN password_hash VARCHAR(255) NULL;
+ALTER TABLE platform_staff ADD COLUMN must_change_password BOOLEAN NOT NULL DEFAULT FALSE;
+
+-- Live crew headcount, maintained for real by server/routes/assignments.js
+-- on every sign-on/sign-off. Drives galley_provisioning_plans below.
+ALTER TABLE vessels ADD COLUMN headcount INT NOT NULL DEFAULT 0;
+
+-- Captures the real before/after state of a mutation so the Security view's
+-- "Field-Level Audit Delta" reads actual changed values instead of a
+-- pattern-matched guess. Populated by call sites that have a meaningful
+-- before/after (tenant edits, plan changes, guardrails, MFA, feature
+-- flags, user status) — NULL on domains with no natural before/after
+-- (e.g. a create or a login event).
+ALTER TABLE audit_logs ADD COLUMN before_data JSON NULL;
+ALTER TABLE audit_logs ADD COLUMN after_data JSON NULL;
+
+-- A real point-in-time logical snapshot of a tenant's own operational
+-- tables (never platform infrastructure — see the scope directive in
+-- src/types.ts), captured on backup creation. POST /:id/restore now
+-- actually replaces the tenant's current rows with this snapshot inside
+-- a transaction, instead of being a no-op that only re-fetches the row.
+ALTER TABLE backup_snapshots ADD COLUMN snapshot_data JSON NULL;
+
+-- Editable SaaS tier pricing/limits — backs the Billing "Tier Constructor"
+-- Save action for real (previously a client-only reducer with no
+-- persistence). Seeded with the same defaults as src/constants.ts.
+CREATE TABLE IF NOT EXISTS saas_tier_configs (
+  name VARCHAR(50) PRIMARY KEY,
+  monthly DECIMAL(10,2) NOT NULL DEFAULT 0,
+  annual DECIMAL(10,2) NOT NULL DEFAULT 0,
+  vessels INT NOT NULL DEFAULT 0,
+  storage_gb INT NOT NULL DEFAULT 0,
+  seats INT NOT NULL DEFAULT 0,
+  updated_by VARCHAR(255),
+  updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+INSERT IGNORE INTO saas_tier_configs (name, monthly, annual, vessels, storage_gb, seats) VALUES
+  ('Standard', 1200, 13200, 5, 50, 25),
+  ('Professional', 4200, 46200, 20, 250, 100),
+  ('Enterprise', 14500, 159500, 80, 1000, 500),
+  ('Custom', 0, 0, 0, 0, 0);
+
+-- A real detected write conflict on the vessel sync outbox: two pending
+-- entries for the same entity from the same vessel that haven't synced
+-- yet. Populated by server/routes/vesselSync.js's POST /outbox, replacing
+-- the hardcoded "dedup events" list on the Monitoring view.
+CREATE TABLE IF NOT EXISTS sync_collision_events (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  vessel_id VARCHAR(36) NOT NULL,
+  module_key VARCHAR(100) NOT NULL,
+  entity_type VARCHAR(100) NOT NULL,
+  entity_id VARCHAR(100) NOT NULL,
+  prior_outbox_id VARCHAR(36) NOT NULL,
+  new_outbox_id VARCHAR(36) NOT NULL,
+  resolution VARCHAR(30) NOT NULL DEFAULT 'latest_wins',
+  detected_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (vessel_id) REFERENCES vessels(id) ON DELETE CASCADE,
+  INDEX idx_collision_tenant (tenant_id, detected_at)
+);
+
+-- Real per-vessel daily galley/victualling provisioning, recomputed by
+-- server/routes/assignments.js whenever headcount changes (real-per-person
+-- ration formula, see GALLEY_RATION_KG_PER_HEAD in that file).
+CREATE TABLE IF NOT EXISTS galley_provisioning_plans (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  vessel_id VARCHAR(36) NOT NULL,
+  plan_date DATE NOT NULL,
+  headcount INT NOT NULL DEFAULT 0,
+  breakfast_kg DECIMAL(8,2) NOT NULL DEFAULT 0,
+  lunch_kg DECIMAL(8,2) NOT NULL DEFAULT 0,
+  dinner_kg DECIMAL(8,2) NOT NULL DEFAULT 0,
+  snack_kg DECIMAL(8,2) NOT NULL DEFAULT 0,
+  computed_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  FOREIGN KEY (vessel_id) REFERENCES vessels(id) ON DELETE CASCADE,
+  UNIQUE KEY uq_galley_plan_vessel_date (vessel_id, plan_date)
+);
+
+-- A real, auditable record that a billing reminder was sent for a tenant.
+-- No outbound email service exists in this deployment, so this is honest
+-- about what actually happened (a reminder was logged/sent by staff) rather
+-- than fabricating a delivery pipeline — see BillingView.tsx.
+CREATE TABLE IF NOT EXISTS billing_reminders (
+  id VARCHAR(36) PRIMARY KEY,
+  tenant_id VARCHAR(36) NOT NULL,
+  sent_by VARCHAR(255),
+  sent_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  note VARCHAR(500),
+  FOREIGN KEY (tenant_id) REFERENCES tenants(id) ON DELETE CASCADE,
+  INDEX idx_billing_reminders_tenant (tenant_id, sent_at)
 );

@@ -4,9 +4,12 @@ import {
   History, ShieldAlert, ChevronRight,
 } from 'lucide-react';
 import { useStore } from '../store';
+import { useAuth } from '../lib/auth';
 import { Modal } from './Modal';
 import { CriticalActionWizard } from './CriticalActionWizard';
 import { relativeTime } from '../constants';
+import { demoSetWorkspaceFrozen, demoSetGuardrails } from '../lib/demoData';
+import { logAudit } from '../lib/audit';
 import type { Tenant, SmsSnapshot } from '../types';
 
 export function TenantControlDrawer({ tenant, open, onClose }: {
@@ -15,6 +18,7 @@ export function TenantControlDrawer({ tenant, open, onClose }: {
   onClose: () => void;
 }) {
   const { smsSnapshots, dispatch, toast, audit } = useStore();
+  const { user } = useAuth();
   const [maxDepth, setMaxDepth] = useState(tenant.guardrails?.maxSubfolderDepth ?? 3);
   const [maxUpload, setMaxUpload] = useState(tenant.guardrails?.maxUploadSizeMb ?? 25);
   const [rollbackFor, setRollbackFor] = useState<SmsSnapshot | null>(null);
@@ -25,10 +29,24 @@ export function TenantControlDrawer({ tenant, open, onClose }: {
   const isFrozen = tenant.guardrails?.workspaceFrozen ?? false;
   const tenantSnaps = smsSnapshots.filter((s) => s.tenantId === tenant.id);
   const tenantAudit = audit.filter((a) => a.companyId === tenant.id && a.category === 'sms').slice(0, 12);
-  const actorEmail = 'superadmin@platform.io';
+  const actorEmail = user?.email ?? 'superadmin@platform.io';
 
-  function handleFreeze() {
-    dispatch({ type: 'TENANT_FREEZE', id: tenant.id, frozen: !isFrozen });
+  async function handleFreeze() {
+    const newFrozen = !isFrozen;
+    try {
+      await demoSetWorkspaceFrozen(tenant.id, newFrozen);
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Failed to update workspace freeze', message: (err as Error).message });
+      setFreezeConfirm(false);
+      return;
+    }
+    dispatch({ type: 'TENANT_FREEZE', id: tenant.id, frozen: newFrozen });
+    await logAudit({
+      tenantId: tenant.id, actorEmail, category: 'sms',
+      action: `Workspace ${newFrozen ? 'frozen' : 'unfrozen'}: ${tenant.company}`, target: tenant.company,
+      severity: newFrozen ? 'critical' : 'warning',
+      before: { workspace_frozen: isFrozen }, after: { workspace_frozen: newFrozen },
+    });
     toast({
       tone: isFrozen ? 'success' : 'danger',
       title: isFrozen ? 'Workspace unfrozen' : 'Workspace frozen',
@@ -37,8 +55,19 @@ export function TenantControlDrawer({ tenant, open, onClose }: {
     setFreezeConfirm(false);
   }
 
-  function handleSaveGuardrails() {
+  async function handleSaveGuardrails() {
+    const before = { maxSubfolderDepth: tenant.guardrails?.maxSubfolderDepth ?? 3, maxUploadSizeMb: tenant.guardrails?.maxUploadSizeMb ?? 25 };
+    try {
+      await demoSetGuardrails(tenant.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload });
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Failed to update guardrails', message: (err as Error).message });
+      return;
+    }
     dispatch({ type: 'GUARDRAILS_UPDATE', id: tenant.id, patch: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload } });
+    await logAudit({
+      tenantId: tenant.id, actorEmail, category: 'sms', action: `Guardrails updated: ${tenant.company}`, target: tenant.company, severity: 'warning',
+      before, after: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload },
+    });
     toast({ tone: 'success', title: 'Guardrails updated', message: `${tenant.company}: max depth ${maxDepth}, max upload ${maxUpload}MB` });
   }
 

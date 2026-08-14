@@ -7,6 +7,7 @@ import { useEffect, useState } from 'react';
 import { RefreshCw, AlertTriangle, CheckCircle2, Ship } from 'lucide-react';
 import { type VesselRow } from '../lib/supabase';
 import { relativeTime } from '../constants';
+import { apiGetVesselSyncStateOne } from '../lib/api';
 
 interface FleetSyncWidgetProps {
   vessels: VesselRow[];
@@ -17,6 +18,11 @@ interface SyncInfo {
   vesselId: string;
   lastSyncAt: string | null;
   smsVersion: string | null;
+}
+
+interface VesselSyncStateRow {
+  last_sync_at: string | null;
+  pending_outbox_count: number | null;
 }
 
 export function FleetSyncWidget({ vessels, tenantId }: FleetSyncWidgetProps) {
@@ -31,23 +37,34 @@ export function FleetSyncWidget({ vessels, tenantId }: FleetSyncWidgetProps) {
     }
 
     const vesselList = vessels;
+    let cancelled = false;
 
     async function load() {
+      const states = await Promise.all(
+        vesselList.map((v) =>
+          apiGetVesselSyncStateOne<VesselSyncStateRow>(v.id, tenantId as string).catch(() => null),
+        ),
+      );
+      if (cancelled) return;
+
       setSyncInfos(
-        vesselList.map((v) => ({
+        vesselList.map((v, i) => ({
           vesselId: v.id,
-          lastSyncAt: v.last_sync_at ?? new Date(Date.now() - Math.random() * 3600_000).toISOString(),
-          smsVersion: v.sms_active_version ?? 'v1.0.0',
+          lastSyncAt: states[i]?.last_sync_at ?? v.last_sync_at,
+          smsVersion: v.sms_active_version,
         }))
       );
-      setPendingRevisions(0);
+      setPendingRevisions(states.reduce((sum, s) => sum + (s?.pending_outbox_count ?? 0), 0));
       setLoading(false);
     }
 
     load();
     // Refresh every 30 seconds for real-time updates
     const interval = setInterval(load, 30_000);
-    return () => clearInterval(interval);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tenantId, vessels.length]);
 

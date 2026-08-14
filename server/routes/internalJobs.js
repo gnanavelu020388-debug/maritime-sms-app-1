@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { refreshAllTenantStorage } from '../jobs/refreshStorageUsage.js';
+import { runAutoBackups } from '../jobs/autoBackup.js';
 
 const router = Router();
 
@@ -22,6 +23,16 @@ router.post('/storage/refresh', requireInternalSecret, async (_req, res) => {
   } catch (err) {
     console.error(err);
     return res.status(500).json({ error: 'Refresh failed' });
+  }
+});
+
+router.post('/backups/auto-run', requireInternalSecret, async (_req, res) => {
+  try {
+    const result = await runAutoBackups();
+    return res.json(result);
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Auto-backup run failed' });
   }
 });
 

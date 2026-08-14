@@ -72,7 +72,7 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
     setFormError(null);
     try {
       const isCompanyAdmin = data.roleChoice === COMPANY_ADMIN_RANK;
-      const rank = isCompanyAdmin ? ('DPA' as Rank) : (data.roleChoice as Rank);
+      const rank = isCompanyAdmin ? ('Company Admin' as Rank) : (data.roleChoice as Rank);
       const role = isCompanyAdmin ? 'company_admin' : (RANK_TO_ROLE.find((r) => r.rank === data.roleChoice)?.role ?? 'vessel');
       await demoCreateUser(tenant.id, {
         name: data.name, email: data.email.toLowerCase().trim(),
@@ -129,7 +129,7 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
         <ol className="list-decimal space-y-1 pl-5 text-primary-700 dark:text-primary-300">
           <li>Create a tenant below (sets license ceilings + clones the locked SMS template).</li>
           <li>Provision users in that tenant — pick <strong>Company Admin</strong>, <strong>DPA</strong>, or a vessel rank (Master/Chief Engineer/Crew).</li>
-          <li>Open the app in a new browser/incognito window and <strong>sign up with the provisioned user's email</strong> + any password (6+ chars). The account auto-links to the provisioned role on first login.</li>
+          <li>Open the app in a new browser/incognito window and <strong>sign in with the provisioned user's email</strong> and password <strong>demo</strong> (the account already exists — no separate sign-up step).</li>
           <li>Repeat per role to see all three windows: Super Admin, Company/DPA Workspace, Vessel Portal.</li>
         </ol>
       </div>

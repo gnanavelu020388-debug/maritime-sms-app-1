@@ -4,8 +4,8 @@ import pool from '../db.js';
 const JWT_SECRET = process.env.JWT_SECRET || 'maritime-platform-dev-secret';
 const TOKEN_EXPIRY = '24h';
 
-export function signToken(payload) {
-  return jwt.sign(payload, JWT_SECRET, { expiresIn: TOKEN_EXPIRY });
+export function signToken(payload, expiresIn = TOKEN_EXPIRY) {
+  return jwt.sign(payload, JWT_SECRET, { expiresIn });
 }
 
 export function verifyToken(token) {

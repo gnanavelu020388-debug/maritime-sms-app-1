@@ -116,10 +116,29 @@ router.post('/outbox', authMiddleware, requireTenantAccess, async (req, res) => 
       return res.status(400).json({ error: 'tenant_id, vessel_id, module_key, entity_type and entity_id are required' });
     }
 
+    // A real write collision: this same entity already has an unsynced
+    // pending write queued from the same vessel (e.g. two workstations on
+    // the vessel LAN edited the same document before either reached
+    // shore). Recorded for the Monitoring "dedup events" view — resolution
+    // is always "latest_wins" because check-in below applies outbox
+    // entries in insertion order, so the newer row is what ships.
+    const [priorPending] = await pool.query(
+      "SELECT id FROM vessel_sync_outbox WHERE tenant_id = ? AND vessel_id = ? AND entity_type = ? AND entity_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1",
+      [tenant_id, vessel_id, entity_type, entity_id],
+    );
+
+    const newOutboxId = uuidv4();
     await pool.query(
       'INSERT INTO vessel_sync_outbox (id, tenant_id, vessel_id, module_key, operation, entity_type, entity_id, payload, priority, status) VALUES (?,?,?,?,?,?,?,?,?,\'pending\')',
-      [uuidv4(), tenant_id, vessel_id, module_key, operation || 'upsert', entity_type, entity_id, JSON.stringify(payload || {}), priority || 0],
+      [newOutboxId, tenant_id, vessel_id, module_key, operation || 'upsert', entity_type, entity_id, JSON.stringify(payload || {}), priority || 0],
     );
+
+    if (priorPending.length > 0) {
+      await pool.query(
+        'INSERT INTO sync_collision_events (id, tenant_id, vessel_id, module_key, entity_type, entity_id, prior_outbox_id, new_outbox_id) VALUES (?,?,?,?,?,?,?,?)',
+        [uuidv4(), tenant_id, vessel_id, module_key, entity_type, entity_id, priorPending[0].id, newOutboxId],
+      );
+    }
 
     await pool.query(
       `INSERT INTO vessel_sync_state
@@ -187,6 +206,26 @@ router.post('/:vesselId/checkin', authMiddleware, requireTenantAccess, async (re
     } catch (innerErr) { console.error('[vesselSync] failed to record check-in failure:', innerErr); }
     return res.status(500).json({ error: 'Check-in failed' });
   }
+});
+
+// Super Admin: recent real write collisions across the fleet — backs the
+// Monitoring "Offline Data Collision Logic Guard" card (previously a
+// hardcoded illustrative list).
+router.get('/collisions', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
+    const [rows] = await pool.query(
+      `SELECT c.id, c.tenant_id, c.vessel_id, c.module_key, c.entity_type, c.entity_id, c.resolution, c.detected_at,
+              v.name AS vessel_name, t.company
+       FROM sync_collision_events c
+       JOIN vessels v ON v.id = c.vessel_id
+       JOIN tenants t ON t.id = c.tenant_id
+       ORDER BY c.detected_at DESC
+       LIMIT ?`,
+      [limit],
+    );
+    return res.json(rows);
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
 // Single-vessel sync state — powers getVesselSyncState() in syncService.ts.

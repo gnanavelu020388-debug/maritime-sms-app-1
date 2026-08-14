@@ -32,7 +32,10 @@ export function isRealTenantId(id: string): boolean {
 // ── Tenant getters ──────────────────────────────────────────
 
 export function getDemoTenant(id: string): TenantRow {
-  return dataCache.getCachedTenants().find((t) => t.id === id) ?? { id, company: 'Unknown', contact_email: '', plan: 'Standard', status: 'active', vessels_max: 0, seats_max: 0, storage_gb_max: 0, monthly_revenue: 0, region: '', mfa_enforced: false, modules: [], sms_version: '1.0.0', created_at: '', contract_expires: '', updated_at: '' };
+  return dataCache.getCachedTenants().find((t) => t.id === id) ?? {
+    id, company: 'Unknown', contact_email: '', plan: 'Standard', status: 'active', vessels_max: 0, seats_max: 0, storage_gb_max: 0, monthly_revenue: 0, region: '', mfa_enforced: false, modules: [], sms_version: '1.0.0', created_at: '', contract_expires: '', updated_at: '',
+    workspace_frozen: false, max_subfolder_depth: 4, max_upload_size_mb: 50, auto_backup_interval_hours: null, last_auto_backup_at: null,
+  };
 }
 
 export function getEffectiveDemoTenants(): TenantRow[] {
@@ -56,28 +59,36 @@ export async function demoCreateTenant(
     sms_version: '1.0.0',
     status: 'active',
   });
-  await dataCache.refreshAllTenants();
+  dataCache.upsertCachedTenant(t);
   return t.id;
 }
 
 export async function demoDeleteTenant(tenantId: string): Promise<void> {
+  // Soft-archive — the endpoint only flips `status` server-side and
+  // returns {success}, not the row, so mirror that one-field change here.
   await api.apiArchiveTenant(tenantId);
-  await dataCache.refreshAllTenants();
+  dataCache.patchCachedTenant(tenantId, { status: 'archived' });
 }
 
 export async function demoUpdateTenantSmsVersion(tenantId: string, smsVersion: string): Promise<void> {
-  await api.apiUpdateTenant<TenantRow>(tenantId, { sms_version: smsVersion });
-  await dataCache.refreshAllTenants();
+  const t = await api.apiUpdateTenant<TenantRow>(tenantId, { sms_version: smsVersion });
+  dataCache.upsertCachedTenant(t);
 }
 
 // ── Workspace freeze / guardrails ───────────────────────────
+// Real per-tenant state (tenants.workspace_frozen / max_subfolder_depth /
+// max_upload_size_mb), enforced for real server-side in
+// server/routes/smsDocuments.js and server/routes/files.js — not just a
+// UI-only flag. Reads come from the same tenant cache TENANTS_HYDRATE
+// uses; writes go through the real tenant-update endpoint.
 
-export function demoGetWorkspaceFrozen(_tenantId: string): boolean {
-  return false;
+export function demoGetWorkspaceFrozen(tenantId: string): boolean {
+  return dataCache.getCachedTenants().find((t) => t.id === tenantId)?.workspace_frozen ?? false;
 }
 
-export function demoSetWorkspaceFrozen(_tenantId: string, _frozen: boolean): void {
-  // Guardrails are managed via API in production
+export async function demoSetWorkspaceFrozen(tenantId: string, frozen: boolean): Promise<void> {
+  const t = await api.apiUpdateTenant<TenantRow>(tenantId, { workspace_frozen: frozen });
+  dataCache.upsertCachedTenant(t);
 }
 
 export interface DemoGuardrails {
@@ -85,12 +96,15 @@ export interface DemoGuardrails {
   maxUploadSizeMb: number;
 }
 
-export function demoGetGuardrails(_tenantId: string): DemoGuardrails | null {
-  return { maxSubfolderDepth: 4, maxUploadSizeMb: 50 };
+export function demoGetGuardrails(tenantId: string): DemoGuardrails | null {
+  const t = dataCache.getCachedTenants().find((x) => x.id === tenantId);
+  if (!t) return null;
+  return { maxSubfolderDepth: t.max_subfolder_depth, maxUploadSizeMb: t.max_upload_size_mb };
 }
 
-export function demoSetGuardrails(_tenantId: string, _guardrails: DemoGuardrails): void {
-  // Guardrails are managed via API in production
+export async function demoSetGuardrails(tenantId: string, guardrails: DemoGuardrails): Promise<void> {
+  const t = await api.apiUpdateTenant<TenantRow>(tenantId, { max_subfolder_depth: guardrails.maxSubfolderDepth, max_upload_size_mb: guardrails.maxUploadSizeMb });
+  dataCache.upsertCachedTenant(t);
 }
 
 // ── Feature flags ───────────────────────────────────────────
@@ -105,16 +119,25 @@ export interface DemoFeatureFlagEntry {
 
 const featureFlagCache = new Map<string, Map<string, boolean>>();
 
-export function getDemoFeatureFlagsForTenant(tenantId: string): Map<string, boolean> {
+// Reads the persisted per-tenant overrides from the backend on first access
+// per tenant, then serves subsequent reads from the in-memory cache — a
+// cache miss must never be treated as "no overrides exist" (which silently
+// defaulted every module back to enabled) since the actual DB state for
+// tenants not yet toggled this session was never fetched.
+export async function getDemoFeatureFlagsForTenant(tenantId: string): Promise<Map<string, boolean>> {
   const cached = featureFlagCache.get(tenantId);
   if (cached) return cached;
-  return new Map();
+  const rows = await api.apiGetFeatureFlags<{ feature_key: string; enabled: boolean }>(tenantId).catch(() => []);
+  const map = new Map<string, boolean>();
+  for (const r of rows) map.set(r.feature_key, !!r.enabled);
+  featureFlagCache.set(tenantId, map);
+  return map;
 }
 
 export function getDemoFeatureFlags(): DemoFeatureFlagEntry[] {
   const entries: DemoFeatureFlagEntry[] = [];
   for (const t of dataCache.getCachedTenants()) {
-    const flags = getDemoFeatureFlagsForTenant(t.id);
+    const flags = featureFlagCache.get(t.id) ?? new Map();
     for (const [key, enabled] of flags) {
       entries.push({ tenant_id: t.id, feature_key: key, enabled, updated_by: null, updated_at: '' });
     }
@@ -122,13 +145,15 @@ export function getDemoFeatureFlags(): DemoFeatureFlagEntry[] {
   return entries;
 }
 
-export async function demoSetFeatureFlag(
+export function demoSetFeatureFlag(
   tenantId: string,
   featureKey: string,
   enabled: boolean,
-  updatedBy: string | null,
-): Promise<void> {
-  await api.apiUpdateFeatureFlag(tenantId, featureKey, { enabled, updated_by: updatedBy });
+): void {
+  // The write itself already happened in setFeatureFlag (featureFlags.ts) —
+  // this only mirrors the result into the local cache so subsequent reads
+  // (same session) don't need a round trip. A second write here would be
+  // redundant and, being unawaited by the caller, a source of races.
   const flags = featureFlagCache.get(tenantId) ?? new Map();
   flags.set(featureKey, enabled);
   featureFlagCache.set(tenantId, flags);
@@ -170,28 +195,9 @@ export async function demoSetSyncConfig(
   syncConfigCache.set(tenantId, entry);
 }
 
-// ── Module definitions ──────────────────────────────────────
-
-export interface DemoModuleDefEntry {
-  feature_key: string;
-  display_name: string;
-  updated_by: string | null;
-  updated_at: string;
-}
-
-const moduleDefCache = new Map<string, DemoModuleDefEntry>();
-
-export function getDemoModuleDefs(): DemoModuleDefEntry[] {
-  return Array.from(moduleDefCache.values());
-}
-
-export function getDemoModuleDef(featureKey: string): string | null {
-  return moduleDefCache.get(featureKey)?.display_name ?? null;
-}
-
-export function demoSetModuleDef(featureKey: string, displayName: string, updatedBy: string | null): void {
-  moduleDefCache.set(featureKey, { feature_key: featureKey, display_name: displayName, updated_by: updatedBy, updated_at: new Date().toISOString() });
-}
+// Module display-name overrides now live in the real module_definitions
+// table — see apiGetAllModuleDefs/apiUpdateModuleDef in api.ts, consumed
+// directly by fetchModuleDefinitions/setModuleDisplayName in featureFlags.ts.
 
 // ── User getters ────────────────────────────────────────────
 
@@ -210,28 +216,34 @@ export async function demoCreateUser(
     status: data.status ?? 'invited', fleet_scope: data.fleet_scope ?? 'global',
     assigned_vessel_ids: data.assigned_vessel_ids ?? [], assigned_fleet_profile_ids: data.assigned_fleet_profile_ids ?? [],
   });
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.upsertCachedUser(tenantId, u);
   return u.id;
 }
 
 export async function demoDeleteUser(tenantId: string, userId: string): Promise<void> {
+  // The route signs off this user's active assignment then hard-deletes the
+  // tenant_users row, which cascades to ALL of their crew_assignments rows
+  // (ON DELETE CASCADE on user_id) — removeCachedUser mirrors that.
   await api.apiDeleteUser(tenantId, userId);
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.removeCachedUser(tenantId, userId);
 }
 
 export async function demoSetUserStatus(tenantId: string, userId: string, status: string): Promise<void> {
-  await api.apiUpdateUser<TenantUserRow>(tenantId, userId, { status });
-  await dataCache.refreshTenantData(tenantId);
+  const u = await api.apiUpdateUser<TenantUserRow>(tenantId, userId, { status });
+  dataCache.upsertCachedUser(tenantId, u);
 }
 
 export async function demoUpdateUserProfile(tenantId: string, userId: string, data: { name?: string; email?: string; employee_id?: string | null; rank?: string; status?: string }): Promise<void> {
-  await api.apiUpdateUser<TenantUserRow>(tenantId, userId, data);
-  await dataCache.refreshTenantData(tenantId);
+  const u = await api.apiUpdateUser<TenantUserRow>(tenantId, userId, data);
+  dataCache.upsertCachedUser(tenantId, u);
 }
 
 export async function demoDeactivateUser(tenantId: string, userId: string): Promise<void> {
+  // /deactivate only returns {success}, not the row, and it also signs off
+  // this user's active assignment server-side — replay both effects locally.
   await api.apiDeactivateUser(tenantId, userId);
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.patchCachedUser(tenantId, userId, { status: 'inactive' });
+  dataCache.signOffCachedAssignmentsForUser(tenantId, userId);
 }
 
 // ── Vessel getters ──────────────────────────────────────────
@@ -252,23 +264,25 @@ export async function demoCreateVessel(
     vessel_type: data.vessel_type, class_society: data.class_society,
     satellite_provider: data.satellite_provider ?? null,
   });
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.upsertCachedVessel(tenantId, v);
   return v.id;
 }
 
 export async function demoDeleteVessel(tenantId: string, vesselId: string): Promise<void> {
+  // ON DELETE CASCADE removes this vessel's crew_assignments server-side —
+  // removeCachedVessel mirrors that so manning views don't show ghost rows.
   await api.apiDeleteVessel(tenantId, vesselId);
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.removeCachedVessel(tenantId, vesselId);
 }
 
 export async function demoUpdateVesselSync(tenantId: string, vesselId: string, smsVersion: string): Promise<void> {
-  await api.apiUpdateVessel<VesselRow>(tenantId, vesselId, { sms_active_version: smsVersion, last_sync_at: new Date().toISOString() });
-  await dataCache.refreshTenantData(tenantId);
+  const v = await api.apiUpdateVessel<VesselRow>(tenantId, vesselId, { sms_active_version: smsVersion, last_sync_at: new Date().toISOString() });
+  dataCache.upsertCachedVessel(tenantId, v);
 }
 
 export async function demoUpdateVessel(tenantId: string, vesselId: string, updates: Partial<Omit<VesselRow, 'id' | 'tenant_id' | 'created_at'>>): Promise<void> {
-  await api.apiUpdateVessel<VesselRow>(tenantId, vesselId, updates);
-  await dataCache.refreshTenantData(tenantId);
+  const v = await api.apiUpdateVessel<VesselRow>(tenantId, vesselId, updates);
+  dataCache.upsertCachedVessel(tenantId, v);
 }
 
 // ── Crew assignments ────────────────────────────────────────
@@ -281,13 +295,13 @@ export async function demoSignOn(tenantId: string, userId: string, vesselId: str
   const a = await api.apiCreateAssignment<CrewAssignmentRow>(tenantId, {
     vessel_id: vesselId, user_id: userId, rank,
   });
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.upsertCachedAssignment(tenantId, a);
   return a.id;
 }
 
 export async function demoSignOff(tenantId: string, assignmentId: string): Promise<void> {
-  await api.apiSignOffAssignment<CrewAssignmentRow>(tenantId, assignmentId);
-  await dataCache.refreshTenantData(tenantId);
+  const a = await api.apiSignOffAssignment<CrewAssignmentRow>(tenantId, assignmentId);
+  dataCache.upsertCachedAssignment(tenantId, a);
 }
 
 // ── SMS documents ───────────────────────────────────────────
@@ -318,13 +332,13 @@ export async function demoCreateSmsDoc(
     approval_state: 'pending_dpa', sort_order: maxSort + 1, profile_id: data.profile_id ?? null,
     author_name: data.author_name ?? null, author_role: data.author_role ?? null, author_origin: data.author_origin ?? null,
   });
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.upsertCachedSmsDoc(tenantId, d);
   return d.id;
 }
 
 export async function demoRenameSmsDoc(tenantId: string, docId: string, newLabel: string): Promise<void> {
-  await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { label: newLabel });
-  await dataCache.refreshTenantData(tenantId);
+  const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { label: newLabel });
+  dataCache.upsertCachedSmsDoc(tenantId, d);
 }
 
 export async function demoUpdateSmsDocContent(tenantId: string, docId: string, content: string, contentKind: 'rich_text' | 'pdf', authorName?: string | null, authorRole?: string | null, authorOrigin?: string | null, fileSizeBytes?: number | null): Promise<void> {
@@ -335,28 +349,28 @@ export async function demoUpdateSmsDocContent(tenantId: string, docId: string, c
   // Only touch file_size_bytes when a new file was actually picked — otherwise
   // a plain resubmit-with-unchanged-PDF would wipe out the recorded size.
   if (fileSizeBytes != null) updates.file_size_bytes = fileSizeBytes;
-  await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, updates);
-  await dataCache.refreshTenantData(tenantId);
+  const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, updates);
+  dataCache.upsertCachedSmsDoc(tenantId, d);
 }
 
 export async function demoApproveSmsDoc(tenantId: string, docId: string): Promise<void> {
-  await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { approval_state: 'approved' });
-  await dataCache.refreshTenantData(tenantId);
+  const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { approval_state: 'approved' });
+  dataCache.upsertCachedSmsDoc(tenantId, d);
 }
 
 export async function demoApproveAllSmsDocs(tenantId: string): Promise<number> {
   const all = getEffectiveDemoSmsDocs(tenantId);
   const pending = all.filter((d) => d.approval_state === 'pending_dpa');
   for (const p of pending) {
-    await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, p.id, { approval_state: 'approved' });
+    const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, p.id, { approval_state: 'approved' });
+    dataCache.upsertCachedSmsDoc(tenantId, d);
   }
-  await dataCache.refreshTenantData(tenantId);
   return pending.length;
 }
 
 export async function demoRejectSmsDoc(tenantId: string, docId: string, comments?: string): Promise<void> {
-  await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { approval_state: 'rejected', rejection_comments: comments ?? null });
-  await dataCache.refreshTenantData(tenantId);
+  const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { approval_state: 'rejected', rejection_comments: comments ?? null });
+  dataCache.upsertCachedSmsDoc(tenantId, d);
 }
 
 export async function demoResubmitSmsDoc(tenantId: string, docId: string, content?: string, contentKind?: 'rich_text' | 'pdf', authorName?: string | null, authorRole?: string | null, authorOrigin?: string | null, fileSizeBytes?: number | null): Promise<void> {
@@ -367,8 +381,8 @@ export async function demoResubmitSmsDoc(tenantId: string, docId: string, conten
   if (authorRole) updates.author_role = authorRole;
   if (authorOrigin) updates.author_origin = authorOrigin;
   if (fileSizeBytes != null) updates.file_size_bytes = fileSizeBytes;
-  await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, updates);
-  await dataCache.refreshTenantData(tenantId);
+  const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, updates);
+  dataCache.upsertCachedSmsDoc(tenantId, d);
 }
 
 export async function demoDeleteSmsDoc(tenantId: string, docId: string): Promise<number> {
@@ -387,7 +401,7 @@ export async function demoDeleteSmsDoc(tenantId: string, docId: string): Promise
   for (const id of toDelete) {
     await api.apiDeleteSmsDoc(tenantId, id);
   }
-  await dataCache.refreshTenantData(tenantId);
+  dataCache.removeCachedSmsDocs(tenantId, toDelete);
   return toDelete.size;
 }
 

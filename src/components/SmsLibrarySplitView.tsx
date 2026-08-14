@@ -58,8 +58,16 @@ import {
 import { useFleetScope } from "../lib/useFleetScope";
 import { onSyncEvent, postSyncEvent } from "../lib/syncChannel";
 import { enqueueSyncEntry } from "../lib/syncService";
+import { apiUploadFile, apiGetSignedUrl, ApiFileError } from "../lib/api";
 import { Modal } from "../components/Modal";
 import { Badge } from "../components/Badge";
+
+// A real GCS object path looks like `tenants/{tenantId}/sms-documents/{id}.{ext}`
+// (see server/routes/files.js) — used to tell a genuinely-uploaded PDF apart
+// from a pre-fix document whose `content` is just a bare filename string.
+function isGcsPath(content: string | null | undefined): content is string {
+  return !!content && content.startsWith("tenants/");
+}
 
 interface TreeNode extends SmsDocRow {
   children: TreeNode[];
@@ -204,6 +212,25 @@ export function SmsLibrarySplitView({
   const [search, setSearch] = useState("");
   const [typeFilter, setTypeFilter] = useState<string>("all");
   const [previewDoc, setPreviewDoc] = useState<SmsDocRow | null>(null);
+  // Real signed URL for a previewed PDF whose content is a genuine gcsUri
+  // (see isGcsPath) — pdfBlobUrls (in-memory, this-session-only) is used
+  // as a same-session fast path when available, this is the real fallback
+  // that also works after a reload or in a different tab/session.
+  const [previewSignedUrl, setPreviewSignedUrl] = useState<string | null>(null);
+  const [previewSignedUrlError, setPreviewSignedUrlError] = useState(false);
+  useEffect(() => {
+    if (!previewDoc || previewDoc.content_kind !== "pdf" || pdfBlobUrls.has(previewDoc.id) || !isGcsPath(previewDoc.content)) {
+      setPreviewSignedUrl(null);
+      setPreviewSignedUrlError(false);
+      return;
+    }
+    let cancelled = false;
+    setPreviewSignedUrlError(false);
+    apiGetSignedUrl(previewDoc.content)
+      .then((url) => { if (!cancelled) setPreviewSignedUrl(url); })
+      .catch(() => { if (!cancelled) setPreviewSignedUrlError(true); });
+    return () => { cancelled = true; };
+  }, [previewDoc]);
   const [editingDoc, setEditingDoc] = useState<SmsDocRow | null>(null);
 
   // Folder / document creation modals
@@ -220,6 +247,7 @@ export function SmsLibrarySplitView({
     string | null
   >(null);
   const [resubmitPdfSize, setResubmitPdfSize] = useState<number | null>(null);
+  const [resubmitPdfFile, setResubmitPdfFile] = useState<File | null>(null);
   const [submittingDraft, setSubmittingDraft] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<SmsDocRow | null>(null);
   const [deleting, setDeleting] = useState(false);
@@ -236,6 +264,7 @@ export function SmsLibrarySplitView({
   );
   const [addDocPdfName, setAddDocPdfName] = useState("");
   const [addDocPdfSize, setAddDocPdfSize] = useState<number | null>(null);
+  const [addDocPdfFile, setAddDocPdfFile] = useState<File | null>(null);
   const [addDocSizeError, setAddDocSizeError] = useState("");
   const [addDocPdfPreviewUrl, setAddDocPdfPreviewUrl] = useState<string | null>(
     null,
@@ -252,6 +281,7 @@ export function SmsLibrarySplitView({
     setAddDocMode("rich_text");
     setAddDocPdfName("");
     setAddDocPdfSize(null);
+    setAddDocPdfFile(null);
     setAddDocSizeError("");
     if (addDocPdfPreviewUrl) URL.revokeObjectURL(addDocPdfPreviewUrl);
     setAddDocPdfPreviewUrl(null);
@@ -268,12 +298,14 @@ export function SmsLibrarySplitView({
       );
       setAddDocPdfName("");
       setAddDocPdfSize(null);
+      setAddDocPdfFile(null);
       setAddDocPdfPreviewUrl(null);
       return;
     }
     setAddDocSizeError("");
     setAddDocPdfName(file.name);
     setAddDocPdfSize(file.size);
+    setAddDocPdfFile(file);
     if (!addDocLabel.trim()) setAddDocLabel(file.name.replace(/\.pdf$/i, ""));
     setAddDocPdfPreviewUrl(URL.createObjectURL(file));
   }
@@ -357,87 +389,111 @@ export function SmsLibrarySplitView({
   }
 
   async function handleResubmitFolder(docId: string) {
-    demoResubmitSmsDoc(
-      tenantId,
-      docId,
-      undefined,
-      undefined,
-      authorName,
-      authorRole,
-      authorOrigin,
-    );
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId,
-      payload: { action: "resubmitted", docId },
-    });
-    setSyncTick((t) => t + 1);
-    setPreviewDoc(null);
-    showToast("Folder resubmitted for DPA approval.", true);
+    try {
+      await demoResubmitSmsDoc(
+        tenantId,
+        docId,
+        undefined,
+        undefined,
+        authorName,
+        authorRole,
+        authorOrigin,
+      );
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId,
+        payload: { action: "resubmitted", docId },
+      });
+      setSyncTick((t) => t + 1);
+      setPreviewDoc(null);
+      showToast("Folder resubmitted for DPA approval.", true);
+    } catch (err) {
+      showToast((err as Error).message || "Failed to resubmit folder.", false);
+    }
   }
 
   async function handleResubmitDocument() {
     if (!editingDoc) return;
     setSubmittingDraft(true);
-    const content = (draftContent.trim() || editingDoc.content) ?? "";
-    const contentKind = editingDoc.content_kind ?? "rich_text";
-    demoResubmitSmsDoc(
-      tenantId,
-      editingDoc.id,
-      content,
-      contentKind,
-      authorName,
-      authorRole,
-      authorOrigin,
-      contentKind === "pdf" ? resubmitPdfSize : null,
-    );
-    if (vesselId)
-      enqueueSyncEntry(
+    try {
+      const contentKind = editingDoc.content_kind ?? "rich_text";
+      let content = (draftContent.trim() || editingDoc.content) ?? "";
+      let sizeBytes = contentKind === "pdf" ? resubmitPdfSize : null;
+      if (contentKind === "pdf" && resubmitPdfFile) {
+        const uploaded = await apiUploadFile(tenantId, editingDoc.id, resubmitPdfFile);
+        content = uploaded.gcsUri;
+        sizeBytes = uploaded.size;
+      }
+      await demoResubmitSmsDoc(
         tenantId,
-        vesselId,
-        "sms_documentation",
-        "document",
         editingDoc.id,
-        { label: editingDoc.label, action: "resubmitted" },
+        content,
+        contentKind,
+        authorName,
+        authorRole,
+        authorOrigin,
+        sizeBytes,
       );
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId,
-      payload: {
-        action: "resubmitted",
-        docId: editingDoc.id,
-        label: editingDoc.label,
-      },
-    });
-    setSubmittingDraft(false);
-    setEditingDoc(null);
-    setDraftContent("");
-    setResubmitPdfSize(null);
-    if (resubmitPdfPreviewUrl) {
-      URL.revokeObjectURL(resubmitPdfPreviewUrl);
-      setResubmitPdfPreviewUrl(null);
+      if (vesselId)
+        enqueueSyncEntry(
+          tenantId,
+          vesselId,
+          "sms_documentation",
+          "document",
+          editingDoc.id,
+          { label: editingDoc.label, action: "resubmitted" },
+        );
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId,
+        payload: {
+          action: "resubmitted",
+          docId: editingDoc.id,
+          label: editingDoc.label,
+        },
+      });
+      setEditingDoc(null);
+      setDraftContent("");
+      setResubmitPdfSize(null);
+      setResubmitPdfFile(null);
+      if (resubmitPdfPreviewUrl) {
+        URL.revokeObjectURL(resubmitPdfPreviewUrl);
+        setResubmitPdfPreviewUrl(null);
+      }
+      showToast(`"${editingDoc.label}" resubmitted for DPA approval.`, true);
+    } catch (err) {
+      const msg = err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
+        ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
+        : (err as Error).message || "Failed to resubmit document.";
+      showToast(msg, false);
+    } finally {
+      setSubmittingDraft(false);
     }
-    showToast(`"${editingDoc.label}" resubmitted for DPA approval.`, true);
   }
 
   async function handleDeleteDraft() {
     if (!deleteTarget) return;
     setDeleting(true);
-    demoDeleteSmsDoc(tenantId, deleteTarget.id);
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId,
-      payload: {
-        action: "draft_deleted",
-        docId: deleteTarget.id,
-        label: deleteTarget.label,
-      },
-    });
-    setDeleting(false);
-    setDeleteTarget(null);
-    setPreviewDoc(null);
-    setSyncTick((t) => t + 1);
-    showToast(`Draft "${deleteTarget.label}" deleted.`, true);
+    try {
+      await demoDeleteSmsDoc(tenantId, deleteTarget.id);
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId,
+        payload: {
+          action: "draft_deleted",
+          docId: deleteTarget.id,
+          label: deleteTarget.label,
+        },
+      });
+      setDeleteTarget(null);
+      setPreviewDoc(null);
+      setSyncTick((t) => t + 1);
+      showToast(`Draft "${deleteTarget.label}" deleted.`, true);
+    } catch (err) {
+      showToast((err as Error).message || "Failed to delete draft.", false);
+    } finally {
+      setDeleting(false);
+    }
   }
 
   function showToast(msg: string, ok: boolean) {
@@ -448,69 +504,88 @@ export function SmsLibrarySplitView({
   async function submitDraftRevision() {
     if (!editingDoc) return;
     setSubmittingDraft(true);
-    const content = (draftContent.trim() || editingDoc.content) ?? "";
-    const contentKind = editingDoc.content_kind ?? "rich_text";
-    demoUpdateSmsDocContent(
-      tenantId,
-      editingDoc.id,
-      content,
-      contentKind,
-      authorName,
-      authorRole,
-      authorOrigin,
-      contentKind === "pdf" ? resubmitPdfSize : null,
-    );
-    if (vesselId)
-      enqueueSyncEntry(
+    try {
+      const contentKind = editingDoc.content_kind ?? "rich_text";
+      let content = (draftContent.trim() || editingDoc.content) ?? "";
+      let sizeBytes = contentKind === "pdf" ? resubmitPdfSize : null;
+      if (contentKind === "pdf" && resubmitPdfFile) {
+        const uploaded = await apiUploadFile(tenantId, editingDoc.id, resubmitPdfFile);
+        content = uploaded.gcsUri;
+        sizeBytes = uploaded.size;
+      }
+      await demoUpdateSmsDocContent(
         tenantId,
-        vesselId,
-        "sms_documentation",
-        "document",
         editingDoc.id,
-        { label: editingDoc.label, action: "draft_revision" },
+        content,
+        contentKind,
+        authorName,
+        authorRole,
+        authorOrigin,
+        sizeBytes,
       );
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId,
-      payload: {
-        action: "draft_revision",
-        docId: editingDoc.id,
-        label: editingDoc.label,
-      },
-    });
-    setSubmittingDraft(false);
-    setEditingDoc(null);
-    setDraftContent("");
-    setResubmitPdfSize(null);
-    showToast(
-      `Draft revision submitted for DPA approval: "${editingDoc.label}"`,
-      true,
-    );
+      if (vesselId)
+        enqueueSyncEntry(
+          tenantId,
+          vesselId,
+          "sms_documentation",
+          "document",
+          editingDoc.id,
+          { label: editingDoc.label, action: "draft_revision" },
+        );
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId,
+        payload: {
+          action: "draft_revision",
+          docId: editingDoc.id,
+          label: editingDoc.label,
+        },
+      });
+      setEditingDoc(null);
+      setDraftContent("");
+      setResubmitPdfSize(null);
+      setResubmitPdfFile(null);
+      showToast(
+        `Draft revision submitted for DPA approval: "${editingDoc.label}"`,
+        true,
+      );
+    } catch (err) {
+      const msg = err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
+        ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
+        : (err as Error).message || "Failed to save draft revision.";
+      showToast(msg, false);
+    } finally {
+      setSubmittingDraft(false);
+    }
   }
 
   async function handleCreateFolder(label: string) {
     if (!addFolderFor || !label.trim()) return;
-    demoCreateSmsDoc(tenantId, {
-      parent_id: addFolderFor.parentId,
-      tree_kind: activeTabKey,
-      label: label.trim(),
-      node_kind: "folder",
-      content_kind: null,
-      content: null,
-      author_name: authorName,
-      author_role: authorRole,
-      author_origin: authorOrigin,
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId,
-      payload: { action: "folder_created", label },
-    });
-    if (addFolderFor.parentId)
-      setExpanded((s) => new Set(s).add(addFolderFor.parentId!));
-    setAddFolderFor(null);
-    setSyncTick((t) => t + 1);
-    showToast(`Folder "${label.trim()}" submitted for DPA approval.`, true);
+    try {
+      await demoCreateSmsDoc(tenantId, {
+        parent_id: addFolderFor.parentId,
+        tree_kind: activeTabKey,
+        label: label.trim(),
+        node_kind: "folder",
+        content_kind: null,
+        content: null,
+        author_name: authorName,
+        author_role: authorRole,
+        author_origin: authorOrigin,
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId,
+        payload: { action: "folder_created", label },
+      });
+      if (addFolderFor.parentId)
+        setExpanded((s) => new Set(s).add(addFolderFor.parentId!));
+      setAddFolderFor(null);
+      setSyncTick((t) => t + 1);
+      showToast(`Folder "${label.trim()}" submitted for DPA approval.`, true);
+    } catch (err) {
+      showToast((err as Error).message || "Failed to create folder.", false);
+    }
   }
 
   async function handleCreateDocument(
@@ -519,39 +594,53 @@ export function SmsLibrarySplitView({
     content: string,
   ) {
     if (!addDocFor || !label.trim()) return;
-    const createdId = await demoCreateSmsDoc(tenantId, {
-      parent_id: addDocFor.parentId,
-      tree_kind: activeTabKey,
-      label: label.trim(),
-      node_kind: "document",
-      content_kind: contentKind,
-      content,
-      file_size_bytes: contentKind === "pdf" ? addDocPdfSize : null,
-      author_name: authorName,
-      author_role: authorRole,
-      author_origin: authorOrigin,
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId,
-      payload: { action: "document_created", label },
-    });
-    if (contentKind === "pdf" && addDocPdfPreviewUrl)
-      pdfBlobUrls.set(createdId, addDocPdfPreviewUrl);
-    if (vesselId)
-      enqueueSyncEntry(
+    try {
+      // For a PDF, create the row first (content=null placeholder) so we
+      // have a docId to upload against, then upload the real bytes and
+      // store the returned gcsUri as content — never just the filename.
+      const createdId = await demoCreateSmsDoc(tenantId, {
+        parent_id: addDocFor.parentId,
+        tree_kind: activeTabKey,
+        label: label.trim(),
+        node_kind: "document",
+        content_kind: contentKind,
+        content: contentKind === "pdf" ? null : content,
+        file_size_bytes: contentKind === "pdf" ? addDocPdfSize : null,
+        author_name: authorName,
+        author_role: authorRole,
+        author_origin: authorOrigin,
+      });
+      if (contentKind === "pdf" && addDocPdfFile) {
+        const { gcsUri, size } = await apiUploadFile(tenantId, createdId, addDocPdfFile);
+        await demoUpdateSmsDocContent(tenantId, createdId, gcsUri, "pdf", authorName, authorRole, authorOrigin, size);
+      }
+      postSyncEvent({
+        type: "SMS_UPDATED",
         tenantId,
-        vesselId,
-        "sms_documentation",
-        "document",
-        createdId,
-        { label, action: "document_created" },
-      );
-    if (addDocFor.parentId)
-      setExpanded((s) => new Set(s).add(addDocFor.parentId!));
-    setAddDocFor(null);
-    setSyncTick((t) => t + 1);
-    showToast(`"${label.trim()}" submitted for DPA approval.`, true);
+        payload: { action: "document_created", label },
+      });
+      if (contentKind === "pdf" && addDocPdfPreviewUrl)
+        pdfBlobUrls.set(createdId, addDocPdfPreviewUrl);
+      if (vesselId)
+        enqueueSyncEntry(
+          tenantId,
+          vesselId,
+          "sms_documentation",
+          "document",
+          createdId,
+          { label, action: "document_created" },
+        );
+      if (addDocFor.parentId)
+        setExpanded((s) => new Set(s).add(addDocFor.parentId!));
+      setAddDocFor(null);
+      setSyncTick((t) => t + 1);
+      showToast(`"${label.trim()}" submitted for DPA approval.`, true);
+    } catch (err) {
+      const msg = err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
+        ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
+        : (err as Error).message || "Failed to create document.";
+      showToast(msg, false);
+    }
   }
 
   const [profiles, setProfiles] = useState<SmsProfileWithVessels[]>([]);
@@ -1356,7 +1445,11 @@ export function SmsLibrarySplitView({
           scrollable
           actions={
             <button
-              onClick={() => openDocInNewTab(previewDoc)}
+              onClick={() => {
+                const realUrl = pdfBlobUrls.get(previewDoc.id) ?? (isGcsPath(previewDoc.content) ? previewSignedUrl : null);
+                if (previewDoc.content_kind === "pdf" && realUrl) window.open(realUrl, "_blank");
+                else openDocInNewTab(previewDoc);
+              }}
               className="flex items-center gap-1.5 rounded-lg border border-ink-200 px-2.5 py-1.5 text-xs font-semibold text-ink-600 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 dark:border-ink-700 dark:text-ink-300 dark:hover:border-primary-600 dark:hover:bg-primary-900/30 dark:hover:text-primary-300"
               title="Open in New Tab"
             >
@@ -1479,7 +1572,7 @@ export function SmsLibrarySplitView({
             <div className="space-y-3">
               <div className="flex items-center gap-2 text-sm text-ink-500">
                 <FileText className="h-4 w-4 text-danger-500" />
-                <span className="font-semibold">{previewDoc.content}</span>
+                <span className="font-semibold">{previewDoc.label}</span>
               </div>
               {pdfBlobUrls.has(previewDoc.id) ? (
                 <iframe
@@ -1487,13 +1580,29 @@ export function SmsLibrarySplitView({
                   title={previewDoc.label}
                   className="h-[600px] w-full rounded-lg border border-ink-200 bg-white dark:border-ink-700"
                 />
-              ) : (
+              ) : !isGcsPath(previewDoc.content) ? (
+                <div className="flex flex-col items-center gap-3 py-12">
+                  <FileText className="h-12 w-12 text-ink-300" />
+                  <p className="text-xs text-ink-400">
+                    {previewDoc.content
+                      ? "This document was uploaded before file storage was wired up and only its filename was saved. Use \"Draft Revision\" to re-upload the PDF."
+                      : "No PDF file attached."}
+                  </p>
+                </div>
+              ) : previewSignedUrlError ? (
                 <div className="flex flex-col items-center gap-3 py-12">
                   <FileText className="h-12 w-12 text-danger-400" />
-                  <p className="text-xs text-ink-400">
-                    PDF reference: {previewDoc.content}. Use "Open in New Tab"
-                    to view externally.
-                  </p>
+                  <p className="text-xs text-danger-400">Couldn't load the file — try "Open in New Tab" or reload.</p>
+                </div>
+              ) : previewSignedUrl ? (
+                <iframe
+                  src={previewSignedUrl}
+                  title={previewDoc.label}
+                  className="h-[600px] w-full rounded-lg border border-ink-200 bg-white dark:border-ink-700"
+                />
+              ) : (
+                <div className="flex h-[300px] items-center justify-center rounded-lg border border-ink-200 bg-ink-50 dark:border-ink-700 dark:bg-ink-800/50">
+                  <Loader2 className="h-6 w-6 animate-spin text-ink-400" />
                 </div>
               )}
             </div>
@@ -1625,6 +1734,7 @@ export function SmsLibrarySplitView({
                       const url = URL.createObjectURL(file);
                       setResubmitPdfPreviewUrl(url);
                       setResubmitPdfSize(file.size);
+                      setResubmitPdfFile(file);
                       pdfBlobUrls.set(editingDoc.id, url);
                       setDraftContent(file.name);
                     }}

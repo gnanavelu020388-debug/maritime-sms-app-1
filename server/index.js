@@ -6,6 +6,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 
 import authRoutes from './routes/auth.js';
+import mfaRoutes from './routes/mfa.js';
 import tenantRoutes from './routes/tenants.js';
 import userRoutes from './routes/users.js';
 import vesselRoutes from './routes/vessels.js';
@@ -63,6 +64,7 @@ app.use((req, res, next) => {
 
 // ── API routes ──────────────────────────────────────────────
 app.use('/api/auth', authRoutes);
+app.use('/api/auth/mfa', mfaRoutes);
 app.use('/api/tenants', tenantRoutes);
 app.use('/api/users', userRoutes);
 app.use('/api/vessels', vesselRoutes);

@@ -92,13 +92,74 @@ export interface AuthLoginResponse {
   };
 }
 
-export async function apiLogin(email: string, password: string): Promise<AuthLoginResponse> {
-  const res = await request<AuthLoginResponse>('/auth/login', {
+export interface MfaChallengeResponse {
+  mfaRequired?: boolean;
+  mfaSetupRequired?: boolean;
+  mfaToken?: string;
+}
+
+export async function apiLogin(
+  email: string,
+  password: string,
+): Promise<AuthLoginResponse | MfaChallengeResponse> {
+  const res = await request<AuthLoginResponse | MfaChallengeResponse>('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
+  if ('token' in res && res.token) setToken(res.token);
+  return res;
+}
+
+// ── MFA (TOTP) ────────────────────────────────────────────
+
+async function mfaRequest<T>(path: string, mfaToken: string, body?: Record<string, unknown>): Promise<T> {
+  const res = await fetch(`${getApiBase()}${path}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${mfaToken}` },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const errBody = await res.json().catch(() => ({ error: 'Request failed' }));
+    throw new Error(errBody.error || `HTTP ${res.status}`);
+  }
+  return res.json() as Promise<T>;
+}
+
+export async function apiMfaSetupInit(mfaToken: string): Promise<{ secret: string; otpauthUrl: string }> {
+  return mfaRequest('/auth/mfa/setup/init', mfaToken);
+}
+
+export async function apiMfaSetupVerify(
+  mfaToken: string,
+  code: string,
+): Promise<AuthLoginResponse & { backupCodes: string[] }> {
+  const res = await mfaRequest<AuthLoginResponse & { backupCodes: string[] }>('/auth/mfa/setup/verify', mfaToken, { code });
   setToken(res.token);
   return res;
+}
+
+export async function apiMfaLoginVerify(
+  mfaToken: string,
+  codeOrBackup: { code: string } | { backupCode: string },
+): Promise<AuthLoginResponse> {
+  const res = await mfaRequest<AuthLoginResponse>('/auth/mfa/login/verify', mfaToken, codeOrBackup);
+  setToken(res.token);
+  return res;
+}
+
+export async function apiMfaDisable(code: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>('/auth/mfa/disable', { method: 'PUT', body: JSON.stringify({ code }) });
+}
+
+export async function apiGetMfaEnforcement(): Promise<{ enforced: boolean }> {
+  return request<{ enforced: boolean }>('/platform/mfa-enforcement');
+}
+
+export async function apiSetMfaEnforcement(enforced: boolean): Promise<{ enforced: boolean; tenantsUpdated: number }> {
+  return request<{ enforced: boolean; tenantsUpdated: number }>('/platform/mfa-enforcement', {
+    method: 'PUT',
+    body: JSON.stringify({ enforced }),
+  });
 }
 
 export async function apiSignup(
@@ -181,6 +242,14 @@ export async function apiDeactivateUser(tenantId: string, userId: string): Promi
   return request<{ success: boolean }>(`/users/${tenantId}/${userId}/deactivate`, { method: 'PUT' });
 }
 
+export async function apiForceTenantPasswordReset(tenantId: string): Promise<{ affected: number }> {
+  return request<{ affected: number }>(`/users/${tenantId}/force-password-reset`, { method: 'PUT' });
+}
+
+export async function apiEmergencyResetUserPassword(tenantId: string, userId: string): Promise<{ tempPassword: string }> {
+  return request<{ tempPassword: string }>(`/users/${tenantId}/${userId}/emergency-reset`, { method: 'PUT' });
+}
+
 // ── Vessels ───────────────────────────────────────────────
 
 export async function apiGetVessels<T>(tenantId: string): Promise<T[]> {
@@ -213,6 +282,19 @@ export async function apiSignOffAssignment<T>(tenantId: string, assignmentId: st
   return request<T>(`/assignments/${tenantId}/${assignmentId}/signoff`, { method: 'PUT' });
 }
 
+export interface GalleyStatus {
+  headcount: number;
+  planDate: string;
+  breakfast_kg: number;
+  lunch_kg: number;
+  dinner_kg: number;
+  snack_kg: number;
+}
+
+export async function apiGetGalleyStatus(tenantId: string, vesselId: string): Promise<GalleyStatus> {
+  return request<GalleyStatus>(`/assignments/${tenantId}/${vesselId}/galley`);
+}
+
 // ── SMS Documents ─────────────────────────────────────────
 
 export async function apiGetSmsDocuments<T>(tenantId: string): Promise<T[]> {
@@ -231,6 +313,32 @@ export async function apiDeleteSmsDoc(tenantId: string, docId: string): Promise<
   return request<{ success: boolean }>(`/sms-documents/${tenantId}/${docId}`, { method: 'DELETE' });
 }
 
+// ── SMS Document Version History ───────────────────────────
+
+export interface DocVersionRow {
+  id: string;
+  tenant_id: string;
+  document_id: string;
+  revision: number;
+  version_label: string;
+  content: string | null;
+  content_kind: string;
+  uploaded_by: string | null;
+  created_at: string;
+}
+
+export async function apiGetDocVersions(tenantId: string, docId: string): Promise<DocVersionRow[]> {
+  return request<DocVersionRow[]>(`/sms-documents/${tenantId}/${docId}/versions`);
+}
+
+export async function apiCreateDocVersion(tenantId: string, docId: string, uploadedBy: string | null): Promise<DocVersionRow> {
+  return request<DocVersionRow>(`/sms-documents/${tenantId}/${docId}/versions`, { method: 'POST', body: JSON.stringify({ uploaded_by: uploadedBy }) });
+}
+
+export async function apiRestoreDocVersion<T>(tenantId: string, docId: string, revision: number): Promise<T> {
+  return request<T>(`/sms-documents/${tenantId}/${docId}/versions/${revision}/restore`, { method: 'POST' });
+}
+
 // ── Audit Logs ────────────────────────────────────────────
 
 export async function apiGetAuditLogs<T>(tenantId?: string): Promise<T[]> {
@@ -238,8 +346,8 @@ export async function apiGetAuditLogs<T>(tenantId?: string): Promise<T[]> {
   return request<T[]>('/audit-logs');
 }
 
-export async function apiCreateAuditLog(data: Record<string, unknown>): Promise<{ success: boolean }> {
-  return request<{ success: boolean }>('/audit-logs', { method: 'POST', body: JSON.stringify(data) });
+export async function apiCreateAuditLog(data: Record<string, unknown>): Promise<{ success: boolean; id?: string }> {
+  return request<{ success: boolean; id?: string }>('/audit-logs', { method: 'POST', body: JSON.stringify(data) });
 }
 
 // ── Feature Flags ─────────────────────────────────────────
@@ -250,6 +358,24 @@ export async function apiGetFeatureFlags<T>(tenantId: string): Promise<T[]> {
 
 export async function apiUpdateFeatureFlag<T>(tenantId: string, featureKey: string, data: Record<string, unknown>): Promise<T> {
   return request<T>(`/feature-flags/${tenantId}/${featureKey}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
+export interface ModuleDefRow {
+  id: string;
+  tenant_id: string | null;
+  module_key: string;
+  label: string;
+}
+
+export async function apiGetAllModuleDefs(): Promise<ModuleDefRow[]> {
+  return request<ModuleDefRow[]>('/feature-flags/module-defs/all');
+}
+
+export async function apiUpdateModuleDef(featureKey: string, displayName: string, updatedBy: string | null): Promise<ModuleDefRow> {
+  return request<ModuleDefRow>(`/feature-flags/module-defs/${featureKey}`, {
+    method: 'PUT',
+    body: JSON.stringify({ display_name: displayName, updated_by: updatedBy }),
+  });
 }
 
 // ── SMS Profiles ──────────────────────────────────────────
@@ -364,6 +490,21 @@ export async function apiGetPlatformHealth(): Promise<PlatformHealth> {
   return request<PlatformHealth>('/platform/health');
 }
 
+export type DateRange = '24h' | '7d' | '30d';
+
+export interface PlatformMetricsHistory {
+  range: DateRange;
+  samples: number;
+  since: string | null;
+  cpu: { avg: number; max: number };
+  apiP95Ms: { avg: number; max: number };
+  storage: { startBytes: number | null; endBytes: number | null; deltaBytes: number | null };
+}
+
+export async function apiGetPlatformMetricsHistory(range: DateRange): Promise<PlatformMetricsHistory> {
+  return request<PlatformMetricsHistory>(`/platform/metrics/history?range=${range}`);
+}
+
 // ── Vessel Sync State (unified sync engine) ────────────────
 
 export async function apiGetVesselSyncStates<T>(): Promise<T[]> {
@@ -410,6 +551,23 @@ export async function apiCheckInVessel(
 
 export async function apiGetVesselSyncStateOne<T>(vesselId: string, tenantId: string): Promise<T | null> {
   return request<T | null>(`/vessel-sync/${vesselId}?tenantId=${encodeURIComponent(tenantId)}`);
+}
+
+export interface SyncCollisionRow {
+  id: string;
+  tenant_id: string;
+  vessel_id: string;
+  module_key: string;
+  entity_type: string;
+  entity_id: string;
+  resolution: string;
+  detected_at: string;
+  vessel_name: string;
+  company: string;
+}
+
+export async function apiGetSyncCollisions(limit = 10): Promise<SyncCollisionRow[]> {
+  return request<SyncCollisionRow[]>(`/vessel-sync/collisions?limit=${limit}`);
 }
 
 // ── Sync Config ───────────────────────────────────────────
@@ -531,6 +689,43 @@ export async function apiCreateInvoice<T>(data: Record<string, unknown>): Promis
   return request<T>('/invoices', { method: 'POST', body: JSON.stringify(data) });
 }
 
+export interface BillingReminderRow {
+  id: string;
+  tenant_id: string;
+  sent_by: string | null;
+  sent_at: string;
+  note: string | null;
+}
+
+export async function apiSendBillingReminder(tenantId: string, note?: string): Promise<BillingReminderRow> {
+  return request<BillingReminderRow>(`/invoices/${tenantId}/reminders`, { method: 'POST', body: JSON.stringify({ note }) });
+}
+
+export async function apiGetBillingReminders(tenantId: string): Promise<BillingReminderRow[]> {
+  return request<BillingReminderRow[]>(`/invoices/${tenantId}/reminders`);
+}
+
+// ── SaaS Tier Config ──────────────────────────────────────
+
+export interface TierConfigRow {
+  name: string;
+  monthly: number;
+  annual: number;
+  vessels: number;
+  storage_gb: number;
+  seats: number;
+  updated_by: string | null;
+  updated_at: string;
+}
+
+export async function apiGetTierConfigs(): Promise<TierConfigRow[]> {
+  return request<TierConfigRow[]>('/platform/tiers');
+}
+
+export async function apiUpdateTierConfig(name: string, data: { monthly: number; annual: number; vessels: number; storage_gb: number; seats: number }): Promise<TierConfigRow> {
+  return request<TierConfigRow>(`/platform/tiers/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(data) });
+}
+
 // ── Backups ───────────────────────────────────────────────
 
 export async function apiGetBackups<T>(): Promise<T[]> {
@@ -567,8 +762,8 @@ export async function apiTogglePlatformStaffLock<T>(id: string): Promise<T> {
   return request<T>(`/platform-staff/${id}/lock-toggle`, { method: 'PUT' });
 }
 
-export async function apiResetPlatformStaffPassword(id: string): Promise<{ success: boolean }> {
-  return request<{ success: boolean }>(`/platform-staff/${id}/reset-password`, { method: 'PUT' });
+export async function apiResetPlatformStaffPassword(id: string): Promise<{ success: boolean; tempPassword: string }> {
+  return request<{ success: boolean; tempPassword: string }>(`/platform-staff/${id}/reset-password`, { method: 'PUT' });
 }
 
 export async function apiDeletePlatformStaff(id: string, mode: 'soft' | 'hard'): Promise<{ success: boolean }> {

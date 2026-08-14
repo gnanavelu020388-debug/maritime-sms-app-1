@@ -11,9 +11,34 @@ import { daysUntil, formatCurrency, relativeTime } from '../constants';
 import type { Invoice, InvoiceLineItem, Tenant, TierConfig } from '../types';
 import type { Capabilities } from '../lib/permissions';
 import { useAuth } from '../lib/auth';
-import { apiCreateInvoice } from '../lib/api';
+import { apiCreateInvoice, apiUpdateTenant, apiUpdateTierConfig, apiSendBillingReminder } from '../lib/api';
 import { logAudit } from '../lib/audit';
 import type { InvoiceRow } from '../lib/supabase';
+
+function downloadReceipt(invoice: Invoice): void {
+  const lines = [
+    `MARITIMOS PLATFORM — RECEIPT`,
+    `Invoice: ${invoice.id}`,
+    `Company: ${invoice.company} (${invoice.tenantId})`,
+    `Period: ${invoice.period}`,
+    `Issued: ${new Date(invoice.issued).toLocaleDateString('en-GB')}`,
+    `Status: ${invoice.status}`,
+    ``,
+    `Line items:`,
+    ...(invoice.lineItems?.length ? invoice.lineItems.map((li) => `  - ${li.description}: ${formatCurrency(li.amount, invoice.currency)}`) : ['  (none itemized)']),
+    ``,
+    `Total: ${formatCurrency(invoice.amount, invoice.currency)}`,
+  ];
+  const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `${invoice.id}-receipt.txt`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
 
 export function BillingView({ caps }: { caps: Capabilities }) {
   const { invoices, tenants, tierConfigs, dispatch, toast } = useStore();
@@ -41,7 +66,7 @@ export function BillingView({ caps }: { caps: Capabilities }) {
     {
       key: 'actions', header: 'Receipt',
       render: (i) => (
-        <button onClick={() => toast({ tone: 'info', title: 'Receipt generated', message: `${i.id}.pdf prepared for download.` })} className="btn-ghost rounded-md p-1.5" title="Download receipt PDF">
+        <button onClick={() => downloadReceipt(i)} className="btn-ghost rounded-md p-1.5" title="Download receipt">
           <Download className="h-4 w-4" />
         </button>
       ),
@@ -50,11 +75,32 @@ export function BillingView({ caps }: { caps: Capabilities }) {
 
   const expiring = tenants.map((t) => ({ tenant: t, days: daysUntil(t.contractExpires) })).sort((a, b) => a.days - b.days);
 
+  const [savingTiers, setSavingTiers] = useState(false);
+
   const updateTier = (idx: number, patch: Partial<TierConfig>) => {
     if (!caps.billingEdit) return;
     // Bind directly to the store so tenant ledger limits recalculate live
     dispatch({ type: 'TIER_CONFIG_UPDATE', index: idx, patch });
     setDirty(true);
+  };
+
+  const saveTiers = async () => {
+    setSavingTiers(true);
+    try {
+      await Promise.all(tierConfigs.map((t) => apiUpdateTierConfig(t.name, {
+        monthly: t.monthly, annual: t.annual, vessels: t.vessels, storage_gb: t.storageGb, seats: t.seats,
+      })));
+      await logAudit({
+        actorEmail: user?.email ?? 'unknown', category: 'billing', action: 'Tier configuration saved', target: 'Platform-wide', severity: 'info',
+        after: Object.fromEntries(tierConfigs.map((t) => [t.name, { monthly: t.monthly, vessels: t.vessels, storageGb: t.storageGb, seats: t.seats }])),
+      });
+      setDirty(false);
+      toast({ tone: 'success', title: 'Tier configuration saved', message: 'Pricing and quota thresholds persisted for all future plan assignments.' });
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Failed to save tier configuration', message: (err as Error).message });
+    } finally {
+      setSavingTiers(false);
+    }
   };
 
   return (
@@ -73,10 +119,7 @@ export function BillingView({ caps }: { caps: Capabilities }) {
           <div className="flex items-center gap-2">
             {overLimitCount > 0 && <Badge tone="danger" dot pulse>{overLimitCount} over limit</Badge>}
             {dirty ? (
-              <button
-                onClick={() => { setDirty(false); toast({ tone: 'success', title: 'Tier configuration saved', message: 'Quota thresholds cascaded to all tenants on this tier.' }); }}
-                className="btn-primary"
-              >Save tiers</button>
+              <button onClick={saveTiers} disabled={savingTiers} className="btn-primary disabled:cursor-not-allowed disabled:opacity-60">{savingTiers ? 'Saving…' : 'Save tiers'}</button>
             ) : <Badge tone="success" dot>Synced</Badge>}
           </div>
         }
@@ -173,10 +216,20 @@ export function BillingView({ caps }: { caps: Capabilities }) {
                       </div>
                       {/* Lock/Edit Toggle */}
                       <button
-                        onClick={() => {
+                        onClick={async () => {
                           if (isEditing) {
-                            // Save email via TENANT_UPDATE
+                            try {
+                              await apiUpdateTenant(tenant.id, { contact_email: pendingEmail });
+                            } catch (err) {
+                              toast({ tone: 'danger', title: 'Failed to save recipient email', message: (err as Error).message });
+                              return;
+                            }
                             dispatch({ type: 'TENANT_UPDATE', id: tenant.id, patch: { contactEmail: pendingEmail } });
+                            await logAudit({
+                              tenantId: tenant.id, actorEmail: user?.email ?? 'unknown', category: 'billing',
+                              action: `Renewal recipient email updated: ${tenant.company}`, target: tenant.company, severity: 'info',
+                              before: { contact_email: tenant.contactEmail }, after: { contact_email: pendingEmail },
+                            });
                             toast({ tone: 'success', title: 'Recipient email saved', message: `${tenant.company} → ${pendingEmail}` });
                             setEditEmailFor(null);
                           } else {
@@ -214,7 +267,22 @@ export function BillingView({ caps }: { caps: Capabilities }) {
                       title="Remove renewal configuration"
                     ><Trash2 className="h-3.5 w-3.5" /></button>
                     <button
-                      onClick={() => toast({ tone: 'success', title: 'Extension granted', message: `30-day temporary access extension for ${tenant.company}.` })}
+                      onClick={async () => {
+                        const newExpiry = new Date(new Date(tenant.contractExpires).getTime() + 30 * 86400000).toISOString();
+                        try {
+                          await apiUpdateTenant(tenant.id, { contract_expires: newExpiry });
+                        } catch (err) {
+                          toast({ tone: 'danger', title: 'Failed to grant extension', message: (err as Error).message });
+                          return;
+                        }
+                        dispatch({ type: 'TENANT_UPDATE', id: tenant.id, patch: { contractExpires: newExpiry } });
+                        await logAudit({
+                          tenantId: tenant.id, actorEmail: user?.email ?? 'unknown', category: 'billing',
+                          action: `Temporary extension granted: ${tenant.company}`, target: tenant.company, severity: 'warning',
+                          before: { contract_expires: tenant.contractExpires }, after: { contract_expires: newExpiry },
+                        });
+                        toast({ tone: 'success', title: 'Extension granted', message: `${tenant.company} renewal pushed back 30 days.` });
+                      }}
                       className="btn-ghost rounded-md p-1.5 text-xs"
                       title="Grant temporary extension"
                     ><Clock className="h-3.5 w-3.5" /></button>
@@ -246,13 +314,28 @@ export function BillingView({ caps }: { caps: Capabilities }) {
             <>
               <button onClick={() => { setEmailPreview(null); setEmailSending(false); }} className="btn-secondary">Close</button>
               <button
-                onClick={() => {
+                onClick={async () => {
                   setEmailSending(true);
-                  setTimeout(() => {
-                    toast({ tone: 'success', title: 'Reminder email sent', message: `Renewal notice dispatched to ${emailPreview.contactEmail}.` });
+                  try {
+                    await apiSendBillingReminder(emailPreview.id, `Renewal notice for ${emailPreview.company}, expires ${new Date(emailPreview.contractExpires).toLocaleDateString('en-GB')}.`);
+                    await logAudit({
+                      tenantId: emailPreview.id, actorEmail: user?.email ?? 'unknown', category: 'billing',
+                      action: `Renewal reminder sent: ${emailPreview.company}`, target: emailPreview.contactEmail, severity: 'info',
+                      after: { reminder_sent: true },
+                    });
+                    // No outbound email service exists in this deployment — the
+                    // reminder above is genuinely logged; actually delivering it
+                    // opens the operator's own mail client with the draft
+                    // pre-filled, rather than silently pretending to send it.
+                    const mailto = `mailto:${emailPreview.contactEmail}?subject=${encodeURIComponent(`Action Required: Subscription Renewal Notice — ${emailPreview.company}`)}&body=${encodeURIComponent(emailDraft)}`;
+                    window.open(mailto, '_blank');
+                    toast({ tone: 'success', title: 'Reminder logged', message: `Recorded for ${emailPreview.company} — your email client opened with the draft ready to send.` });
                     setEmailPreview(null);
+                  } catch (err) {
+                    toast({ tone: 'danger', title: 'Failed to log reminder', message: (err as Error).message });
+                  } finally {
                     setEmailSending(false);
-                  }, 900);
+                  }
                 }}
                 disabled={emailSending}
                 className="btn-primary"
@@ -303,10 +386,20 @@ export function BillingView({ caps }: { caps: Capabilities }) {
               )}
               {deleteStep === 2 && (
                 <button
-                  onClick={() => {
-                    // Clear the renewal config email and audit-log it
+                  onClick={async () => {
+                    try {
+                      await apiUpdateTenant(deleteFor.id, { contact_email: '' });
+                    } catch (err) {
+                      toast({ tone: 'danger', title: 'Failed to remove configuration', message: (err as Error).message });
+                      return;
+                    }
                     dispatch({ type: 'TENANT_UPDATE', id: deleteFor.id, patch: { contactEmail: '' } });
-                    toast({ tone: 'danger', title: 'Configuration removed', message: `Renewal configuration for ${deleteFor.company} has been wiped. Audit logged.` });
+                    await logAudit({
+                      tenantId: deleteFor.id, actorEmail: user?.email ?? 'unknown', category: 'billing',
+                      action: `Renewal configuration removed: ${deleteFor.company}`, target: deleteFor.company, severity: 'critical',
+                      before: { contact_email: deleteFor.contactEmail }, after: { contact_email: '' },
+                    });
+                    toast({ tone: 'danger', title: 'Configuration removed', message: `Renewal configuration for ${deleteFor.company} has been wiped.` });
                     setDeleteFor(null);
                     setDeleteTyped('');
                     setDeleteStep(1);

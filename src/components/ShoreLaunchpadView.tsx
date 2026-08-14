@@ -20,7 +20,7 @@ import {
   MODULE_KEYS, MODULE_LABELS, LIVE_MODULES, LAUNCHPAD_EXCLUDED,
   useFeatureFlags, useModuleDefinitions, getDisplayName, type ModuleKey,
 } from '../lib/featureFlags';
-import { getShorePermsForRole, resolveShoreRoleName, canDoShore, type ShorePermissionMap } from '../lib/shoreRoles';
+import { useShoreRolePermissions, resolveShoreRoleName, canDoShore, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS, type ShorePermissionMap } from '../lib/shoreRoles';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   FileCheck2, Clock, UtensilsCrossed, Award, SatelliteDish, Navigation,
@@ -168,8 +168,9 @@ export function ShoreLaunchpadView({
   const [isLaunchpadOpen, setIsLaunchpadOpen] = useState(false);
 
   const shoreRoleName = resolveShoreRoleName(tenantUser?.rank);
+  const { permissions: shoreRolePerms } = useShoreRolePermissions(tenant?.id);
   const perms: ShorePermissionMap | null = tenant
-    ? getShorePermsForRole(tenant.id, shoreRoleName)
+    ? (shoreRolePerms[shoreRoleName] ?? normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[shoreRoleName] ?? {}))
     : null;
 
   const allModules = MODULE_KEYS

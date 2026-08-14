@@ -8,8 +8,6 @@ import {
   getDemoFeatureFlagsForTenant,
   demoSetFeatureFlag,
   demoSetSyncConfig,
-  getDemoModuleDefs,
-  demoSetModuleDef,
 } from './demoData';
 import { postSyncEvent, onSyncEvent, type SyncEvent } from './syncChannel';
 import * as api from './api';
@@ -117,7 +115,7 @@ function notifyModuleDefChange() {
 export async function fetchEnabledFeatures(tenantId: string): Promise<Set<ModuleKey>> {
   const cached = flagCache.get(tenantId);
   if (cached) return cached;
-  const overrides = getDemoFeatureFlagsForTenant(tenantId);
+  const overrides = await getDemoFeatureFlagsForTenant(tenantId);
   const enabled = new Set<ModuleKey>();
   for (const k of MODULE_KEYS) {
     const explicit = overrides.get(k);
@@ -181,9 +179,12 @@ export async function setFeatureFlag(
   try {
     await api.apiUpdateFeatureFlag(tenantId, featureKey, { enabled, updated_by: updatedBy });
   } catch (err) {
+    // Propagate the failure — a caller showing a success toast on `true`
+    // must not do so when the write never actually reached the database.
     console.error('[setFeatureFlag] API error:', err);
+    return false;
   }
-  demoSetFeatureFlag(tenantId, featureKey, enabled, updatedBy);
+  demoSetFeatureFlag(tenantId, featureKey, enabled);
   flagCache.delete(tenantId);
   notifyFlagChange(tenantId);
   postSyncEvent({ type: 'FEATURE_FLAGS_CHANGED', tenantId, payload: { tenantId, featureKey, enabled } });
@@ -294,17 +295,17 @@ export function useSyncConfig(tenantId: string | null | undefined) {
 export async function fetchModuleDefinitions(): Promise<Map<ModuleKey, ModuleDefinitionRow>> {
   if (moduleDefCache) return moduleDefCache;
   const map = new Map<ModuleKey, ModuleDefinitionRow>();
-  const overrides = getDemoModuleDefs();
+  const overrides = await api.apiGetAllModuleDefs().catch(() => []);
   MODULE_KEYS.forEach((k, i) => {
-    const override = overrides.find((d) => d.feature_key === k);
+    const override = overrides.find((d) => d.module_key === k);
     map.set(k, {
       id: k,
       feature_key: k,
-      display_name: override?.display_name ?? MODULE_LABELS[k].label,
+      display_name: override?.label ?? MODULE_LABELS[k].label,
       description: MODULE_LABELS[k].description,
       sort_order: i + 1,
-      updated_by: override?.updated_by ?? null,
-      updated_at: override?.updated_at ?? new Date().toISOString(),
+      updated_by: null,
+      updated_at: new Date().toISOString(),
     });
   });
   moduleDefCache = map;
@@ -316,7 +317,12 @@ export async function setModuleDisplayName(
   displayName: string,
   updatedBy: string,
 ): Promise<boolean> {
-  demoSetModuleDef(featureKey, displayName, updatedBy);
+  try {
+    await api.apiUpdateModuleDef(featureKey, displayName, updatedBy);
+  } catch (err) {
+    console.error('[setModuleDisplayName] API error:', err);
+    return false;
+  }
   moduleDefCache = null;
   notifyModuleDefChange();
   return true;

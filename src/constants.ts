@@ -56,7 +56,7 @@ export const SECTIONS: { id: string; label: string; group: 'Operate' | 'Govern' 
   { id: 'tenants', label: 'Tenant & Company Management', group: 'Govern', description: 'Onboard, suspend, configure tenant accounts' },
   { id: 'features', label: 'Tenant Feature Matrix', group: 'Govern', description: 'Per-tenant module enablement & sync configuration' },
   { id: 'provisioning', label: 'Live Provisioning Studio', group: 'Govern', description: 'Create real tenants & provision users end-to-end' },
-  { id: 'sms', label: 'Master SMS Template Engine', group: 'Govern', description: 'Regulatory baseline hierarchy & push distribution' },
+  { id: 'sms', label: 'SMS Documentation', group: 'Govern', description: 'Regulatory baseline hierarchy & push distribution' },
   { id: 'users', label: 'User & Role Configuration', group: 'Govern', description: 'Internal staff access & maritime rank blueprint' },
   { id: 'security', label: 'Platform Security & Audits', group: 'Govern', description: 'Immutable ledger & impersonation tracking' },
   { id: 'monitoring', label: 'Platform Monitoring', group: 'Operate', description: 'Satellite traffic, license compliance & errors' },

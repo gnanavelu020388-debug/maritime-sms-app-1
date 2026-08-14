@@ -14,19 +14,21 @@ import { demoSetWorkspaceFrozen, demoGetWorkspaceFrozen, demoSetGuardrails } fro
 import { relativeTime } from '../constants';
 import { apiGetSmsSnapshots, apiRollbackSmsSnapshot } from '../lib/api';
 import { logAudit } from '../lib/audit';
+import { useModuleDefinitions, getDisplayName } from '../lib/featureFlags';
 import type { SmsSnapshotRow } from '../lib/supabase';
 import type { Capabilities } from '../lib/permissions';
 import type { SmsSnapshot, PlanTier } from '../types';
 
 export function SmsView({ caps: _caps }: { caps: Capabilities }) {
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const { defs } = useModuleDefinitions();
 
   return (
     <div className="space-y-5">
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div>
-          <h1 className="text-xl font-bold text-ink-900 dark:text-white">Master SMS Template Engine</h1>
+          <h1 className="text-xl font-bold text-ink-900 dark:text-white">{getDisplayName('sms_documentation', defs)}</h1>
           <p className="text-sm text-ink-500 dark:text-ink-400">Inspect any tenant's live SMS workspace — full 1:1 mirror view with metadata, approval states, and sync status.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -101,11 +103,23 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
     ? audit.filter((a) => a.companyId === selectedTenant.id && a.category === 'sms').slice(0, 8)
     : [];
 
-  function handleFreeze() {
+  async function handleFreeze() {
     if (selectedTenant) {
       const newFrozen = !isFrozen;
+      try {
+        await demoSetWorkspaceFrozen(selectedTenant.id, newFrozen);
+      } catch (err) {
+        toast({ tone: 'danger', title: 'Failed to update workspace freeze', message: (err as Error).message });
+        setFreezeConfirm(false);
+        return;
+      }
       dispatch({ type: 'TENANT_FREEZE', id: selectedTenant.id, frozen: newFrozen });
-      demoSetWorkspaceFrozen(selectedTenant.id, newFrozen);
+      await logAudit({
+        tenantId: selectedTenant.id, actorEmail: user?.email ?? 'superadmin@platform.io', category: 'sms',
+        action: `Workspace ${newFrozen ? 'frozen' : 'unfrozen'}: ${selectedTenant.company}`, target: selectedTenant.company,
+        severity: newFrozen ? 'critical' : 'warning',
+        before: { workspace_frozen: !newFrozen }, after: { workspace_frozen: newFrozen },
+      });
       postSyncEvent({ type: 'SMS_UPDATED', tenantId: selectedTenant.demoTenantId ?? selectedTenant.id, payload: { action: 'workspace_freeze', frozen: newFrozen } });
       toast({
         tone: newFrozen ? 'danger' : 'success',
@@ -116,17 +130,36 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
     setFreezeConfirm(false);
   }
 
-  function handleSaveGuardrails() {
+  async function handleSaveGuardrails() {
     if (selectedTenant) {
+      const before = { maxSubfolderDepth: guardrails.maxSubfolderDepth, maxUploadSizeMb: guardrails.maxUploadSizeMb };
+      try {
+        await demoSetGuardrails(selectedTenant.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload });
+      } catch (err) {
+        toast({ tone: 'danger', title: 'Failed to update guardrails', message: (err as Error).message });
+        return;
+      }
       dispatch({ type: 'GUARDRAILS_UPDATE', id: selectedTenant.id, patch: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload } });
-      demoSetGuardrails(selectedTenant.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload });
+      await logAudit({
+        tenantId: selectedTenant.id, actorEmail: user?.email ?? 'superadmin@platform.io', category: 'sms',
+        action: `Guardrails updated: ${selectedTenant.company}`, target: selectedTenant.company, severity: 'warning',
+        before, after: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload },
+      });
       postSyncEvent({ type: 'SMS_UPDATED', tenantId: selectedTenant.demoTenantId ?? selectedTenant.id, payload: { action: 'guardrails_updated', maxDepth, maxUpload } });
       toast({ tone: 'success', title: 'Tenant guardrails updated', message: `${selectedTenant.company}: max depth ${maxDepth}, max upload ${maxUpload}MB` });
     } else {
       dispatch({ type: 'GUARDRAILS_GLOBAL_UPDATE', patch: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload } });
-      tenants.forEach((t) => { demoSetGuardrails(t.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload }); });
+      // "Global" here means every tenant at once — apply the real per-tenant
+      // write to each, so the new default genuinely takes effect fleet-wide,
+      // not just in this session's local display.
+      await Promise.all(tenants.map((t) => demoSetGuardrails(t.id, { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload }).catch(() => {})));
+      tenants.forEach((t) => dispatch({ type: 'GUARDRAILS_UPDATE', id: t.id, patch: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload } }));
       tenants.forEach((t) => postSyncEvent({ type: 'SMS_UPDATED', tenantId: t.demoTenantId ?? t.id, payload: { action: 'global_guardrails_updated', maxDepth, maxUpload } }));
-      toast({ tone: 'success', title: 'Global defaults updated', message: `Platform-wide: max depth ${maxDepth}, max upload ${maxUpload}MB` });
+      await logAudit({
+        actorEmail: user?.email ?? 'superadmin@platform.io', category: 'sms', action: 'Global guardrails updated', target: 'Platform-wide', severity: 'warning',
+        after: { maxSubfolderDepth: maxDepth, maxUploadSizeMb: maxUpload, tenants_updated: tenants.length },
+      });
+      toast({ tone: 'success', title: 'Global defaults updated', message: `Platform-wide: max depth ${maxDepth}, max upload ${maxUpload}MB across ${tenants.length} tenant(s).` });
     }
   }
 

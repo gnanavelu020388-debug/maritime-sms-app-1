@@ -1,8 +1,11 @@
 import { ShieldAlert, LogOut, Eye } from 'lucide-react';
 import { useStore } from '../store';
+import { useAuth } from '../lib/auth';
+import { logAudit } from '../lib/audit';
 
 export function ImpersonationOverlay() {
   const { impersonation, tenants, dispatch, toast } = useStore();
+  const { user } = useAuth();
   if (!impersonation.active) return null;
   const tenant = tenants.find((t) => t.id === impersonation.tenantId);
   return (
@@ -24,6 +27,16 @@ export function ImpersonationOverlay() {
         <button
           onClick={() => {
             dispatch({ type: 'IMPERSONATE_END' });
+            void logAudit({
+              tenantId: impersonation.tenantId,
+              actorEmail: user?.email ?? 'super-admin',
+              category: 'impersonation',
+              action: 'Impersonation session ended',
+              target: tenant?.company ?? impersonation.tenantId ?? 'platform',
+              severity: 'warning',
+              before: { impersonating: true },
+              after: { impersonating: false },
+            });
             toast({ tone: 'success', title: 'Returned to Super Admin Panel', message: 'Impersonation session ended and recorded in the audit ledger.' });
           }}
           className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-danger-700 shadow-sm hover:bg-danger-50"

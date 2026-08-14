@@ -59,6 +59,8 @@ export interface Tenant {
   // Inherited document trees cloned to this tenant's workspace via flexible template push
   guardrails?: TenantGuardrails;
   demoTenantId?: string | null;
+  autoBackupIntervalHours?: number | null;
+  lastAutoBackupAt?: string | null;
 }
 
 // ---- Master SMS / Fleet / Flag State document trees (flexible template model) ----
@@ -118,6 +120,12 @@ export type AuditCategory =
   | 'security'
   | 'system';
 
+export interface AuditFieldDelta {
+  field: string;
+  before: string;
+  after: string;
+}
+
 export interface AuditEvent {
   id: string;
   ts: string;
@@ -130,6 +138,12 @@ export interface AuditEvent {
   scope: string;
   severity: 'info' | 'warning' | 'critical';
   impersonation?: boolean;
+  // Real captured before/after field values for this action, when the call
+  // site provided them (see src/lib/audit.ts logAudit). Absent for actions
+  // with no natural before/after (creates, logins) or ones not yet
+  // instrumented — the UI shows those honestly rather than guessing.
+  beforeData?: Record<string, unknown> | null;
+  afterData?: Record<string, unknown> | null;
 }
 
 export type InvoiceStatus = 'paid' | 'overdue' | 'processing' | 'draft';

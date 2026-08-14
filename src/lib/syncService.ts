@@ -1,6 +1,7 @@
-import type { SmsDocRow } from './supabase';
+import type { SmsDocRow, TenantRow } from './supabase';
 import {
   getLocalSmsVersion,
+  setLocalSmsVersion,
   getLocalDocuments,
   cacheAllDocuments,
   isCacheSeeded,
@@ -33,11 +34,28 @@ export interface SyncResult {
   error: string | null;
 }
 
-/** Seed the local cache from demo data on first login. */
+/**
+ * Real top-down pull: fetches every SMS document + the tenant's current
+ * sms_version from the backend and replaces the local cache with it. This
+ * is a full-refresh "delta" (see the note in deltaPackager.ts on why a
+ * true incremental delta isn't implemented), but it's real — the vessel's
+ * local cache genuinely reflects shore's current state afterward, which
+ * it previously never did.
+ */
+async function pullFromShore(tenantId: string): Promise<string | null> {
+  const [tenant, docs] = await Promise.all([
+    api.apiGetTenant<TenantRow>(tenantId),
+    api.apiGetSmsDocuments<SmsDocRow>(tenantId),
+  ]);
+  await cacheAllDocuments(tenantId, docs);
+  await setLocalSmsVersion(tenantId, tenant.sms_version);
+  return tenant.sms_version;
+}
+
+/** Seed the local cache from the real backend on first login. */
 export async function seedLocalCache(tenantId: string): Promise<void> {
   if (await isCacheSeeded(tenantId)) return;
-  const docs = await getLocalDocuments(tenantId, 'sms');
-  await cacheAllDocuments(tenantId, docs as SmsDocRow[]);
+  await pullFromShore(tenantId);
 }
 
 /** Drains a vessel's real pending outbox via the unified sync engine's check-in endpoint. Returns how many entries were synced (0 if there's no vessel to drain for). */
@@ -69,17 +87,30 @@ export async function performSyncCheckIn(
 
   if (!localVersion) {
     try {
-      await seedLocalCache(tenantId);
-      const seededVersion = await getLocalSmsVersion(tenantId);
+      const seededVersion = await pullFromShore(tenantId);
+      await setLastSyncAt(tenantId, new Date().toISOString());
       return { applied: true, fromVersion: null, toVersion: seededVersion, error: null };
     } catch (err) {
       return { applied: false, fromVersion: null, toVersion: null, error: (err as Error).message };
     }
   }
 
-  const syncTime = new Date().toISOString();
-  await setLastSyncAt(tenantId, syncTime);
-  return { applied: false, fromVersion: localVersion, toVersion: localVersion, error: null };
+  // Top-down: pull fresh documents whenever shore's version has actually
+  // moved on. Cheap to check every cycle — apiGetTenant is a lightweight
+  // single-row fetch, and a real pull only happens when it's warranted.
+  try {
+    const tenant = await api.apiGetTenant<TenantRow>(tenantId);
+    const syncTime = new Date().toISOString();
+    if (tenant.sms_version !== localVersion) {
+      await pullFromShore(tenantId);
+      await setLastSyncAt(tenantId, syncTime);
+      return { applied: true, fromVersion: localVersion, toVersion: tenant.sms_version, error: null };
+    }
+    await setLastSyncAt(tenantId, syncTime);
+    return { applied: false, fromVersion: localVersion, toVersion: localVersion, error: null };
+  } catch (err) {
+    return { applied: false, fromVersion: localVersion, toVersion: localVersion, error: (err as Error).message };
+  }
 }
 
 export function startSyncLoop(

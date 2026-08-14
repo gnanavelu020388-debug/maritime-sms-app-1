@@ -53,7 +53,96 @@ router.get('/health', authMiddleware, requireSuperAdmin, async (_req, res) => {
       'INSERT INTO platform_metrics_cache (id, cpu_percent, api_p95_ms) VALUES (1, ?, ?) ON DUPLICATE KEY UPDATE cpu_percent = VALUES(cpu_percent), api_p95_ms = VALUES(api_p95_ms)',
       [cpuPercent, apiP95Ms],
     );
+    // Also append to history so GET /metrics/history can answer range
+    // queries — piggybacked on this poll rather than a separate scheduled
+    // job, since this route already runs whenever a super-admin has the
+    // dashboard open.
+    const [[storageCache]] = await pool.query('SELECT bytes_used FROM platform_storage_cache WHERE id = 1');
+    await pool.query(
+      'INSERT INTO platform_metrics_history (cpu_percent, api_p95_ms, storage_bytes_used) VALUES (?, ?, ?)',
+      [cpuPercent, apiP95Ms, Number(storageCache?.bytes_used || 0)],
+    );
     return res.json({ cpuPercent, apiP95Ms, computedAt: new Date().toISOString() });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+const RANGE_HOURS = { '24h': 24, '7d': 24 * 7, '30d': 24 * 30 };
+
+router.get('/metrics/history', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const range = RANGE_HOURS[req.query.range] ? req.query.range : '24h';
+    const [rows] = await pool.query(
+      `SELECT cpu_percent AS cpuPercent, api_p95_ms AS apiP95Ms, storage_bytes_used AS storageBytesUsed, captured_at AS capturedAt
+       FROM platform_metrics_history
+       WHERE captured_at >= (NOW() - INTERVAL ? HOUR)
+       ORDER BY captured_at ASC`,
+      [RANGE_HOURS[range]],
+    );
+    const samples = rows.length;
+    const avgCpu = samples ? Math.round((rows.reduce((s, r) => s + Number(r.cpuPercent), 0) / samples) * 10) / 10 : 0;
+    const maxCpu = samples ? Math.max(...rows.map((r) => Number(r.cpuPercent))) : 0;
+    const avgP95 = samples ? Math.round(rows.reduce((s, r) => s + Number(r.apiP95Ms), 0) / samples) : 0;
+    const maxP95 = samples ? Math.max(...rows.map((r) => Number(r.apiP95Ms))) : 0;
+    const startBytes = samples ? Number(rows[0].storageBytesUsed) : null;
+    const endBytes = samples ? Number(rows[samples - 1].storageBytesUsed) : null;
+    return res.json({
+      range,
+      samples,
+      since: samples ? rows[0].capturedAt : null,
+      cpu: { avg: avgCpu, max: maxCpu },
+      apiP95Ms: { avg: avgP95, max: maxP95 },
+      storage: { startBytes, endBytes, deltaBytes: samples ? endBytes - startBytes : null },
+    });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+// Global MFA Enforcement (Super Admin → Users): persists the platform-wide
+// default AND bulk-applies it to every tenant's mfa_enforced column for
+// real — that column is what auth.js's login route actually checks, so
+// toggling this has an immediate, real effect on whether tenant users are
+// prompted for a code at login.
+router.get('/mfa-enforcement', authMiddleware, requireSuperAdmin, async (_req, res) => {
+  try {
+    const [[row]] = await pool.query("SELECT setting_value FROM platform_settings WHERE setting_key = 'global_mfa_enforced'");
+    return res.json({ enforced: row ? row.setting_value === '1' : true });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+router.put('/mfa-enforcement', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const { enforced } = req.body;
+    await pool.query(
+      "INSERT INTO platform_settings (setting_key, setting_value) VALUES ('global_mfa_enforced', ?) ON DUPLICATE KEY UPDATE setting_value = VALUES(setting_value)",
+      [enforced ? '1' : '0'],
+    );
+    const [result] = await pool.query('UPDATE tenants SET mfa_enforced = ?', [!!enforced]);
+    return res.json({ enforced: !!enforced, tenantsUpdated: result.affectedRows });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+// SaaS Tier Constructor (Billing view) — real persistence for the pricing/
+// limit config that used to be a client-only reducer with no backend at
+// all. Changing a tier here does NOT retroactively change any tenant
+// already on that plan (same behavior as today) — it only changes what
+// new plan assignments apply going forward.
+router.get('/tiers', authMiddleware, requireSuperAdmin, async (_req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM saas_tier_configs ORDER BY monthly ASC');
+    return res.json(rows.map((r) => ({ ...r, monthly: Number(r.monthly), annual: Number(r.annual) })));
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+router.put('/tiers/:name', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const { monthly, annual, vessels, storage_gb, seats } = req.body;
+    await pool.query(
+      `INSERT INTO saas_tier_configs (name, monthly, annual, vessels, storage_gb, seats, updated_by)
+       VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON DUPLICATE KEY UPDATE monthly = VALUES(monthly), annual = VALUES(annual), vessels = VALUES(vessels), storage_gb = VALUES(storage_gb), seats = VALUES(seats), updated_by = VALUES(updated_by)`,
+      [req.params.name, monthly || 0, annual || 0, vessels || 0, storage_gb || 0, seats || 0, req.user.email || null],
+    );
+    const [rows] = await pool.query('SELECT * FROM saas_tier_configs WHERE name = ?', [req.params.name]);
+    return res.json({ ...rows[0], monthly: Number(rows[0].monthly), annual: Number(rows[0].annual) });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 

@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { useAuth } from '../../lib/auth';
 import { SmsLibrarySplitView } from '../../components/SmsLibrarySplitView';
 import {
@@ -13,6 +14,7 @@ import { CrewSignOnPanel } from './CrewSignOnPanel';
 import { EmergencyControlsPanel } from './EmergencyControlsPanel';
 import { HelpPanel } from '../../components/BridgeDrawer';
 import type { DrawerSection } from '../../components/BridgeDrawer';
+import { getVesselSyncState } from '../../lib/syncService';
 
 const ICON_MAP: Record<string, LucideIcon> = {
   FileCheck2, Clock, UtensilsCrossed, Award, SatelliteDish, Navigation,
@@ -170,6 +172,20 @@ export function VesselPortalView({
 
   const rankPerms = usePermissionsForRank(tenant?.id, crewRank);
 
+  // Real pending-outbox count for the "Vessel Sync & Offline Status" panel
+  // below — was previously a hardcoded "0 queued" regardless of what was
+  // actually queued. Refetched each time this panel is opened so it
+  // reflects reality, not just whatever was true at portal mount.
+  const [pendingSyncItems, setPendingSyncItems] = useState<number | null>(null);
+  useEffect(() => {
+    if (!tenant?.id || !vesselId || drawerSection !== 'sync') return;
+    let cancelled = false;
+    getVesselSyncState(tenant.id, vesselId).then((s) => {
+      if (!cancelled) setPendingSyncItems(s?.pendingOutbox ?? 0);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, vesselId, drawerSection]);
+
   // ── SMS gate: only block the SMS documentation workspace, not core utilities ──
   const smsBlocked = !isEnabled('sms_documentation');
 
@@ -253,7 +269,9 @@ export function VesselPortalView({
               </div>
               <div className="rounded-lg border border-ink-200 p-3 dark:border-ink-700">
                 <p className="text-[10px] font-bold uppercase tracking-wide text-ink-400">Pending Items</p>
-                <p className="mt-1 text-lg font-bold text-success-600 dark:text-success-400">0 queued</p>
+                <p className={`mt-1 text-lg font-bold ${pendingSyncItems ? 'text-warning-600 dark:text-warning-400' : 'text-success-600 dark:text-success-400'}`}>
+                  {pendingSyncItems === null ? 'Loading…' : `${pendingSyncItems} queued`}
+                </p>
               </div>
             </div>
           </div>

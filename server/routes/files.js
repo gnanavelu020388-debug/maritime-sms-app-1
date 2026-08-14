@@ -30,6 +30,15 @@ router.post('/upload', authMiddleware, upload.single('file'), async (req, res) =
       return res.status(403).json({ error: 'Tenant access denied' });
     }
 
+    const [[governance]] = await pool.query('SELECT workspace_frozen, max_upload_size_mb FROM tenants WHERE id = ?', [tenantId]);
+    if (governance?.workspace_frozen) {
+      return res.status(423).json({ error: 'This workspace has been frozen by the platform administrator. Uploads are disabled until it is unfrozen.' });
+    }
+    const maxUploadBytes = (governance?.max_upload_size_mb ?? 50) * 1024 * 1024;
+    if (req.file.size > maxUploadBytes) {
+      return res.status(400).json({ error: `File exceeds this workspace's upload limit (${governance?.max_upload_size_mb ?? 50} MB).`, code: 'UPLOAD_TOO_LARGE' });
+    }
+
     // Reserve the incoming file's size against the tenant's quota in one
     // atomic statement so concurrent uploads can't both pass a check based
     // on stale reads. Ensure a cache row exists first (new tenants may not

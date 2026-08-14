@@ -11,10 +11,15 @@ import { useAuth } from '../lib/auth';
 import { formatCurrency, formatGb, formatNumber, relativeTime } from '../constants';
 import type { Capabilities } from '../lib/permissions';
 import * as api from '../lib/api';
-import { isRealTenantId } from '../lib/demoData';
+import { isRealTenantId, getEffectiveDemoVessels } from '../lib/demoData';
 import { mapBannerRow } from '../components/MaintenanceBanner';
 import { logAudit } from '../lib/audit';
 import type { MaintenanceBanner as BannerData } from '../types';
+
+interface VesselSyncStateRow {
+  vessel_id: string;
+  is_online: number | boolean | null;
+}
 
 export function DashboardView({ caps }: { caps: Capabilities }) {
   const { tenants, audit, toast } = useStore();
@@ -28,20 +33,43 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
   const [publishBusy, setPublishBusy] = useState(false);
   const [platformStorage, setPlatformStorage] = useState<api.PlatformStorage | null>(null);
   const [platformHealth, setPlatformHealth] = useState<api.PlatformHealth | null>(null);
+  const [networkOnline, setNetworkOnline] = useState(true);
+  const [metricsHistory, setMetricsHistory] = useState<api.PlatformMetricsHistory | null>(null);
   const [poolEditing, setPoolEditing] = useState(false);
   const [poolInput, setPoolInput] = useState('');
   const [poolSaving, setPoolSaving] = useState(false);
+  const [vesselSyncStates, setVesselSyncStates] = useState<VesselSyncStateRow[] | null>(null);
 
   useEffect(() => {
     api.apiGetPlatformStorage().then(setPlatformStorage).catch(() => {
       // Non-fatal — dashboard still renders with tenant-sum storage figures
       // if the platform-wide endpoint is unavailable (e.g. non-super-admin).
     });
-    api.apiGetPlatformHealth().then(setPlatformHealth).catch(() => {
-      // Non-fatal — falls back to a static 0 reading (see ResourceRow below)
-      // if the platform-wide endpoint is unavailable (e.g. non-super-admin).
+    api.apiGetPlatformHealth()
+      .then((h) => { setPlatformHealth(h); setNetworkOnline(true); })
+      .catch(() => {
+        // Falls back to a static 0 reading (see ResourceRow below) and marks
+        // the network badge offline — this endpoint is the platform's own
+        // health check, so a failed call means real backend unreachability
+        // (as opposed to a permissions issue, which returns 200 with data).
+        setNetworkOnline(false);
+      });
+    api.apiGetVesselSyncStates<VesselSyncStateRow>().then(setVesselSyncStates).catch(() => {
+      // Non-fatal — the Fleet Sync Status card falls back to totalShips-only
+      // (no online/offline split) if this super-admin-only endpoint fails.
+      setVesselSyncStates(null);
     });
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    api.apiGetPlatformMetricsHistory(dateRange).then((h) => {
+      if (!cancelled) setMetricsHistory(h);
+    }).catch(() => {
+      if (!cancelled) setMetricsHistory(null);
+    });
+    return () => { cancelled = true; };
+  }, [dateRange]);
 
   const realTenants = useMemo(() => tenants.filter((t) => isRealTenantId(t.id)), [tenants]);
 
@@ -151,13 +179,43 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
       : tenants.reduce((s, t) => s + t.storageGb.used, 0);
     const totalStorageMax = tenants.reduce((s, t) => s + t.storageGb.max, 0);
     // Archived tenants are excluded from active subscription revenue.
-    const revenue = tenants
-      .filter((t) => t.status !== 'archived')
-      .reduce((s, t) => s + t.monthlyRevenue, 0);
-    const onlineShips = Math.round(totalShips * 0.81);
-    const offlineShips = totalShips - onlineShips;
-    return { activeTenants, totalTenants: tenants.length, totalShips, totalUsers, totalStorageUsed, totalStorageMax, revenue, onlineShips, offlineShips };
-  }, [tenants, platformStorage]);
+    const billableTenants = tenants.filter((t) => t.status !== 'archived');
+    const revenue = billableTenants.reduce((s, t) => s + t.monthlyRevenue, 0);
+    const activePlanTiers = new Set(billableTenants.map((t) => t.plan)).size;
+    // Real online count from vessel_sync_state (via GET /vessel-sync, super-admin
+    // only) rather than a fabricated ratio. Vessels with no sync state row yet
+    // (never gone through the sync engine) count as offline, not online.
+    const onlineShips = vesselSyncStates
+      ? vesselSyncStates.filter((s) => !!s.is_online).length
+      : totalShips;
+    const offlineShips = Math.max(0, totalShips - onlineShips);
+    return { activeTenants, totalTenants: tenants.length, totalShips, totalUsers, totalStorageUsed, totalStorageMax, revenue, activePlanTiers, onlineShips, offlineShips };
+  }, [tenants, platformStorage, vesselSyncStates]);
+
+  const rangeMs = { '24h': 24, '7d': 7 * 24, '30d': 30 * 24 }[dateRange] * 60 * 60 * 1000;
+
+  const rangeAudit = useMemo(() => {
+    const cutoff = Date.now() - rangeMs;
+    return audit.filter((e) => new Date(e.ts).getTime() >= cutoff);
+  }, [audit, rangeMs]);
+
+  // New-activity counts for the KPI trend badges, scoped to the selected
+  // range. Built only from realTenants (genuine DB-backed rows, see
+  // isRealTenantId) — the local-only simulated tenants mixed into `tenants`
+  // for UI padding don't have meaningful creation activity to report, and
+  // counting them would fabricate growth that didn't happen.
+  const rangeGrowth = useMemo(() => {
+    const cutoff = Date.now() - rangeMs;
+    const newTenants = realTenants.filter((t) => new Date(t.createdAt).getTime() >= cutoff);
+    const newVessels = realTenants.reduce(
+      (sum, t) => sum + getEffectiveDemoVessels(t.id).filter((v) => new Date(v.created_at).getTime() >= cutoff).length,
+      0,
+    );
+    const newMrr = newTenants.reduce((sum, t) => sum + t.monthlyRevenue, 0);
+    return { newTenants: newTenants.length, newVessels, newMrr };
+  }, [realTenants, rangeMs]);
+
+  const rangeLabel = dateRange === '24h' ? '24 hours' : dateRange === '7d' ? '7 days' : '30 days';
 
   return (
     <div className="space-y-6">
@@ -179,7 +237,9 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
               </button>
             ))}
           </div>
-          <Badge tone="success" dot pulse>Network Online</Badge>
+          <Badge tone={networkOnline ? 'success' : 'danger'} dot pulse={networkOnline}>
+            {networkOnline ? 'Network Online' : 'Network Offline'}
+          </Badge>
         </div>
       </div>
 
@@ -190,7 +250,7 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
           label="Active Subscriptions"
           value={`${kpis.activeTenants} / ${kpis.totalTenants}`}
           sub="Tiers active across platform"
-          trend={{ dir: 'up', text: '+2 this quarter' }}
+          trend={{ dir: 'up', text: `+${rangeGrowth.newTenants} new in ${rangeLabel}` }}
           tone="primary"
         />
         <KpiCard
@@ -198,7 +258,7 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
           label="Vessels & Users"
           value={`${formatNumber(kpis.totalShips)}`}
           sub={`${formatNumber(kpis.totalUsers)} users · ${kpis.totalTenants} companies`}
-          trend={{ dir: 'up', text: '+14 ships' }}
+          trend={{ dir: 'up', text: `+${rangeGrowth.newVessels} vessels in ${rangeLabel}` }}
           tone="accent"
         />
         <KpiCard
@@ -215,14 +275,18 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
           value={formatGb(kpis.totalStorageUsed)}
           sub={`of ${formatGb(kpis.totalStorageMax)} allocated`}
           bar={{ value: kpis.totalStorageUsed, max: kpis.totalStorageMax }}
+          trend={metricsHistory && metricsHistory.samples > 0 && metricsHistory.storage.deltaBytes !== null ? {
+            dir: metricsHistory.storage.deltaBytes >= 0 ? 'up' : 'down',
+            text: `${metricsHistory.storage.deltaBytes >= 0 ? '+' : '-'}${formatGb(Math.abs(metricsHistory.storage.deltaBytes) / (1024 ** 3))} over ${rangeLabel}`,
+          } : undefined}
           tone="warning"
         />
         <KpiCard
           icon={<DollarSign className="h-5 w-5" />}
           label="Subscription Revenue"
           value={formatCurrency(kpis.revenue)}
-          sub="Monthly recurring · 24 tiers active"
-          trend={{ dir: 'up', text: '+8.4% MoM' }}
+          sub={`Monthly recurring · ${kpis.activePlanTiers} tier${kpis.activePlanTiers === 1 ? '' : 's'} active`}
+          trend={{ dir: 'up', text: `+${formatCurrency(rangeGrowth.newMrr)} MRR in ${rangeLabel}` }}
           tone="success"
         />
       </div>
@@ -406,6 +470,11 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
               unit="ms"
               tone={!platformHealth ? 'success' : platformHealth.apiP95Ms >= 400 ? 'danger' : platformHealth.apiP95Ms >= 200 ? 'warning' : 'success'}
             />
+            <p className="pt-1 text-[11px] text-ink-400">
+              {metricsHistory && metricsHistory.samples > 0
+                ? `Past ${rangeLabel}: avg ${metricsHistory.cpu.avg}% CPU (peak ${metricsHistory.cpu.max}%) · avg ${metricsHistory.apiP95Ms.avg}ms p95 (peak ${metricsHistory.apiP95Ms.max}ms) · ${metricsHistory.samples} sample${metricsHistory.samples === 1 ? '' : 's'}`
+                : `No historical samples yet for the past ${rangeLabel} — a sample is recorded each time this dashboard is viewed.`}
+            </p>
           </div>
         </Card>
 
@@ -438,9 +507,13 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
           </div>
         </Card>
 
-        <Card title="Recent Audit Activity" subtitle="Last 5 high-risk events" icon={<ArrowUpRight className="h-4 w-4" />}>
+        <Card
+          title="Recent Audit Activity"
+          subtitle={`Last 5 high-risk events · past ${rangeLabel}`}
+          icon={<ArrowUpRight className="h-4 w-4" />}
+        >
           <div className="space-y-2">
-            {audit.slice(0, 5).map((e) => (
+            {rangeAudit.slice(0, 5).map((e) => (
               <div key={e.id} className="flex items-start gap-3 rounded-lg p-2 hover:bg-ink-50 dark:hover:bg-ink-800/50">
                 <span className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${e.severity === 'critical' ? 'bg-danger-500' : e.severity === 'warning' ? 'bg-warning-500' : 'bg-primary-500'}`} />
                 <div className="min-w-0 flex-1">
@@ -450,6 +523,9 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
                 {e.impersonation && <Badge tone="danger">Impersonation</Badge>}
               </div>
             ))}
+            {rangeAudit.length === 0 && (
+              <p className="py-6 text-center text-sm text-ink-400">No audit activity in this range.</p>
+            )}
           </div>
         </Card>
       </div>

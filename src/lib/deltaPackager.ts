@@ -1,41 +1,16 @@
-import type { SmsDocRow } from './supabase';
-
 /**
- * Delta Packager — compiles lightweight JSON delta packages on DPA "Approve & Deploy".
+ * Version bumping for DPA "Approve & Deploy" — see deployBaseline.ts.
  *
- * When the DPA approves pending documents, the version bumps (e.g. v1.0.0 → v1.1.0).
- * Instead of pushing the entire SMS tree to every vessel, we compile only the
- * newly added/modified documents into a small JSON payload.
+ * A separate delta-compilation step (packaging only newly-changed documents
+ * instead of the full SMS tree) was scaffolded here but never had a real
+ * backing store and had no callers — removed rather than left as a
+ * fabricated stub. Vessels currently pull the full approved document set
+ * on sync (see getLocalDocuments in localVesselDb.ts), which is correct
+ * for this fleet's SMS tree sizes; a real delta-only sync would need a
+ * server-side changelog table keyed by version, which doesn't exist yet.
  */
-
-export interface DeltaPayload {
-  upserted: SmsDocRow[];
-  deleted: { id: string; tree_kind: string }[];
-  from_version: string;
-  to_version: string;
-}
-
-/** Bump the minor version: v1.0.0 → v1.1.0, v2.3.0 → v2.4.0 */
 export function bumpVersion(v: string): string {
   const parts = v.split('.');
   const minor = parseInt(parts[1] ?? '0', 10) + 1;
   return `${parts[0] ?? '1'}.${minor}.0`;
-}
-
-/**
- * Build a delta payload from the given approved documents.
- * In local mode, this is computed in-memory and not persisted to a remote DB.
- */
-export async function buildAndStoreDelta(
-  _tenantId: string,
-  fromVersion: string,
-  toVersion: string,
-  _deployedBy: string,
-): Promise<DeltaPayload | null> {
-  return {
-    upserted: [],
-    deleted: [],
-    from_version: fromVersion,
-    to_version: toVersion,
-  };
 }

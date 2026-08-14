@@ -29,6 +29,7 @@ import type {
   ErrorLogRow,
   SmsSnapshotRow,
 } from './lib/supabase';
+import type { TierConfigRow } from './lib/api';
 
 // A row fetched from the real backend, merged into the ledger by
 // TENANTS_HYDRATE. Usage counts (seats/vessels used) are computed
@@ -60,6 +61,8 @@ function mapAuditRow(row: AuditLogRow): AuditEvent {
     scope: row.location ?? row.category,
     severity: row.severity,
     impersonation: row.category === 'impersonation',
+    beforeData: row.before_data ?? null,
+    afterData: row.after_data ?? null,
   };
 }
 
@@ -123,8 +126,8 @@ function mapSmsSnapshotRow(row: SmsSnapshotRow, company: string): SmsSnapshot {
 // Shared by the cross-tab (BroadcastChannel) and same-tab (CustomEvent)
 // audit listeners below — both carry the same logAudit() payload shape.
 function auditEventFromLogPayload(tenantId: string | null, payload: unknown, ip: string): AuditEvent {
-  const p = payload as { actorEmail: string; category: string; action: string; target?: string; severity?: 'info' | 'warning' | 'critical'; location?: string };
-  return { id: uid('evt'), ts: new Date().toISOString(), actor: p.actorEmail, category: (p.category as AuditCategory) ?? 'system', action: p.action, target: p.target ?? '', companyId: tenantId, ip, scope: p.location ?? 'tenant', severity: p.severity ?? 'info' };
+  const p = payload as { actorEmail: string; category: string; action: string; target?: string; severity?: 'info' | 'warning' | 'critical'; location?: string; before?: Record<string, unknown>; after?: Record<string, unknown> };
+  return { id: uid('evt'), ts: new Date().toISOString(), actor: p.actorEmail, category: (p.category as AuditCategory) ?? 'system', action: p.action, target: p.target ?? '', companyId: tenantId, ip, scope: p.location ?? 'tenant', severity: p.severity ?? 'info', beforeData: p.before ?? null, afterData: p.after ?? null };
 }
 
 interface Toast { id: string; title: string; message?: string; tone: 'info' | 'success' | 'warning' | 'danger'; }
@@ -152,7 +155,7 @@ type Action =
   | { type: 'TOAST_ADD'; toast: Toast } | { type: 'TOAST_DISMISS'; id: string } | { type: 'THEME_SET'; theme: 'light' | 'dark' }
   | { type: 'MAINTENANCE_REMOTE'; banner: MaintenanceBanner | null }
   | { type: 'TENANTS_HYDRATE'; rows: HydratedTenantRow[] }
-  | { type: 'AUDIT_HYDRATE'; rows: AuditLogRow[] } | { type: 'INVOICES_HYDRATE'; rows: InvoiceRow[] }
+  | { type: 'AUDIT_HYDRATE'; rows: AuditLogRow[] } | { type: 'INVOICES_HYDRATE'; rows: InvoiceRow[] } | { type: 'TIER_CONFIGS_HYDRATE'; rows: TierConfigRow[] }
   | { type: 'BACKUPS_HYDRATE'; rows: BackupSnapshotRow[] } | { type: 'STAFF_HYDRATE'; rows: PlatformStaffRow[] }
   | { type: 'ERROR_LOGS_HYDRATE'; rows: ErrorLogRow[] }
   | { type: 'SMS_SNAPSHOTS_HYDRATE'; tenantId: string; rows: SmsSnapshotRow[] }
@@ -162,7 +165,7 @@ type Action =
   | { type: 'BACKUP_ADD'; snapshot: BackupSnapshot } | { type: 'BACKUP_RESTORE'; snapshotId: string } | { type: 'BACKUP_DELETE'; snapshotId: string }
   | { type: 'INVOICE_ADD'; invoice: Invoice } | { type: 'USER_RESET_PASSWORD'; id: string } | { type: 'USER_LOCK_TOGGLE'; id: string; user?: InternalUser }
   | { type: 'USER_INVITE'; user: InternalUser } | { type: 'USER_EDIT'; id: string; name: string; email: string; role: InternalUser['role'] }
-  | { type: 'USER_DELETE'; id: string; mode: 'soft' | 'hard' } | { type: 'MFA_GLOBAL_TOGGLE'; enforced: boolean }
+  | { type: 'USER_DELETE'; id: string; mode: 'soft' | 'hard' } | { type: 'MFA_GLOBAL_TOGGLE'; enforced: boolean } | { type: 'MFA_GLOBAL_HYDRATE'; enforced: boolean }
   | { type: 'IMPERSONATE_START'; tenantId: string } | { type: 'IMPERSONATE_END' } | { type: 'AUDIT_ADD'; event: AuditEvent }
   | { type: 'TENANT_FREEZE'; id: string; frozen: boolean } | { type: 'TENANT_ROLLBACK'; snapshotId: string }
   | { type: 'GUARDRAILS_UPDATE'; id: string; patch: Partial<TenantGuardrails> } | { type: 'GUARDRAILS_GLOBAL_UPDATE'; patch: Partial<TenantGuardrails> };
@@ -233,6 +236,9 @@ function reducer(state: State, action: Action): State {
             percentage: row.storage_percentage ?? 0,
             status: row.storage_status ?? 'NORMAL',
           },
+          guardrails: { workspaceFrozen: row.workspace_frozen, maxSubfolderDepth: row.max_subfolder_depth, maxUploadSizeMb: row.max_upload_size_mb },
+          autoBackupIntervalHours: row.auto_backup_interval_hours,
+          lastAutoBackupAt: row.last_auto_backup_at,
         };
       });
       const newOnes: Tenant[] = action.rows.filter((r) => !existingIds.has(r.id)).map((row) => ({
@@ -250,12 +256,21 @@ function reducer(state: State, action: Action): State {
         modules: row.modules as ModuleKey[], mfaEnforced: row.mfa_enforced,
         createdAt: row.created_at, contractExpires: row.contract_expires,
         monthlyRevenue: Number(row.monthly_revenue), region: row.region,
-        guardrails: { workspaceFrozen: false, maxSubfolderDepth: 3, maxUploadSizeMb: 25 },
+        guardrails: { workspaceFrozen: row.workspace_frozen, maxSubfolderDepth: row.max_subfolder_depth, maxUploadSizeMb: row.max_upload_size_mb },
+        autoBackupIntervalHours: row.auto_backup_interval_hours,
+        lastAutoBackupAt: row.last_auto_backup_at,
         demoTenantId: null,
       }));
       return { ...state, tenants: [...merged, ...newOnes], isTenantsLoading: false };
     }
     case 'AUDIT_HYDRATE': return { ...state, audit: action.rows.map(mapAuditRow) };
+    case 'TIER_CONFIGS_HYDRATE': {
+      if (action.rows.length === 0) return state;
+      const tierConfigs: TierConfig[] = action.rows.map((r) => ({
+        name: r.name as PlanTier, monthly: r.monthly, annual: r.annual, vessels: r.vessels, storageGb: r.storage_gb, seats: r.seats,
+      }));
+      return { ...state, tierConfigs, tenants: applyTierLimits(state.tenants, tierConfigs) };
+    }
     case 'INVOICES_HYDRATE': return { ...state, invoices: action.rows.map(mapInvoiceRow) };
     case 'BACKUPS_HYDRATE': return { ...state, backups: action.rows.map(mapBackupRow) };
     case 'STAFF_HYDRATE': return { ...state, internalUsers: action.rows.map(mapStaffRow) };
@@ -265,14 +280,21 @@ function reducer(state: State, action: Action): State {
       const mapped = action.rows.map((r) => mapSmsSnapshotRow(r, tenant?.company ?? action.tenantId));
       return { ...state, smsSnapshots: [...state.smsSnapshots.filter((s) => s.tenantId !== action.tenantId), ...mapped] };
     }
-    case 'TENANT_CREATE': { const next = pushAudit(state, { category: 'tenant', action: `Tenant provisioned: ${action.tenant.company}`, target: action.tenant.company, companyId: action.tenant.id, ip: '10.42.1.8', scope: 'tenant', severity: 'info' }); return { ...next, tenants: [action.tenant, ...state.tenants] }; }
-    case 'TENANT_UPDATE': { const tenant = state.tenants.find((t) => t.id === action.id); const next = pushAudit(state, { category: 'tenant', action: `Tenant edited: ${tenant?.company ?? action.id}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: 'info' }); return { ...next, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, ...action.patch } : t)) }; }
-    case 'TENANT_SET_STATUS': { const tenant = state.tenants.find((t) => t.id === action.id); const next = pushAudit(state, { category: 'tenant', action: `Tenant ${action.status}: ${tenant?.company ?? action.id}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: action.status === 'suspended' ? 'warning' : 'info' }); return { ...next, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, status: action.status } : t)) }; }
-    case 'TENANT_DELETE': { const t = state.tenants.find((x) => x.id === action.id); const next = pushAudit(state, { category: 'tenant', action: `Tenant permanently deleted: ${t?.company ?? action.id}`, target: t?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: 'critical' }); return { ...next, tenants: state.tenants.filter((x) => x.id !== action.id), backups: state.backups.filter((b) => b.tenantId !== action.id) }; }
-    case 'TENANT_SET_PLAN': { const tenant = state.tenants.find((t) => t.id === action.id); const next = pushAudit(state, { category: 'tenant', action: `Plan tier changed to ${action.plan}: ${tenant?.company ?? action.id}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'billing', severity: 'info' }); return { ...next, tenants: applyTierLimits(state.tenants, state.tierConfigs, { id: action.id, plan: action.plan }) }; }
+    // TENANT_CREATE/UPDATE/SET_STATUS/DELETE/SET_PLAN below no longer
+    // fabricate a local audit entry — every call site now performs the
+    // real backend mutation AND a real logAudit() call with actual
+    // before/after values (see TenantsView.tsx), so this is state-only.
+    case 'TENANT_CREATE': return { ...state, tenants: [action.tenant, ...state.tenants] };
+    case 'TENANT_UPDATE': return { ...state, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, ...action.patch } : t)) };
+    case 'TENANT_SET_STATUS': return { ...state, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, status: action.status } : t)) };
+    case 'TENANT_DELETE': return { ...state, tenants: state.tenants.filter((x) => x.id !== action.id), backups: state.backups.filter((b) => b.tenantId !== action.id) };
+    case 'TENANT_SET_PLAN': return { ...state, tenants: applyTierLimits(state.tenants, state.tierConfigs, { id: action.id, plan: action.plan }) };
     case 'TENANT_TOGGLE_MODULE': { const tenant = state.tenants.find((t) => t.id === action.id); const has = tenant?.modules.includes(action.module); const next = pushAudit(state, { category: 'tenant', action: `Module ${has ? 'revoked' : 'granted'}: ${action.module}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: 'info' }); return { ...next, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, modules: has ? t.modules.filter((m) => m !== action.module) : [...t.modules, action.module] } : t) }; }
     case 'TENANT_TOGGLE_MODULE_REMOTE': return { ...state, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, modules: action.enabled ? t.modules.includes(action.module) ? t.modules : [...t.modules, action.module] : t.modules.filter((m) => m !== action.module) } : t) };
-    case 'TIER_CONFIG_UPDATE': { const tierConfigs = state.tierConfigs.map((t, i) => (i === action.index ? { ...t, ...action.patch } : t)); const tenants = applyTierLimits(state.tenants, tierConfigs); const changedTier = tierConfigs[action.index]; const next = pushAudit(state, { category: 'billing', action: `Tier config updated: ${changedTier.name}`, target: changedTier.name, companyId: null, ip: '10.42.1.8', scope: 'billing', severity: 'info' }); return { ...next, tierConfigs, tenants }; }
+    // Fires on every keystroke while editing the tier constructor — logging
+    // here would spam the ledger. The real logAudit() call happens once,
+    // in BillingView's "Save tiers" handler, after the real API write.
+    case 'TIER_CONFIG_UPDATE': { const tierConfigs = state.tierConfigs.map((t, i) => (i === action.index ? { ...t, ...action.patch } : t)); const tenants = applyTierLimits(state.tenants, tierConfigs); return { ...state, tierConfigs, tenants }; }
     case 'BACKUP_ADD': return { ...state, backups: [action.snapshot, ...state.backups] };
     case 'BACKUP_RESTORE': return state;
     case 'BACKUP_DELETE': return { ...state, backups: state.backups.filter((b) => b.id !== action.snapshotId) };
@@ -287,16 +309,27 @@ function reducer(state: State, action: Action): State {
       if (action.mode === 'soft') return { ...state, internalUsers: state.internalUsers.map((x) => x.id === action.id ? { ...x, status: 'locked' as const, mfa: false } : x) };
       return { ...state, internalUsers: state.internalUsers.filter((x) => x.id !== action.id) };
     }
-    case 'MFA_GLOBAL_TOGGLE': { const next = pushAudit(state, { category: 'security', action: `Global MFA enforcement ${action.enforced ? 'enabled' : 'disabled'}`, target: 'platform', companyId: null, ip: '10.42.1.8', scope: 'security', severity: 'warning' }); return { ...next, globalMfaEnforced: action.enforced }; }
-    case 'IMPERSONATE_START': { const tenant = state.tenants.find((t) => t.id === action.tenantId); const next = pushAudit(state, { category: 'impersonation', action: `Login As — impersonation started: ${tenant?.company ?? action.tenantId}`, target: tenant?.contactEmail ?? action.tenantId, companyId: action.tenantId, ip: '10.42.1.8', scope: 'impersonation', severity: 'critical', impersonation: true }); return { ...next, impersonation: { active: true, tenantId: action.tenantId, startedAt: new Date().toISOString() } }; }
-    case 'IMPERSONATE_END': { const next = pushAudit(state, { category: 'impersonation', action: 'Impersonation session ended', target: state.impersonation.tenantId ?? 'platform', companyId: state.impersonation.tenantId, ip: '10.42.1.8', scope: 'impersonation', severity: 'warning', impersonation: true }); return { ...next, impersonation: { active: false, tenantId: null, startedAt: null } }; }
-    case 'TENANT_FREEZE': { const tenant = state.tenants.find((t) => t.id === action.id); const next = pushAudit(state, { category: 'sms', action: `Workspace ${action.frozen ? 'frozen' : 'unfrozen'}: ${tenant?.company ?? action.id}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'sms', severity: action.frozen ? 'critical' : 'warning' }); return { ...next, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, guardrails: { ...(t.guardrails ?? { workspaceFrozen: false, maxSubfolderDepth: 3, maxUploadSizeMb: 25 }), workspaceFrozen: action.frozen } } : t) }; }
+    // Real backend action (PUT /api/platform/mfa-enforcement) — the caller
+    // logs a real audit_logs row via logAudit() itself (see UsersView),
+    // matching the convention documented on pushAudit() above, so this
+    // just updates local state without also fabricating a local entry.
+    case 'MFA_GLOBAL_TOGGLE': return { ...state, globalMfaEnforced: action.enforced };
+    case 'MFA_GLOBAL_HYDRATE': return { ...state, globalMfaEnforced: action.enforced };
+    // Real logAudit() calls now happen at the call sites (TenantsView.tsx
+    // start, ImpersonationOverlay.tsx end) — see the comment above.
+    case 'IMPERSONATE_START': return { ...state, impersonation: { active: true, tenantId: action.tenantId, startedAt: new Date().toISOString() } };
+    case 'IMPERSONATE_END': return { ...state, impersonation: { active: false, tenantId: null, startedAt: null } };
+    // Real backend action (tenants.workspace_frozen / max_subfolder_depth /
+    // max_upload_size_mb, enforced server-side — see smsDocuments.js and
+    // files.js) — the caller (SmsView.tsx) awaits the real API write and
+    // logs a real audit_logs row itself before dispatching these.
+    case 'TENANT_FREEZE': return { ...state, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, guardrails: { ...(t.guardrails ?? { workspaceFrozen: false, maxSubfolderDepth: 3, maxUploadSizeMb: 25 }), workspaceFrozen: action.frozen } } : t) };
     // No real document state to overwrite on this parallel master-template
     // system (see server/routes/smsTemplates.js) — rollback is a purely
     // audit-logged event, matching BACKUP_RESTORE's semantics above.
     case 'TENANT_ROLLBACK': return state;
-    case 'GUARDRAILS_UPDATE': { const tenant = state.tenants.find((t) => t.id === action.id); const next = pushAudit(state, { category: 'sms', action: `Guardrails updated: ${tenant?.company ?? action.id}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'sms', severity: 'warning' }); return { ...next, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, guardrails: { ...(t.guardrails ?? { workspaceFrozen: false, maxSubfolderDepth: 3, maxUploadSizeMb: 25 }), ...action.patch } } : t) }; }
-    case 'GUARDRAILS_GLOBAL_UPDATE': { const next = pushAudit(state, { category: 'sms', action: `Global guardrails updated`, target: 'Platform-wide', companyId: null, ip: 'local', scope: 'platform', severity: 'warning' }); return { ...next, globalGuardrails: { ...state.globalGuardrails, ...action.patch } }; }
+    case 'GUARDRAILS_UPDATE': return { ...state, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, guardrails: { ...(t.guardrails ?? { workspaceFrozen: false, maxSubfolderDepth: 3, maxUploadSizeMb: 25 }), ...action.patch } } : t) };
+    case 'GUARDRAILS_GLOBAL_UPDATE': return { ...state, globalGuardrails: { ...state.globalGuardrails, ...action.patch } };
     case 'AUDIT_ADD': return { ...state, audit: [action.event, ...state.audit].slice(0, 400) };
     default: return state;
   }

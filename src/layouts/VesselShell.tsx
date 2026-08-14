@@ -4,7 +4,7 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
-import { startSyncLoop, getSyncStatus, replicateToShoreNow, type SyncResult } from '../lib/syncService';
+import { startSyncLoop, getSyncStatus, getVesselSyncState, replicateToShoreNow, type SyncResult } from '../lib/syncService';
 import { getLocalSmsVersion } from '../lib/localVesselDb';
 import { getEffectiveDemoVessels, getEffectiveDemoAssignments, getEffectiveDemoUsers } from '../lib/demoData';
 import { getProfileForVessel, type SmsProfile } from '../lib/smsProfiles';
@@ -107,6 +107,20 @@ export function VesselShell({
   }, [tenant?.id, tenant?.sms_version]);
 
   const versionLabel = localVersion ?? tenant?.sms_version ?? '—';
+
+  // Real pending-outbox count for the header sync pill — previously
+  // hardcoded to 0 regardless of what was actually queued, which could
+  // hide a real backlog from a crew member at sea. Re-fetched whenever a
+  // sync completes (lastSync changes) so it drops back to 0 for real.
+  const [pendingSyncItems, setPendingSyncItems] = useState(0);
+  useEffect(() => {
+    if (!tenant?.id || !activeVesselId) return;
+    let cancelled = false;
+    getVesselSyncState(tenant.id, activeVesselId).then((s) => {
+      if (!cancelled) setPendingSyncItems(s?.pendingOutbox ?? 0);
+    });
+    return () => { cancelled = true; };
+  }, [tenant?.id, activeVesselId, lastSync]);
 
   const [_vesselProfile, setVesselProfile] = useState<SmsProfile | null>(null);
   useEffect(() => {
@@ -211,7 +225,7 @@ export function VesselShell({
           <NetworkStatusBadge compact />
           <VesselSyncStatusPill
             lastSyncAt={lastSync ?? vesselConn.lastSyncAt}
-            pendingSyncItems={0}
+            pendingSyncItems={pendingSyncItems}
             localVersion={versionLabel}
           />
 

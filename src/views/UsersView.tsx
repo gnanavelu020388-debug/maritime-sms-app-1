@@ -1,7 +1,7 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Users, ShieldCheck, KeyRound, Lock, Unlock, Search, UserPlus, AlertTriangle,
-  Pencil, Trash2,
+  Pencil, Trash2, Copy, Check,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Modal } from '../components/Modal';
@@ -12,9 +12,12 @@ import { CriticalActionWizard } from '../components/CriticalActionWizard';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
 import { relativeTime } from '../constants';
-import type { InternalUser } from '../types';
+import type { InternalUser, Tenant } from '../types';
 import type { Capabilities } from '../lib/permissions';
-import { apiInvitePlatformStaff, apiUpdatePlatformStaff, apiTogglePlatformStaffLock, apiResetPlatformStaffPassword, apiDeletePlatformStaff } from '../lib/api';
+import {
+  apiInvitePlatformStaff, apiUpdatePlatformStaff, apiTogglePlatformStaffLock, apiResetPlatformStaffPassword, apiDeletePlatformStaff,
+  apiGetMfaEnforcement, apiSetMfaEnforcement, apiForceTenantPasswordReset, apiUpdateTenant,
+} from '../lib/api';
 import { logAudit } from '../lib/audit';
 import type { PlatformStaffRow } from '../lib/supabase';
 
@@ -31,16 +34,22 @@ const ROLE_TONE: Record<string, 'danger' | 'warning' | 'info'> = {
 const ALL_ROLES: InternalUser['role'][] = ['Super-Admin', 'Platform Auditor', 'Global Support Staff'];
 
 export function UsersView({ caps }: { caps: Capabilities }) {
-  const { internalUsers, globalMfaEnforced, dispatch, toast } = useStore();
+  const { internalUsers, globalMfaEnforced, tenants, dispatch, toast } = useStore();
   const { user } = useAuth();
   const [query, setQuery] = useState('');
   const [inviteOpen, setInviteOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [editTarget, setEditTarget] = useState<InternalUser | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<InternalUser | null>(null);
+  const [emergencyAction, setEmergencyAction] = useState<'reset' | 'lockdown' | null>(null);
+  const [tempPasswordReveal, setTempPasswordReveal] = useState<{ email: string; password: string } | null>(null);
 
   const currentEmail = user?.email ?? '';
   const isSelf = (u: InternalUser) => u.email === currentEmail;
+
+  useEffect(() => {
+    apiGetMfaEnforcement().then((r) => dispatch({ type: 'MFA_GLOBAL_HYDRATE', enforced: r.enforced })).catch(() => {});
+  }, [dispatch]);
 
   const columns: Column<InternalUser>[] = [
     {
@@ -85,10 +94,10 @@ export function UsersView({ caps }: { caps: Capabilities }) {
           ><Pencil className="h-4 w-4" /></button>
           <button
             onClick={async () => {
-              await apiResetPlatformStaffPassword(u.id);
+              const result = await apiResetPlatformStaffPassword(u.id);
               dispatch({ type: 'USER_RESET_PASSWORD', id: u.id });
               await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' });
-              toast({ tone: 'info', title: 'Password reset issued', message: `Reset email sent to ${u.email}.` });
+              setTempPasswordReveal({ email: u.email, password: result.tempPassword });
             }}
             disabled={!caps.userResetPassword}
             className="btn-ghost rounded-md p-1.5 disabled:cursor-not-allowed disabled:opacity-30"
@@ -134,31 +143,31 @@ export function UsersView({ caps }: { caps: Capabilities }) {
 
       {/* Emergency Security Toolkit */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-        <Card title="Global MFA Enforcement" subtitle="Master switch for all platform staff" icon={<ShieldCheck className="h-4 w-4" />}>
+        <Card title="Global MFA Enforcement" subtitle="Default applied to every tenant workspace" icon={<ShieldCheck className="h-4 w-4" />}>
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-ink-800 dark:text-ink-100">Require MFA for all internal accounts</p>
-              <p className="mt-0.5 text-xs text-ink-500">When enabled, staff without MFA are forced to enroll on next sign-in.</p>
+              <p className="text-sm font-medium text-ink-800 dark:text-ink-100">Require MFA at login for every company</p>
+              <p className="mt-0.5 text-xs text-ink-500">When enabled, any tenant user without MFA already set up is prompted to enroll on their next sign-in.</p>
             </div>
-            <Toggle checked={globalMfaEnforced} onChange={(v) => {
+            <Toggle checked={globalMfaEnforced} onChange={async (v) => {
               if (!caps.securityEdit) return;
-              dispatch({ type: 'MFA_GLOBAL_TOGGLE', enforced: v });
-              toast({ tone: v ? 'success' : 'warning', title: `MFA enforcement ${v ? 'enabled' : 'disabled'}` });
+              try {
+                const result = await apiSetMfaEnforcement(v);
+                dispatch({ type: 'MFA_GLOBAL_TOGGLE', enforced: result.enforced });
+                await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Global MFA enforcement ${v ? 'enabled' : 'disabled'} (${result.tenantsUpdated} tenants)`, target: 'platform', severity: 'warning', before: { global_mfa_enforced: !v }, after: { global_mfa_enforced: v, tenants_updated: result.tenantsUpdated } });
+                toast({ tone: v ? 'success' : 'warning', title: `MFA enforcement ${v ? 'enabled' : 'disabled'}`, message: `Applied to ${result.tenantsUpdated} tenant workspace(s).` });
+              } catch (err) {
+                toast({ tone: 'danger', title: 'Could not update MFA enforcement', message: (err as Error).message });
+              }
             }} disabled={!caps.securityEdit} />
-          </div>
-          <div className="mt-3 rounded-lg bg-ink-50 p-3 dark:bg-ink-800/50">
-            <div className="flex items-center justify-between text-xs">
-              <span className="text-ink-500">Staff with MFA</span>
-              <span className="font-bold text-ink-800 dark:text-ink-100">{internalUsers.filter((u) => u.mfa).length} / {internalUsers.length}</span>
-            </div>
           </div>
         </Card>
 
         <Card title="Quick Account Actions" subtitle="Emergency security controls" icon={<KeyRound className="h-4 w-4" />}>
           <div className="space-y-2">
             <button onClick={() => setSearchOpen(true)} className="btn-secondary w-full justify-start"><Search className="h-4 w-4" /> Search any client account</button>
-            <button onClick={() => toast({ tone: 'info', title: 'Bulk password reset', message: 'Reset link generated for selected tenant users.' })} className="btn-secondary w-full justify-start"><KeyRound className="h-4 w-4" /> Trigger tenant password reset</button>
-            <button onClick={() => toast({ tone: 'warning', title: 'Lockdown prepared', message: 'Emergency lockdown playbook ready to execute.' })} className="btn-danger w-full justify-start"><Lock className="h-4 w-4" /> Emergency account lockdown</button>
+            <button onClick={() => setEmergencyAction('reset')} disabled={!caps.securityEdit} className="btn-secondary w-full justify-start disabled:cursor-not-allowed disabled:opacity-50"><KeyRound className="h-4 w-4" /> Trigger tenant password reset</button>
+            <button onClick={() => setEmergencyAction('lockdown')} disabled={!caps.securityEdit} className="btn-danger w-full justify-start disabled:cursor-not-allowed disabled:opacity-50"><Lock className="h-4 w-4" /> Emergency account lockdown</button>
           </div>
         </Card>
 
@@ -187,11 +196,11 @@ export function UsersView({ caps }: { caps: Capabilities }) {
         <InviteModal
           onClose={() => setInviteOpen(false)}
           onInvite={async (draft) => {
-            const row = await apiInvitePlatformStaff<PlatformStaffRow>({ name: draft.name, email: draft.email, role: draft.role });
+            const row = await apiInvitePlatformStaff<PlatformStaffRow & { tempPassword: string }>({ name: draft.name, email: draft.email, role: draft.role });
             const u = mapStaffRow(row);
             dispatch({ type: 'USER_INVITE', user: u });
             await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Internal staff invited: ${u.email}`, target: u.email, severity: 'info' });
-            toast({ tone: 'success', title: 'Invitation sent', message: `${u.email} invited as ${u.role}.` });
+            setTempPasswordReveal({ email: u.email, password: row.tempPassword });
             setInviteOpen(false);
           }}
         />
@@ -262,7 +271,7 @@ export function UsersView({ caps }: { caps: Capabilities }) {
                   </div>
                   <div className="flex items-center gap-2">
                     <StatusBadge status={u.status} />
-                    <button onClick={async () => { await apiResetPlatformStaffPassword(u.id); dispatch({ type: 'USER_RESET_PASSWORD', id: u.id }); await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' }); toast({ tone: 'info', title: 'Password reset issued', message: u.email }); }} className="btn-ghost rounded-md p-1.5"><KeyRound className="h-4 w-4" /></button>
+                    <button onClick={async () => { const result = await apiResetPlatformStaffPassword(u.id); dispatch({ type: 'USER_RESET_PASSWORD', id: u.id }); await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' }); setTempPasswordReveal({ email: u.email, password: result.tempPassword }); }} className="btn-ghost rounded-md p-1.5"><KeyRound className="h-4 w-4" /></button>
                   </div>
                 </div>
               ))}
@@ -270,6 +279,20 @@ export function UsersView({ caps }: { caps: Capabilities }) {
             </div>
           </div>
         </Modal>
+      )}
+
+      {tempPasswordReveal && (
+        <TempPasswordModal reveal={tempPasswordReveal} onClose={() => setTempPasswordReveal(null)} />
+      )}
+
+      {emergencyAction && (
+        <EmergencyTenantActionModal
+          action={emergencyAction}
+          tenants={tenants}
+          actorEmail={currentEmail || 'unknown'}
+          onClose={() => setEmergencyAction(null)}
+          toast={toast}
+        />
       )}
     </div>
   );
@@ -375,4 +398,110 @@ function EditStaffModal({ user, onClose, onSave }: { user: InternalUser; onClose
   );
 }
 
+function EmergencyTenantActionModal({
+  action, tenants, actorEmail, onClose, toast,
+}: {
+  action: 'reset' | 'lockdown';
+  tenants: Tenant[];
+  actorEmail: string;
+  onClose: () => void;
+  toast: (t: { tone: 'info' | 'success' | 'warning' | 'danger'; title: string; message?: string }) => void;
+}) {
+  const [tenantId, setTenantId] = useState(tenants[0]?.id ?? '');
+  const [busy, setBusy] = useState(false);
+  const selected = tenants.find((t) => t.id === tenantId);
+  const isReset = action === 'reset';
+
+  const execute = async () => {
+    if (!selected || busy) return;
+    setBusy(true);
+    try {
+      if (isReset) {
+        const result = await apiForceTenantPasswordReset(selected.id);
+        await logAudit({ tenantId: selected.id, actorEmail, category: 'security', action: `Password reset forced for all users: ${selected.company}`, target: selected.company, severity: 'warning' });
+        toast({ tone: 'success', title: 'Password reset triggered', message: `${result.affected} user(s) at ${selected.company} must set a new password on next sign-in.` });
+      } else {
+        await apiUpdateTenant(selected.id, { status: 'suspended' });
+        await logAudit({ tenantId: selected.id, actorEmail, category: 'security', action: `Emergency lockdown — tenant suspended: ${selected.company}`, target: selected.company, severity: 'critical' });
+        toast({ tone: 'danger', title: 'Tenant suspended', message: `${selected.company} is locked out — no user at this company can sign in until reactivated.` });
+      }
+      onClose();
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Action failed', message: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title={isReset ? 'Trigger Tenant Password Reset' : 'Emergency Account Lockdown'}
+      subtitle={isReset ? 'Force every user at a company to set a new password' : 'Immediately suspend a company — blocks all sign-ins'}
+      icon={isReset ? <KeyRound className="h-5 w-5" /> : <Lock className="h-5 w-5" />}
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary">Cancel</button>
+          <button
+            disabled={!selected || busy}
+            onClick={execute}
+            className={isReset ? 'btn-primary' : 'btn-danger'}
+          >{busy ? 'Working…' : isReset ? 'Force password reset' : 'Suspend company'}</button>
+        </>
+      }
+    >
+      <div className="space-y-4">
+        {!isReset && (
+          <div className="rounded-lg bg-danger-50 p-3 text-xs text-danger-700 dark:bg-danger-900/20 dark:text-danger-300">
+            <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
+            This immediately blocks every user at the selected company from signing in, until a Super Admin reactivates the account from Tenant &amp; Company Management.
+          </div>
+        )}
+        <div>
+          <label className="label">Company</label>
+          <select className="input" value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
+            {tenants.length === 0 && <option value="">No tenants loaded</option>}
+            {tenants.map((t) => <option key={t.id} value={t.id}>{t.company}</option>)}
+          </select>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function TempPasswordModal({ reveal, onClose }: { reveal: { email: string; password: string }; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(reveal.password);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch { /* clipboard access denied — value is still selectable on screen */ }
+  };
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Temporary Password Issued"
+      subtitle={reveal.email}
+      icon={<KeyRound className="h-5 w-5" />}
+      size="sm"
+      footer={<button onClick={onClose} className="btn-primary w-full">Done</button>}
+    >
+      <div className="space-y-3">
+        <div className="rounded-lg bg-warning-50 p-3 text-xs text-warning-700 dark:bg-warning-900/20 dark:text-warning-300">
+          <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
+          This is shown once and cannot be retrieved again. Relay it to {reveal.email} through a secure channel — they'll be required to set a new password on next sign-in.
+        </div>
+        <div className="flex items-center justify-between gap-2 rounded-lg border border-ink-200 bg-ink-50 px-3 py-2.5 font-mono text-sm dark:border-ink-800 dark:bg-ink-800/50">
+          <span className="select-all text-ink-900 dark:text-white">{reveal.password}</span>
+          <button onClick={copy} className="btn-ghost rounded-md p-1.5 shrink-0" title="Copy password">
+            {copied ? <Check className="h-4 w-4 text-success-500" /> : <Copy className="h-4 w-4" />}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
 

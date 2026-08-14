@@ -66,12 +66,13 @@ function SuperAdminShellInner({ user, internalRole, onSignOut }: { user: User; r
 
       // Super-Admin-only flat datasets — fetched once per session, in
       // parallel, independent of tenant hydration succeeding above.
-      const [auditRows, invoiceRows, backupRows, staffRows, errRows] = await Promise.all([
+      const [auditRows, invoiceRows, backupRows, staffRows, errRows, tierRows] = await Promise.all([
         api.apiGetAuditLogs<AuditLogRow>().catch(() => []),
         api.apiGetInvoices<InvoiceRow>().catch(() => []),
         api.apiGetBackups<BackupSnapshotRow>().catch(() => []),
         api.apiGetPlatformStaff<PlatformStaffRow>().catch(() => []),
         api.apiGetErrorLogs<ErrorLogRow>().catch(() => []),
+        api.apiGetTierConfigs().catch(() => []),
       ]);
       if (cancelled) return;
       dispatch({ type: 'AUDIT_HYDRATE', rows: auditRows });
@@ -79,6 +80,7 @@ function SuperAdminShellInner({ user, internalRole, onSignOut }: { user: User; r
       dispatch({ type: 'BACKUPS_HYDRATE', rows: backupRows });
       dispatch({ type: 'STAFF_HYDRATE', rows: staffRows });
       dispatch({ type: 'ERROR_LOGS_HYDRATE', rows: errRows });
+      dispatch({ type: 'TIER_CONFIGS_HYDRATE', rows: tierRows });
     })();
     return () => { cancelled = true; };
   }, [dispatch]);

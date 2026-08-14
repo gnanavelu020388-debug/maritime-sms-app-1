@@ -17,7 +17,7 @@ import {
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { useFleetScope } from '../../lib/useFleetScope';
 import { deployBaseline } from '../../lib/deployBaseline';
-import { getShorePermsForRole, canDoShore, resolveShoreRoleName, dpaFullAuthority } from '../../lib/shoreRoles';
+import { useShoreRolePermissions, canDoShore, resolveShoreRoleName, dpaFullAuthority, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS } from '../../lib/shoreRoles';
 import { Modal } from '../../components/Modal';
 
 interface Crumb {
@@ -106,8 +106,9 @@ export function SmsApprovalsView() {
   const resolvedRoleName = resolveShoreRoleName(rawShoreRoleName);
   const isDpaRole = resolvedRoleName === 'Designated Person Ashore (DPA)' ||
     (tenantUser?.email?.toLowerCase() ?? '') === 'dpa@nordicreef.no';
+  const { permissions: shoreRolePerms } = useShoreRolePermissions(tenant?.id);
   const shorePerms = tenant
-    ? (isDpaRole ? dpaFullAuthority() : getShorePermsForRole(tenant.id, resolvedRoleName))
+    ? (isDpaRole ? dpaFullAuthority() : (shoreRolePerms[resolvedRoleName] ?? normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[resolvedRoleName] ?? {})))
     : null;
   const canApprove = canDoShore(shorePerms, 'approve_sms');
   const canEdit = canDoShore(shorePerms, 'edit_sms');
@@ -215,68 +216,83 @@ export function SmsApprovalsView() {
   async function executeApproveAndDeploy() {
     if (!tenant || !selectedDoc || !signatureName.trim() || !signatureTitle.trim()) return;
     setDeploying(true);
-    const oldVersion = tenant.sms_version;
-    demoApproveSmsDoc(tenant.id, selectedDoc.id);
-    let newVersion: string | null = null;
-    if (canDeploy) {
-      newVersion = await deployBaseline(tenant.id, tenantUser!.email);
+    try {
+      const oldVersion = tenant.sms_version;
+      await demoApproveSmsDoc(tenant.id, selectedDoc.id);
+      let newVersion: string | null = null;
+      if (canDeploy) {
+        newVersion = await deployBaseline(tenant.id, tenantUser!.email);
+      }
+      const versionLabel = newVersion ?? oldVersion;
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: 'sms',
+        action: `DPA APPROVED & DEPLOYED: ${selectedDoc.label} (SMS v${oldVersion} → v${versionLabel}). Digital signature: ${signatureName} (${signatureTitle}). Document deployed to all fleet vessels.`,
+        target: selectedDoc.tree_kind,
+        location: tenant!.company,
+        severity: 'warning',
+      });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'approved', docId: selectedDoc.id, label: selectedDoc.label, version: versionLabel } });
+      await refresh();
+      setShowSignModal(false);
+      setSignatureName('');
+      setSignatureTitle('');
+      setSelectedDoc(null);
+      setRejectMode(false);
+      setRejectComments('');
+      setSyncTick((t) => t + 1);
+      showToast(`Approved & deployed to fleet. SMS v${versionLabel}. Signed by ${signatureName}.`, true);
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to approve & deploy.', false);
+    } finally {
+      setDeploying(false);
     }
-    const versionLabel = newVersion ?? oldVersion;
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: 'sms',
-      action: `DPA APPROVED & DEPLOYED: ${selectedDoc.label} (SMS v${oldVersion} → v${versionLabel}). Digital signature: ${signatureName} (${signatureTitle}). Document deployed to all fleet vessels.`,
-      target: selectedDoc.tree_kind,
-      location: tenant!.company,
-      severity: 'warning',
-    });
-    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'approved', docId: selectedDoc.id, label: selectedDoc.label, version: versionLabel } });
-    await refresh();
-    setDeploying(false);
-    setShowSignModal(false);
-    setSignatureName('');
-    setSignatureTitle('');
-    setSelectedDoc(null);
-    setRejectMode(false);
-    setRejectComments('');
-    setSyncTick((t) => t + 1);
-    showToast(`Approved & deployed to fleet. SMS v${versionLabel}. Signed by ${signatureName}.`, true);
   }
 
   async function handleReject(doc: SmsDocRow) {
     if (!tenant) return;
     setRejectingId(doc.id);
-    demoRejectSmsDoc(tenant.id, doc.id, rejectComments);
-    await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `DPA rejected: ${doc.label}`, target: doc.tree_kind, location: tenant!.company, severity: 'warning' });
-    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'rejected', docId: doc.id, label: doc.label } });
-    setRejectingId(null);
-    setSelectedDoc(null);
-    setRejectMode(false);
-    setRejectComments('');
-    setSyncTick((t) => t + 1);
-    showToast(`Document rejected with comments.`, true);
+    try {
+      await demoRejectSmsDoc(tenant.id, doc.id, rejectComments);
+      await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `DPA rejected: ${doc.label}`, target: doc.tree_kind, location: tenant!.company, severity: 'warning' });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'rejected', docId: doc.id, label: doc.label } });
+      setSelectedDoc(null);
+      setRejectMode(false);
+      setRejectComments('');
+      setSyncTick((t) => t + 1);
+      showToast(`Document rejected with comments.`, true);
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to reject document.', false);
+    } finally {
+      setRejectingId(null);
+    }
   }
 
   async function handlePurge(doc: SmsDocRow) {
     if (!tenant) return;
     setPurgingId(doc.id);
-    demoDeleteSmsDoc(tenant.id, doc.id);
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: 'sms',
-      action: `DRAFT_PURGED: DPA discarded draft "${doc.label}" permanently from the review queue.`,
-      target: doc.tree_kind,
-      location: tenant!.company,
-      severity: 'warning',
-    });
-    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'draft_purged', docId: doc.id, label: doc.label } });
-    setPurgingId(null);
-    setShowPurgeModal(false);
-    setSelectedDoc(null);
-    setSyncTick((t) => t + 1);
-    showToast(`Draft "${doc.label}" purged permanently.`, true);
+    try {
+      await demoDeleteSmsDoc(tenant.id, doc.id);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: 'sms',
+        action: `DRAFT_PURGED: DPA discarded draft "${doc.label}" permanently from the review queue.`,
+        target: doc.tree_kind,
+        location: tenant!.company,
+        severity: 'warning',
+      });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'draft_purged', docId: doc.id, label: doc.label } });
+      setShowPurgeModal(false);
+      setSelectedDoc(null);
+      setSyncTick((t) => t + 1);
+      showToast(`Draft "${doc.label}" purged permanently.`, true);
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to purge draft.', false);
+    } finally {
+      setPurgingId(null);
+    }
   }
 
   // ── Upload new SMS document ────────────────────────────────────────
@@ -285,30 +301,34 @@ export function SmsApprovalsView() {
     parentId: string | null; content: string; contentKind: 'rich_text' | 'pdf';
   }) {
     if (!tenant) return;
-    demoCreateSmsDoc(tenant.id, {
-      parent_id: data.parentId,
-      tree_kind: data.treeKind,
-      label: data.label,
-      node_kind: 'document',
-      content_kind: data.contentKind,
-      content: data.content,
-      profile_id: data.profileId,
-      author_name: tenantUser?.name ?? 'DPA',
-      author_role: 'DPA',
-      author_origin: 'Shoreside HQ',
-    });
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: 'sms',
-      action: `SMS Upload: ${data.label} (${data.treeKind}) — submitted for DPA approval. Doc ID: ${data.docId}`,
-      target: data.treeKind,
-      location: tenant!.company,
-    });
-    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'uploaded', label: data.label } });
-    setShowUploadModal(false);
-    setSyncTick((t) => t + 1);
-    showToast(`"${data.label}" uploaded and submitted for DPA approval.`, true);
+    try {
+      await demoCreateSmsDoc(tenant.id, {
+        parent_id: data.parentId,
+        tree_kind: data.treeKind,
+        label: data.label,
+        node_kind: 'document',
+        content_kind: data.contentKind,
+        content: data.content,
+        profile_id: data.profileId,
+        author_name: tenantUser?.name ?? 'DPA',
+        author_role: 'DPA',
+        author_origin: 'Shoreside HQ',
+      });
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: 'sms',
+        action: `SMS Upload: ${data.label} (${data.treeKind}) — submitted for DPA approval. Doc ID: ${data.docId}`,
+        target: data.treeKind,
+        location: tenant!.company,
+      });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'uploaded', label: data.label } });
+      setShowUploadModal(false);
+      setSyncTick((t) => t + 1);
+      showToast(`"${data.label}" uploaded and submitted for DPA approval.`, true);
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to upload document.', false);
+    }
   }
 
   // ── Edit SMS section content ───────────────────────────────────────
@@ -321,21 +341,26 @@ export function SmsApprovalsView() {
   async function saveEdit() {
     if (!tenant || !editingDoc) return;
     setSavingEdit(true);
-    demoRenameSmsDoc(tenant.id, editingDoc.id, editLabel);
-    demoUpdateSmsDocContent(tenant.id, editingDoc.id, editContent, editingDoc.content_kind ?? 'rich_text', tenantUser?.name ?? 'DPA', 'DPA', 'Shoreside HQ');
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: 'sms',
-      action: `SMS Edit: ${editingDoc.label} — content updated and resubmitted for DPA approval`,
-      target: editingDoc.tree_kind,
-      location: tenant!.company,
-    });
-    postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'edited', docId: editingDoc.id } });
-    setSavingEdit(false);
-    setEditingDoc(null);
-    setSyncTick((t) => t + 1);
-    showToast(`Section "${editLabel}" updated and resubmitted for approval.`, true);
+    try {
+      await demoRenameSmsDoc(tenant.id, editingDoc.id, editLabel);
+      await demoUpdateSmsDocContent(tenant.id, editingDoc.id, editContent, editingDoc.content_kind ?? 'rich_text', tenantUser?.name ?? 'DPA', 'DPA', 'Shoreside HQ');
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: 'sms',
+        action: `SMS Edit: ${editingDoc.label} — content updated and resubmitted for DPA approval`,
+        target: editingDoc.tree_kind,
+        location: tenant!.company,
+      });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'edited', docId: editingDoc.id } });
+      setEditingDoc(null);
+      setSyncTick((t) => t + 1);
+      showToast(`Section "${editLabel}" updated and resubmitted for approval.`, true);
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to save changes.', false);
+    } finally {
+      setSavingEdit(false);
+    }
   }
 
   // ── Section-by-section reader helpers ──────────────────────────────

@@ -77,12 +77,18 @@ router.put('/:tenantId', authMiddleware, async (req, res) => {
     if (req.user.role !== 'super_admin' && req.user.tenant_id !== req.params.tenantId) {
       return res.status(403).json({ error: 'Access denied' });
     }
-    const fields = ['company', 'contact_email', 'plan', 'status', 'region', 'vessels_max', 'seats_max', 'storage_gb_max', 'monthly_revenue', 'mfa_enforced', 'sms_version'];
+    const fields = [
+      'company', 'contact_email', 'plan', 'status', 'region', 'vessels_max', 'seats_max', 'storage_gb_max', 'monthly_revenue', 'mfa_enforced', 'sms_version',
+      'workspace_frozen', 'max_subfolder_depth', 'max_upload_size_mb', 'auto_backup_interval_hours',
+    ];
     const sets = [];
     const vals = [];
     for (const f of fields) {
       if (req.body[f] !== undefined) { sets.push(`${f} = ?`); vals.push(req.body[f]); }
     }
+    // mysql2 rejects a raw ISO string ("...T...Z") for a TIMESTAMP column —
+    // always wrap in Date(), matching the convention in invoices.js/backups.js.
+    if (req.body.contract_expires !== undefined) { sets.push('contract_expires = ?'); vals.push(new Date(req.body.contract_expires)); }
     if (req.body.modules !== undefined) { sets.push('modules = ?'); vals.push(JSON.stringify(req.body.modules)); }
     if (sets.length === 0) return res.json({ error: 'No fields to update' });
     vals.push(req.params.tenantId);

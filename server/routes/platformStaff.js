@@ -1,9 +1,18 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
+import crypto from 'crypto';
+import bcrypt from 'bcryptjs';
 import pool from '../db.js';
 import { authMiddleware, requireSuperAdmin } from '../middleware/auth.js';
 
 const router = Router();
+
+// A real, one-time temp credential (not the shared/guessable default
+// tenant_users.js uses) — internal platform accounts warrant a genuinely
+// random password since they carry Super-Admin-tier backend access.
+function generateTempPassword() {
+  return crypto.randomBytes(9).toString('base64').replace(/[+/=]/g, '').slice(0, 12);
+}
 
 router.get('/', authMiddleware, requireSuperAdmin, async (_req, res) => {
   try {
@@ -16,12 +25,16 @@ router.post('/', authMiddleware, requireSuperAdmin, async (req, res) => {
   try {
     const { name, email, role } = req.body;
     const id = uuidv4();
+    const tempPassword = generateTempPassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
     await pool.query(
-      'INSERT INTO platform_staff (id, name, email, role, status, mfa) VALUES (?,?,?,?,?,?)',
-      [id, name, email, role || 'Global Support Staff', 'invited', false],
+      'INSERT INTO platform_staff (id, name, email, role, status, mfa, password_hash, must_change_password) VALUES (?,?,?,?,?,?,?,TRUE)',
+      [id, name, email, role || 'Global Support Staff', 'invited', false, passwordHash],
     );
     const [rows] = await pool.query('SELECT * FROM platform_staff WHERE id = ?', [id]);
-    return res.status(201).json(rows[0]);
+    // tempPassword is returned exactly once — it is never stored or
+    // retrievable again after this response (only its bcrypt hash is kept).
+    return res.status(201).json({ ...rows[0], tempPassword });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
@@ -53,10 +66,20 @@ router.put('/:id/lock-toggle', authMiddleware, requireSuperAdmin, async (req, re
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
-// No real credential exists to reset for a roster-only staff record — this
-// endpoint exists so the action is real and auditable, matching today's UX.
-router.put('/:id/reset-password', authMiddleware, requireSuperAdmin, async (_req, res) => {
-  return res.json({ success: true });
+// A real credential rotation — generates a new temp password, hashes it,
+// and forces a change on next sign-in. The plaintext is returned exactly
+// once so the Super Admin can relay it to the staff member out-of-band.
+router.put('/:id/reset-password', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const tempPassword = generateTempPassword();
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    const [result] = await pool.query(
+      'UPDATE platform_staff SET password_hash = ?, must_change_password = TRUE WHERE id = ?',
+      [passwordHash, req.params.id],
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'Staff member not found' });
+    return res.json({ success: true, tempPassword });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
 router.delete('/:id', authMiddleware, requireSuperAdmin, async (req, res) => {

@@ -1,6 +1,6 @@
 import { useAuth } from '../../lib/auth';
 import { SmsLibrarySplitView } from '../../components/SmsLibrarySplitView';
-import { getShorePermsForRole, canDoShore, resolveShoreRoleName, dpaFullAuthority } from '../../lib/shoreRoles';
+import { useShoreRolePermissions, canDoShore, resolveShoreRoleName, dpaFullAuthority, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS } from '../../lib/shoreRoles';
 import { Shield } from 'lucide-react';
 import type { RankPermissionMap } from '../../lib/rankPermissions';
 import { Badge } from '../../components/Badge';
@@ -14,13 +14,14 @@ const DPA_SMS_PERMS: RankPermissionMap = {
 
 export function SmsLibraryView() {
   const { tenant, activeAssignment, tenantUser } = useAuth();
+  const { permissions: shoreRolePerms } = useShoreRolePermissions(tenant?.id);
   if (!tenant) return null;
 
   const rawShoreRoleName = tenantUser?.rank ?? 'DPA';
   const resolvedRoleName = resolveShoreRoleName(rawShoreRoleName);
   const isDpaRole = resolvedRoleName === 'Designated Person Ashore (DPA)' ||
     (tenantUser?.email?.toLowerCase() ?? '') === 'dpa@nordicreef.no';
-  const shorePerms = isDpaRole ? dpaFullAuthority() : getShorePermsForRole(tenant.id, resolvedRoleName);
+  const shorePerms = isDpaRole ? dpaFullAuthority() : (shoreRolePerms[resolvedRoleName] ?? normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[resolvedRoleName] ?? {}));
   const canEdit = canDoShore(shorePerms, 'edit_sms');
   const canUpload = canDoShore(shorePerms, 'upload_sms');
   const canApprove = canDoShore(shorePerms, 'approve_sms');

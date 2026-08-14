@@ -58,6 +58,11 @@ export interface TenantRow {
   storage_status?: 'NORMAL' | 'WARNING' | 'LIMIT_REACHED' | 'OVER_LIMIT';
   storage_remaining_gb?: number;
   storage_percentage?: number;
+  workspace_frozen: boolean;
+  max_subfolder_depth: number;
+  max_upload_size_mb: number;
+  auto_backup_interval_hours: number | null;
+  last_auto_backup_at: string | null;
 }
 
 export interface TenantUserRow {
@@ -156,6 +161,8 @@ export interface AuditLogRow {
   ip_address: string | null;
   location: string | null;
   severity: 'info' | 'warning' | 'critical';
+  before_data: Record<string, unknown> | null;
+  after_data: Record<string, unknown> | null;
   created_at: string;
 }
 

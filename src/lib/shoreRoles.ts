@@ -490,9 +490,9 @@ export function resolveShoreRoleName(rank: string | null | undefined): string {
   return partial?.role ?? 'Designated Person Ashore (DPA)';
 }
 
-/** Get the shore permission map for a specific role (merged defaults + overrides). */
-export function getShorePermsForRole(tenantId: string, role: string): ShorePermissionMap {
-  return normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[role] ?? {});
-}
+// The shore permission map for a specific role (merged defaults +
+// overrides) is now always sourced from useShoreRolePermissions(tenantId)
+// — a synchronous, tenant-blind getter can't reflect a Company Admin's
+// saved overrides, which was the whole point of the Permissions Matrix.
 
 export { emptyShoreActions, normalizeShorePerms };

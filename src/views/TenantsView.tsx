@@ -115,6 +115,23 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
           return;
         }
         setSaveBusy(false);
+        await logAudit({
+          tenantId: editing.id,
+          actorEmail: user?.email ?? "super-admin",
+          category: "tenant",
+          action: `Tenant edited: ${tenant.company}`,
+          target: tenant.company,
+          before: {
+            company: editing.company, contact_email: editing.contactEmail, plan: editing.plan, status: editing.status,
+            region: editing.region, vessels_max: editing.vessels.max, seats_max: editing.seats.max,
+            storage_gb_max: editing.storageGb.max, monthly_revenue: editing.monthlyRevenue, mfa_enforced: editing.mfaEnforced,
+          },
+          after: {
+            company: tenant.company, contact_email: tenant.contactEmail, plan: tenant.plan, status: tenant.status,
+            region: tenant.region, vessels_max: tenant.vessels.max, seats_max: tenant.seats.max,
+            storage_gb_max: tenant.storageGb.max, monthly_revenue: tenant.monthlyRevenue, mfa_enforced: tenant.mfaEnforced,
+          },
+        });
       }
       dispatch({ type: "TENANT_UPDATE", id: editing.id, patch: tenant });
       toast({
@@ -207,6 +224,16 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
         });
         return false;
       }
+      await logAudit({
+        tenantId: t.id,
+        actorEmail: user?.email ?? "super-admin",
+        category: "tenant",
+        action: `Tenant ${status}: ${t.company}`,
+        target: t.company,
+        severity: status === "suspended" || status === "archived" ? "critical" : "info",
+        before: { status: t.status },
+        after: { status },
+      });
     }
     dispatch({ type: "TENANT_SET_STATUS", id: t.id, status });
     return true;
@@ -230,6 +257,15 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       });
     } else {
       dispatch({ type: "IMPERSONATE_START", tenantId: t.id });
+      void logAudit({
+        tenantId: t.id,
+        actorEmail: user?.email ?? "super-admin",
+        category: "impersonation",
+        action: `Login As — impersonation started: ${t.company}`,
+        target: t.contactEmail,
+        severity: "critical",
+        after: { impersonating: true, tenant: t.company },
+      });
       toast({
         tone: "info",
         title: "Impersonation started",
@@ -299,6 +335,15 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
                 });
                 return;
               }
+              await logAudit({
+                tenantId: t.id,
+                actorEmail: user?.email ?? "super-admin",
+                category: "billing",
+                action: `Plan tier changed to ${plan}: ${t.company}`,
+                target: t.company,
+                before: { plan: t.plan, vessels_max: t.vessels.max, seats_max: t.seats.max, storage_gb_max: t.storageGb.max, monthly_revenue: t.monthlyRevenue },
+                after: { plan, vessels_max: d.vessels, seats_max: d.seats, storage_gb_max: d.storageGb, monthly_revenue: d.monthly },
+              });
             }
             dispatch({ type: "TENANT_SET_PLAN", id: t.id, plan });
             toast({
@@ -674,6 +719,19 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
             if (isRealTenantId(deleteTarget.id)) {
               await api.apiDeleteTenantPermanent(deleteTarget.id);
             }
+            await logAudit({
+              // No tenantId — the tenant (and its own audit_logs rows, via
+              // ON DELETE CASCADE) is already gone by this point, so a
+              // tenant-scoped entry would violate the FK and be lost. Same
+              // platform-level pattern as the staff hard-delete audit entry.
+              actorEmail: user?.email ?? "unknown",
+              category: "tenant",
+              action: `Tenant permanently deleted: ${deleteTarget.company}`,
+              target: deleteTarget.company,
+              severity: "critical",
+              before: { status: deleteTarget.status, company: deleteTarget.company },
+              after: { status: "deleted" },
+            });
             dispatch({ type: "TENANT_DELETE", id: deleteTarget.id });
             toast({
               tone: "danger",

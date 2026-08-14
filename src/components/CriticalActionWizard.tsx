@@ -187,7 +187,7 @@ export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }:
           </div>
           <div>
             <label className="label">
-              Type exactly: <span className="font-mono text-danger-600 dark:text-danger-400">{target.confirmPhrase}</span>
+              Type exactly: <span className="normal-case font-mono text-danger-600 dark:text-danger-400">{target.confirmPhrase}</span>
             </label>
             <input
               autoFocus

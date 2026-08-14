@@ -1,4 +1,5 @@
-import { getEffectiveDemoVessels } from './demoData';
+import { getEffectiveDemoVessels, getEffectiveDemoSmsDocs } from './demoData';
+import { refreshTenantData } from './dataCache';
 import {
   apiGetSmsProfiles, apiCreateSmsProfile, apiUpdateSmsProfile, apiDeleteSmsProfile,
   apiGetProfileVessels, apiAssignProfileVessel, apiUnassignProfileVessel,
@@ -97,6 +98,19 @@ export async function getVesselsForTenant(tenantId: string): Promise<{ id: strin
   }));
 }
 
-export async function countApprovedDocsForProfile(_tenantId: string, _profileId: string | null, _sinceISO?: string): Promise<number> {
-  return 0;
+// Real count of approved SMS documents visible to a vessel's profile
+// (profile-specific docs, plus fleet-wide docs with no profile_id — same
+// visibility rule as getEffectiveDemoSmsDocs) that were approved since the
+// vessel's last sync. Refreshes the cache first so a doc approved moments
+// ago by the DPA is counted, not just what was cached at page load.
+export async function countApprovedDocsForProfile(tenantId: string, profileId: string | null, sinceISO?: string): Promise<number> {
+  await refreshTenantData(tenantId).catch(() => {});
+  const docs = getEffectiveDemoSmsDocs(tenantId);
+  const since = sinceISO ? new Date(sinceISO).getTime() : 0;
+  return docs.filter((d) =>
+    d.node_kind === 'document' &&
+    d.approval_state === 'approved' &&
+    (d.profile_id === null || d.profile_id === profileId) &&
+    new Date(d.updated_at).getTime() > since,
+  ).length;
 }

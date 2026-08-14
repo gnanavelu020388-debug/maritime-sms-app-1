@@ -1,8 +1,19 @@
 import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import bcrypt from 'bcryptjs';
+import crypto from 'crypto';
 import pool from '../db.js';
 import { authMiddleware, requireSuperAdmin } from '../middleware/auth.js';
+
+// Readable, unambiguous (no 0/O/1/I) — matches what a Master would read
+// aloud or hand-write for a crew member at sea.
+function generateEmergencyOtp() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const bytes = crypto.randomBytes(8);
+  let otp = '';
+  for (let i = 0; i < 8; i++) otp += chars[bytes[i] % chars.length];
+  return otp;
+}
 
 const router = Router();
 
@@ -34,7 +45,7 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
     }
     const { name, email, password, rank, role, nationality, employee_id, passport_number, seaman_book_number, status, fleet_scope, assigned_vessel_ids, assigned_fleet_profile_ids } = req.body;
     const id = uuidv4();
-    const defaultPass = '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy'; // bcrypt hash of 'demo'
+    const defaultPass = '$2a$10$/RceoxCFoo88Mt8kCf4akuGNGM/9VyiIygSpRuz17ZALoU26qqBRS'; // bcrypt hash of 'demo'
 
     // If this email already self-registered (app_users), it'll be superseded by
     // the tenant_users row below — otherwise granting tenant access here would
@@ -86,8 +97,8 @@ router.put('/:tenantId/:userId', authMiddleware, async (req, res) => {
     if (req.body.assigned_vessel_ids !== undefined) { sets.push('assigned_vessel_ids = ?'); vals.push(JSON.stringify(req.body.assigned_vessel_ids)); }
     if (req.body.assigned_fleet_profile_ids !== undefined) { sets.push('assigned_fleet_profile_ids = ?'); vals.push(JSON.stringify(req.body.assigned_fleet_profile_ids)); }
     if (sets.length === 0) return res.json({ error: 'No fields to update' });
-    vals.push(req.params.userId);
-    await pool.query(`UPDATE tenant_users SET ${sets.join(', ')} WHERE id = ? AND tenant_id = ?`, [req.params.userId, tid]);
+    vals.push(req.params.userId, tid);
+    await pool.query(`UPDATE tenant_users SET ${sets.join(', ')} WHERE id = ? AND tenant_id = ?`, vals);
     const [rows] = await pool.query('SELECT * FROM tenant_users WHERE id = ?', [req.params.userId]);
     return res.json(parseUser(rows[0]));
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
@@ -102,6 +113,41 @@ router.delete('/:tenantId/:userId', authMiddleware, async (req, res) => {
     await pool.query('UPDATE crew_assignments SET signed_off_at = NOW() WHERE user_id = ? AND tenant_id = ? AND signed_off_at IS NULL', [req.params.userId, tid]);
     await pool.query('DELETE FROM tenant_users WHERE id = ? AND tenant_id = ?', [req.params.userId, tid]);
     return res.json({ success: true });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+// Vessel Master "Emergency Password Reset" — a real credential rotation
+// for a crew member who's locked out at sea with no shore IT available.
+// Any authenticated user of the tenant can call this (matches the existing
+// tenant-scoped access pattern on every other route in this file — the
+// app has no finer-grained "is this user actually the Master" backend
+// check anywhere, so this is consistent with, not weaker than, the rest
+// of the API surface). The plaintext is returned exactly once.
+router.put('/:tenantId/:userId/emergency-reset', authMiddleware, async (req, res) => {
+  try {
+    const tid = req.params.tenantId;
+    if (req.user.role !== 'super_admin' && req.user.tenant_id !== tid) {
+      return res.status(403).json({ error: 'Access denied' });
+    }
+    const tempPassword = generateEmergencyOtp();
+    const passwordHash = await bcrypt.hash(tempPassword, 10);
+    const [result] = await pool.query(
+      'UPDATE tenant_users SET password_hash = ?, must_change_password = TRUE WHERE id = ? AND tenant_id = ?',
+      [passwordHash, req.params.userId, tid],
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'User not found' });
+    return res.json({ tempPassword });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+// Super Admin "Trigger tenant password reset" emergency action — forces
+// every user at a tenant to set a new password on next sign-in. A real,
+// tenant-wide write, not a per-user endpoint, since the emergency-response
+// use case is "something at this company may be compromised."
+router.put('/:tenantId/force-password-reset', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const [result] = await pool.query('UPDATE tenant_users SET must_change_password = TRUE WHERE tenant_id = ?', [req.params.tenantId]);
+    return res.json({ affected: result.affectedRows });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 

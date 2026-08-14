@@ -3,6 +3,7 @@ import { SECTIONS, PLATFORM_NAME, PLATFORM_SHORT } from '../constants';
 import { useStore } from '../store';
 import type { SectionId } from '../types';
 import { canAccessSection, INTERNAL_ROLE_LABEL, type InternalRole } from '../lib/permissions';
+import { useModuleDefinitions, getDisplayName } from '../lib/featureFlags';
 
 const ICONS: Record<string, typeof LayoutDashboard> = {
   dashboard: LayoutDashboard,
@@ -31,6 +32,7 @@ export function Sidebar({
   roleKey: InternalRole;
 }) {
   const { tenants } = useStore();
+  const { defs } = useModuleDefinitions();
   const activeCount = tenants.filter((t) => t.status === 'active').length;
   const archivedCount = tenants.filter((t) => t.status === 'archived').length;
   const groups = ['Operate', 'Govern', 'Commercial'] as const;
@@ -68,6 +70,10 @@ export function Sidebar({
                   const isActive = active === s.id;
                   const allowed = canAccessSection(roleKey, s.id as SectionId);
                   const showArchived = s.id === 'tenants' && archivedCount > 0;
+                  // The 'sms' nav item names the same module as the Feature
+                  // Matrix's "SMS Documentation" column — always shown with
+                  // whatever display name is stored there.
+                  const label = s.id === 'sms' ? getDisplayName('sms_documentation', defs) : s.label;
                   return (
                     <button
                       key={s.id}
@@ -82,7 +88,7 @@ export function Sidebar({
                         : 'text-ink-600 hover:bg-ink-100 hover:text-ink-900 dark:text-ink-300 dark:hover:bg-ink-800 dark:hover:text-white'}`}
                     >
                       <Icon className={`h-[18px] w-[18px] ${isActive ? 'text-primary-600 dark:text-primary-400' : ''}`} />
-                      <span className="flex-1 truncate">{s.label}</span>
+                      <span className="flex-1 truncate">{label}</span>
                       {!allowed && <Lock className="h-3 w-3 shrink-0 text-ink-400" />}
                       {s.id === 'tenants' && (
                         <span className="rounded-full bg-ink-100 px-1.5 py-0.5 text-[10px] font-bold text-ink-500 dark:bg-ink-800 dark:text-ink-400">

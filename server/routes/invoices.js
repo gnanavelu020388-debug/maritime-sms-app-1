@@ -49,4 +49,27 @@ router.post('/', authMiddleware, requireSuperAdmin, async (req, res) => {
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
+// Billing reminders — no outbound email service exists in this deployment,
+// so this is honest about what actually happens: a real, persisted,
+// auditable record that a reminder was sent, rather than fabricating an
+// email delivery pipeline. See BillingView.tsx "Send Reminder Email Now".
+router.post('/:tenantId/reminders', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const id = uuidv4();
+    await pool.query(
+      'INSERT INTO billing_reminders (id, tenant_id, sent_by, note) VALUES (?,?,?,?)',
+      [id, req.params.tenantId, req.user.email || null, req.body.note || null],
+    );
+    const [rows] = await pool.query('SELECT * FROM billing_reminders WHERE id = ?', [id]);
+    return res.status(201).json(rows[0]);
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+router.get('/:tenantId/reminders', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM billing_reminders WHERE tenant_id = ? ORDER BY sent_at DESC LIMIT 50', [req.params.tenantId]);
+    return res.json(rows);
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
 export default router;

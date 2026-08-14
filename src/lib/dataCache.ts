@@ -155,3 +155,95 @@ export function setCachedAuditLogs(tenantId: string, logs: AuditLogRow[]): void 
   cache.auditLogs.set(tenantId, logs);
   notifyListeners();
 }
+
+// ── Targeted single-row cache patches ──────────────────────────────────────
+// Every write mutation (create/update/delete) already gets the canonical
+// row back from the API in its response. Patching that one row into the
+// cache directly — instead of re-fetching all five tenant collections via
+// refreshTenantData() — makes the tab that performed the write (and every
+// other mounted view sharing this cache) show the new value the instant the
+// write resolves, with no second network round trip. The API call itself is
+// still the thing that persists the change; this just avoids re-asking the
+// server for data we were already just handed.
+
+function upsertById<T extends { id: string }>(list: T[], row: T): T[] {
+  const idx = list.findIndex((r) => r.id === row.id);
+  return idx === -1 ? [...list, row] : list.map((r, i) => (i === idx ? row : r));
+}
+
+export function upsertCachedTenant(tenant: TenantRow): void {
+  cache.tenants = upsertById(cache.tenants, tenant);
+  notifyListeners();
+}
+
+export function patchCachedTenant(tenantId: string, patch: Partial<TenantRow>): void {
+  cache.tenants = cache.tenants.map((t) => (t.id === tenantId ? { ...t, ...patch } : t));
+  notifyListeners();
+}
+
+export function upsertCachedUser(tenantId: string, user: TenantUserRow): void {
+  cache.users.set(tenantId, upsertById(cache.users.get(tenantId) ?? [], user));
+  notifyListeners();
+}
+
+export function patchCachedUser(tenantId: string, userId: string, patch: Partial<TenantUserRow>): void {
+  cache.users.set(tenantId, (cache.users.get(tenantId) ?? []).map((u) => (u.id === userId ? { ...u, ...patch } : u)));
+  notifyListeners();
+}
+
+// Mirrors the server's cascade for a hard user delete (tenant_users row
+// removed, crew_assignments.user_id has ON DELETE CASCADE — see
+// server/routes/users.js and schema.sql) so the vessel manning view doesn't
+// keep showing a deleted crew member as signed on until its next full reload.
+export function removeCachedUser(tenantId: string, userId: string): void {
+  cache.users.set(tenantId, (cache.users.get(tenantId) ?? []).filter((u) => u.id !== userId));
+  cache.assignments.set(tenantId, (cache.assignments.get(tenantId) ?? []).filter((a) => a.user_id !== userId));
+  notifyListeners();
+}
+
+export function upsertCachedVessel(tenantId: string, vessel: VesselRow): void {
+  cache.vessels.set(tenantId, upsertById(cache.vessels.get(tenantId) ?? [], vessel));
+  notifyListeners();
+}
+
+// Mirrors the server's ON DELETE CASCADE from vessels to crew_assignments.
+export function removeCachedVessel(tenantId: string, vesselId: string): void {
+  cache.vessels.set(tenantId, (cache.vessels.get(tenantId) ?? []).filter((v) => v.id !== vesselId));
+  cache.assignments.set(tenantId, (cache.assignments.get(tenantId) ?? []).filter((a) => a.vessel_id !== vesselId));
+  notifyListeners();
+}
+
+export function upsertCachedAssignment(tenantId: string, assignment: CrewAssignmentRow): void {
+  cache.assignments.set(tenantId, upsertById(cache.assignments.get(tenantId) ?? [], assignment));
+  notifyListeners();
+}
+
+// Mirrors PUT /users/:tenantId/:userId/deactivate, which signs off this
+// user's active assignment(s) server-side before flipping their status —
+// the deactivate endpoint only returns {success}, not a row, so there's no
+// response to patch from and this has to replay the same rule locally.
+export function signOffCachedAssignmentsForUser(tenantId: string, userId: string): void {
+  const now = new Date().toISOString();
+  cache.assignments.set(tenantId, (cache.assignments.get(tenantId) ?? []).map((a) => (a.user_id === userId && !a.signed_off_at ? { ...a, signed_off_at: now } : a)));
+  notifyListeners();
+}
+
+// logAudit() (src/lib/audit.ts) posts fire-and-forget to /audit-logs, which
+// only returns {success, id} — not a row — so it synthesizes one from the
+// payload it already had and prepends it here, keeping the tenant-scoped
+// Audit Log tab (CompanyAuditView) live without a network re-fetch.
+export function prependCachedAuditLog(tenantId: string, log: AuditLogRow): void {
+  cache.auditLogs.set(tenantId, [log, ...(cache.auditLogs.get(tenantId) ?? [])]);
+  notifyListeners();
+}
+
+export function upsertCachedSmsDoc(tenantId: string, doc: SmsDocRow): void {
+  cache.smsDocs.set(tenantId, upsertById(cache.smsDocs.get(tenantId) ?? [], doc));
+  notifyListeners();
+}
+
+export function removeCachedSmsDocs(tenantId: string, docIds: Iterable<string>): void {
+  const idSet = new Set(docIds);
+  cache.smsDocs.set(tenantId, (cache.smsDocs.get(tenantId) ?? []).filter((d) => !idSet.has(d.id)));
+  notifyListeners();
+}

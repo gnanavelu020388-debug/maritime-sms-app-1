@@ -12,7 +12,7 @@ import { VesselSyncStatusCompact } from '../components/VesselSyncStatusPill';
 import { getSyncStatus } from '../lib/syncService';
 import { useFeatureFlags, useModuleDefinitions, getDisplayName, type ModuleKey } from '../lib/featureFlags';
 import { SessionSecurityGuard, broadcastSecurityTenant } from '../components/SessionSecurityGuard';
-import { getShorePermsForRole, resolveShoreRoleName, canDoShore } from '../lib/shoreRoles';
+import { useShoreRolePermissions, resolveShoreRoleName, canDoShore, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS } from '../lib/shoreRoles';
 import { NetworkStatusBadge } from '../components/NetworkStatusBadge';
 import { ReconnectionBanner } from '../components/ReconnectionBanner';
 
@@ -53,6 +53,7 @@ export function DpaShell({ children, active }: { children: ReactNode; active: Dp
   const { isEnabled } = useFeatureFlags(tenant?.id);
   const { defs } = useModuleDefinitions();
   const smsLabel = getDisplayName('sms_documentation', defs);
+  const { permissions: shoreRolePerms } = useShoreRolePermissions(tenant?.id);
 
   const STATIC_NAV: NavItemDef[] = STATIC_NAV_IDS.map((s) => ({
     ...s,
@@ -63,7 +64,7 @@ export function DpaShell({ children, active }: { children: ReactNode; active: Dp
   const shoreNavItems = useMemo(() => {
     if (!tenant) return [];
     const shoreRoleName = resolveShoreRoleName(tenantUser?.rank);
-    const perms = getShorePermsForRole(tenant.id, shoreRoleName);
+    const perms = shoreRolePerms[shoreRoleName] ?? normalizeShorePerms(DEFAULT_SHORE_PERMISSIONS[shoreRoleName] ?? {});
     const labelMap: Record<DpaSection, string> = {
       fleet: 'Fleet & Vessel Profiles',
       crew: 'Crew & User Management',
@@ -81,7 +82,7 @@ export function DpaShell({ children, active }: { children: ReactNode; active: Dp
       feature: item.feature,
       perm: item.perm,
     }));
-  }, [tenant, tenantUser?.rank, smsLabel]);
+  }, [tenant, tenantUser?.rank, smsLabel, shoreRolePerms]);
 
   const allNav = [...STATIC_NAV, ...shoreNavItems];
   const items = allNav.filter((n) => isEnabled(n.feature));

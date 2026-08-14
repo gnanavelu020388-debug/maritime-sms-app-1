@@ -45,28 +45,50 @@ function roleActionBucket(e: AuditEvent): 'support' | 'auditor' | 'superadmin' |
   return 'general';
 }
 
-// Generate a synthetic before/after delta based on the action
-function auditDelta(e: AuditEvent): { field: string; before: string; after: string }[] {
-  const a = e.action.toLowerCase();
-  if (a.includes('suspend')) return [{ field: 'tenant.status', before: 'Active', after: 'Suspended' }];
-  if (a.includes('activ')) return [{ field: 'tenant.status', before: 'Suspended', after: 'Active' }];
-  if (a.includes('plan tier') || a.includes('tier overrid')) return [{ field: 'tenant.plan', before: 'Standard', after: 'Professional' }, { field: 'tenant.vessels.max', before: '5', after: '20' }];
-  if (a.includes('pricing')) return [{ field: 'tierConfig.monthly', before: '$1,200', after: '$1,500' }];
-  if (a.includes('archiv')) return [{ field: 'tenant.status', before: 'Active', after: 'Archived' }];
-  if (a.includes('restore')) return [{ field: 'tenant.data_state', before: 'current (live)', after: 'restored from snapshot' }];
-  if (a.includes('backup') || a.includes('snapshot')) return [{ field: 'backup.snapshot_count', before: '6', after: '7' }, { field: 'backup.last_snapshot_id', before: '—', after: `SNP-${e.id.slice(-4)}` }];
-  if (a.includes('password reset')) return [{ field: 'user.password', before: '********', after: '******** (reset)' }, { field: 'user.locked', before: 'false', after: 'true' }];
-  if (a.includes('locked')) return [{ field: 'user.locked', before: 'false', after: 'true' }];
-  if (a.includes('mfa enforcement')) return [{ field: 'platform.global_mfa', before: 'false', after: 'true' }];
-  if (a.includes('mfa challenge')) return [{ field: 'auth.mfa_verified', before: 'false', after: 'true' }];
-  if (a.includes('sign-in')) return [{ field: 'auth.session', before: '—', after: 'established' }];
-  if (a.includes('impersonation started')) return [{ field: 'session.impersonating', before: 'false', after: 'true' }, { field: 'session.target_tenant', before: '—', after: e.target }];
-  if (a.includes('impersonation ended')) return [{ field: 'session.impersonating', before: 'true', after: 'false' }];
-  if (a.includes('invoice')) return [{ field: 'invoice.status', before: 'draft', after: 'issued' }];
-  if (a.includes('renewal email')) return [{ field: 'contract.reminder_sent', before: 'false', after: 'true' }];
-  if (a.includes('sms push')) return [{ field: 'sms.version', before: '2.3.0', after: '2.4.0' }];
-  if (a.includes('maintenance')) return [{ field: 'platform.banner', before: '—', after: 'published' }];
-  return [{ field: 'state', before: '—', after: e.action }];
+// Real field-level delta from the event's captured before/after state (see
+// src/lib/audit.ts logAudit) — no guessing. Returns null when the call
+// site that logged this event didn't capture before/after data (e.g. a
+// create, a login, or an action with no natural before/after state).
+function formatDeltaValue(v: unknown): string {
+  if (v === undefined) return '—';
+  if (v === null) return 'null';
+  if (typeof v === 'object') return JSON.stringify(v);
+  return String(v);
+}
+
+function auditDelta(e: AuditEvent): { field: string; before: string; after: string }[] | null {
+  if (!e.beforeData && !e.afterData) return null;
+  const keys = Array.from(new Set([...Object.keys(e.beforeData ?? {}), ...Object.keys(e.afterData ?? {})]));
+  if (keys.length === 0) return null;
+  return keys.map((field) => ({
+    field,
+    before: formatDeltaValue(e.beforeData?.[field]),
+    after: formatDeltaValue(e.afterData?.[field]),
+  }));
+}
+
+function csvEscape(v: string): string {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+// Real client-side CSV export of exactly the rows currently on screen
+// (post-filter) — no server round trip needed since `audit` is already
+// fully hydrated from the real audit_logs table.
+function exportLedgerCsv(events: AuditEvent[]): void {
+  const header = ['Timestamp (UTC)', 'Actor', 'Category', 'Action', 'Target', 'Severity', 'Company ID', 'Impersonation'];
+  const rows = events.map((e) => [
+    formatUtc(e.ts), e.actor, e.category, e.action, e.target, e.severity, e.companyId ?? '', e.impersonation ? 'yes' : 'no',
+  ]);
+  const csv = [header, ...rows].map((r) => r.map((c) => csvEscape(String(c))).join(',')).join('\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `audit-ledger-${new Date().toISOString().slice(0, 10)}.csv`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
 }
 
 export function SecurityView({ caps }: { caps: Capabilities }) {
@@ -122,7 +144,7 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
         subtitle="Append-only · expand any row for full event inspection · all times UTC / GMT"
         icon={<ShieldCheck className="h-4 w-4" />}
         actions={
-          <button onClick={() => {}} disabled={!caps.securityEdit} className="btn-secondary shrink-0 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /> Export ledger</button>
+          <button onClick={() => exportLedgerCsv(filtered)} disabled={!caps.securityEdit || filtered.length === 0} className="btn-secondary shrink-0 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /> Export ledger</button>
         }
       >
         {/* Filters */}
@@ -335,26 +357,30 @@ function EventDetailDrawer({ event, user }: { event: AuditEvent; user?: Internal
       {/* Field-Level Audit Delta */}
       <div className="rounded-xl border border-ink-200/70 bg-white p-4 dark:border-ink-800 dark:bg-ink-900">
         <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-500"><GitCompare className="h-3.5 w-3.5" /> Field-Level Audit Delta</p>
-        <div className="overflow-hidden rounded-lg border border-ink-200 dark:border-ink-700">
-          <table className="w-full text-left text-xs">
-            <thead className="bg-ink-50/80 text-[10px] uppercase tracking-wide text-ink-500 dark:bg-ink-800/60">
-              <tr>
-                <th className="px-2.5 py-1.5 font-semibold">Field</th>
-                <th className="px-2.5 py-1.5 font-semibold">Before</th>
-                <th className="px-2.5 py-1.5 font-semibold">After</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-              {delta.map((d) => (
-                <tr key={d.field} className="bg-white dark:bg-ink-900">
-                  <td className="px-2.5 py-1.5 font-mono text-ink-600 dark:text-ink-300">{d.field}</td>
-                  <td className="px-2.5 py-1.5 text-ink-400 line-through">{d.before}</td>
-                  <td className="px-2.5 py-1.5 font-semibold text-success-600 dark:text-success-400">{d.after}</td>
+        {delta === null ? (
+          <p className="rounded-lg bg-ink-50 p-3 text-xs text-ink-400 dark:bg-ink-800/50">No field-level before/after was recorded for this action.</p>
+        ) : (
+          <div className="overflow-hidden rounded-lg border border-ink-200 dark:border-ink-700">
+            <table className="w-full text-left text-xs">
+              <thead className="bg-ink-50/80 text-[10px] uppercase tracking-wide text-ink-500 dark:bg-ink-800/60">
+                <tr>
+                  <th className="px-2.5 py-1.5 font-semibold">Field</th>
+                  <th className="px-2.5 py-1.5 font-semibold">Before</th>
+                  <th className="px-2.5 py-1.5 font-semibold">After</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
+                {delta.map((d) => (
+                  <tr key={d.field} className="bg-white dark:bg-ink-900">
+                    <td className="px-2.5 py-1.5 font-mono text-ink-600 dark:text-ink-300">{d.field}</td>
+                    <td className="px-2.5 py-1.5 text-ink-400 line-through">{d.before}</td>
+                    <td className="px-2.5 py-1.5 font-semibold text-success-600 dark:text-success-400">{d.after}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
         {event.impersonation && (
           <p className="mt-2 flex items-center gap-1 text-[10px] font-bold text-danger-600 dark:text-danger-400">
             <ShieldAlert className="h-3 w-3" /> Executed during impersonation session

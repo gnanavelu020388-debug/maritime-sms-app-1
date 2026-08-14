@@ -14,6 +14,8 @@
  * recovers, we seamlessly switch back to VESSEL_SERVER_LAN.
  */
 
+import { getLocalSmsVersion } from './localVesselDb';
+
 export type ConnectionMode = 'VESSEL_SERVER_LAN' | 'CLOUD_DIRECT';
 
 export interface VesselConnectionState {
@@ -36,7 +38,6 @@ export interface SyncStatusInfo {
 
 const DEFAULT_SERVER_URL = 'http://vessel-server.local:8080';
 const HEARTBEAT_INTERVAL_MS = 20_000;
-const HEARTBEAT_TIMEOUT_MS = 5_000;
 const STATE_KEY_PREFIX = 'mpc-vessel-connection';
 
 function stateKey(tenantId: string): string {
@@ -86,18 +87,21 @@ function persistActiveState(): void {
   if (activeTenantId) persistState(activeTenantId, currentState);
 }
 
-/** In the browser sandbox, we simulate the local vessel server /health probe. */
-async function pingHealth(_serverUrl: string): Promise<boolean> {
-  // In production this would be: fetch(`${serverUrl}/health`, { signal: controller })
-  // In the browser simulation, we treat the local IndexedDB cache as the "vessel server".
-  // If the cache has been seeded (has a local SMS version), the "server" is up.
+/**
+ * There is no separate onboard vessel-server process in this browser-based
+ * deployment (see the module docstring above) — the "vessel server" IS the
+ * browser's own IndexedDB cache (localVesselDb.ts). So a real reachability
+ * check here means exactly what the architecture actually is: the browser
+ * itself must be online, AND the local cache must actually be seeded with
+ * an SMS version (i.e. a real successful sync has happened at least once).
+ * Neither of those was previously checked — this always returned true.
+ */
+async function pingHealth(tenantId: string | null): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return false;
+  if (!tenantId) return true;
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), HEARTBEAT_TIMEOUT_MS);
-    clearTimeout(timeout);
-    // Simulated: always "reachable" in LAN mode if we're in the browser.
-    // Real implementation would ping the actual endpoint.
-    return true;
+    const version = await getLocalSmsVersion(tenantId);
+    return version !== null;
   } catch {
     return false;
   }
@@ -131,7 +135,7 @@ export function setServerUrl(url: string): void {
 }
 
 async function runHeartbeat(): Promise<void> {
-  const ok = await pingHealth(currentState.serverUrl);
+  const ok = await pingHealth(activeTenantId);
   const now = new Date().toISOString();
   const wasReachable = currentState.serverReachable;
 

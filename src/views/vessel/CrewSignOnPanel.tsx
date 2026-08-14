@@ -14,6 +14,7 @@ import { CREW_STATUS } from '../../lib/rankPermissions';
 import { MODULE_KEYS, MODULE_LABELS, type ModuleKey } from '../../lib/featureFlags';
 import { Modal } from '../../components/Modal';
 import { Badge } from '../../components/Badge';
+import { apiGetGalleyStatus, type GalleyStatus } from '../../lib/api';
 
 interface PendingCrew {
   user: TenantUserRow;
@@ -38,6 +39,16 @@ export function CrewSignOnPanel({
   const [firstMeal, setFirstMeal] = useState('lunch');
   const [search, setSearch] = useState('');
   const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+  const [galley, setGalley] = useState<GalleyStatus | null>(null);
+
+  const loadGalley = async () => {
+    if (!vesselId) return;
+    try {
+      setGalley(await apiGetGalleyStatus(tenantId, vesselId));
+    } catch {
+      // best-effort — galley card just stays hidden if this fails
+    }
+  };
 
   const licensedModuleLabels = useMemo(() => {
     return MODULE_KEYS.filter((k) => enabledModules.has(k)).map((k) => MODULE_LABELS[k as ModuleKey].label);
@@ -67,7 +78,7 @@ export function CrewSignOnPanel({
     setLoading(false);
   };
 
-  useEffect(() => { load(); }, [tenantId, vesselId]);
+  useEffect(() => { load(); loadGalley(); }, [tenantId, vesselId]);
 
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
@@ -77,67 +88,85 @@ export function CrewSignOnPanel({
   async function executeSignOn(user: TenantUserRow, meal: string) {
     if (!vesselId) return;
     setBusy(user.id);
-    demoSetUserStatus(tenantId, user.id, 'active');
-    demoSignOn(tenantId, user.id, vesselId, user.rank);
+    try {
+      await demoSetUserStatus(tenantId, user.id, 'active');
+      await demoSignOn(tenantId, user.id, vesselId, user.rank);
 
-    await logAudit({
-      tenantId,
-      actorEmail,
-      category: 'crew',
-      action: `MASTER SIGN-ON: ${user.name} (${user.rank}) signed on to ${vesselName}. Universal access activated across ${licensedModuleLabels.length} licensed modules: ${licensedModuleLabels.join(', ')}. First meal: ${meal}.`,
-      target: user.email,
-      location: vesselName,
-      severity: 'info',
-    });
-
-    if (enabledModules.has('haccp_galley')) {
       await logAudit({
         tenantId,
         actorEmail,
-        category: 'galley',
-        action: `VICTUALLING CASCADE: Headcount +1 (${user.name}) on ${vesselName}. Daily meal provisioning calculations adjusted automatically. First meal registered: ${meal}.`,
+        category: 'crew',
+        action: `MASTER SIGN-ON: ${user.name} (${user.rank}) signed on to ${vesselName}. Universal access activated across ${licensedModuleLabels.length} licensed modules: ${licensedModuleLabels.join(', ')}. First meal: ${meal}.`,
         target: user.email,
         location: vesselName,
         severity: 'info',
       });
-    }
 
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId, payload: { action: 'master_sign_on', userId: user.id, vessel: vesselName, modules: licensedModuleLabels } });
-    setBusy(null);
-    setSignOnFor(null);
-    showToast(`${user.name} signed on successfully. Login access unlocked across ${licensedModuleLabels.length} licensed modules. ${enabledModules.has('haccp_galley') ? 'Galley victualling headcount updated (+1).' : ''}`, true);
-    load();
+      if (enabledModules.has('haccp_galley')) {
+        const status = await apiGetGalleyStatus(tenantId, vesselId).catch(() => null);
+        await logAudit({
+          tenantId,
+          actorEmail,
+          category: 'galley',
+          action: status
+            ? `VICTUALLING: ${user.name} signed on to ${vesselName} — headcount now ${status.headcount}. Today's provisioning: ${status.breakfast_kg}kg breakfast, ${status.lunch_kg}kg lunch, ${status.dinner_kg}kg dinner. First meal registered: ${meal}.`
+            : `VICTUALLING: ${user.name} signed on to ${vesselName}. Headcount update failed to confirm — check galley status manually.`,
+          target: user.email,
+          location: vesselName,
+          severity: 'info',
+        });
+        setGalley(status);
+      }
+
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId, payload: { action: 'master_sign_on', userId: user.id, vessel: vesselName, modules: licensedModuleLabels } });
+      setSignOnFor(null);
+      showToast(`${user.name} signed on successfully. Login access unlocked across ${licensedModuleLabels.length} licensed modules.${enabledModules.has('haccp_galley') && galley ? ` Galley headcount now ${galley.headcount}.` : ''}`, true);
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Sign-on failed.', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function executeSignOff(user: TenantUserRow, assignment: CrewAssignmentRow | null) {
     if (!assignment) return;
     setBusy(user.id);
-    demoSignOff(tenantId, assignment.id);
-    demoSetUserStatus(tenantId, user.id, 'active');
-    await logAudit({
-      tenantId,
-      actorEmail,
-      category: 'crew',
-      action: `MASTER SIGN-OFF: ${user.name} (${user.rank}) signed off from ${vesselName}. Universal access revoked.`,
-      target: user.email,
-      location: vesselName,
-      severity: 'warning',
-    });
-    if (enabledModules.has('haccp_galley')) {
+    try {
+      await demoSignOff(tenantId, assignment.id);
+      await demoSetUserStatus(tenantId, user.id, 'active');
       await logAudit({
         tenantId,
         actorEmail,
-        category: 'galley',
-        action: `VICTUALLING CASCADE: Headcount -1 (${user.name}) on ${vesselName}. Daily meal provisioning calculations adjusted.`,
+        category: 'crew',
+        action: `MASTER SIGN-OFF: ${user.name} (${user.rank}) signed off from ${vesselName}. Universal access revoked.`,
         target: user.email,
         location: vesselName,
-        severity: 'info',
+        severity: 'warning',
       });
+      if (enabledModules.has('haccp_galley') && vesselId) {
+        const status = await apiGetGalleyStatus(tenantId, vesselId).catch(() => null);
+        await logAudit({
+          tenantId,
+          actorEmail,
+          category: 'galley',
+          action: status
+            ? `VICTUALLING: ${user.name} signed off from ${vesselName} — headcount now ${status.headcount}. Today's provisioning: ${status.breakfast_kg}kg breakfast, ${status.lunch_kg}kg lunch, ${status.dinner_kg}kg dinner.`
+            : `VICTUALLING: ${user.name} signed off from ${vesselName}. Headcount update failed to confirm — check galley status manually.`,
+          target: user.email,
+          location: vesselName,
+          severity: 'info',
+        });
+        setGalley(status);
+      }
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId, payload: { action: 'master_sign_off', userId: user.id, vessel: vesselName } });
+      showToast(`${user.name} signed off. Login access revoked.${enabledModules.has('haccp_galley') && galley ? ` Galley headcount now ${galley.headcount}.` : ''}`, true);
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Sign-off failed.', false);
+    } finally {
+      setBusy(null);
     }
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId, payload: { action: 'master_sign_off', userId: user.id, vessel: vesselName } });
-    setBusy(null);
-    showToast(`${user.name} signed off. Login access revoked. ${enabledModules.has('haccp_galley') ? 'Galley victualling headcount updated (-1).' : ''}`, true);
-    load();
   }
 
   const filteredPending = pending.filter((p) => {
@@ -175,10 +204,34 @@ export function CrewSignOnPanel({
           <Zap className="mt-0.5 h-4 w-4 shrink-0" />
           <div>
             <p className="font-bold">Universal Access Activation</p>
-            <p className="mt-0.5">Signing on a crew member instantly unlocks their login access across <strong>all {licensedModuleLabels.length} licensed platform modules</strong> ({licensedModuleLabels.join(', ')}). The Galley/HACCP module also receives a victualling headcount update (+1) to adjust meal provisioning automatically.</p>
+            <p className="mt-0.5">Signing on a crew member instantly unlocks their login access across <strong>all {licensedModuleLabels.length} licensed platform modules</strong> ({licensedModuleLabels.join(', ')}).{enabledModules.has('haccp_galley') ? ' The Galley/HACCP module also updates the real victualling headcount and today’s provisioning plan below.' : ''}</p>
           </div>
         </div>
       </div>
+
+      {enabledModules.has('haccp_galley') && galley && (
+        <div className="rounded-xl border border-ink-200/70 bg-white p-4 dark:border-ink-800 dark:bg-ink-900">
+          <div className="flex items-center gap-2">
+            <UtensilsCrossed className="h-4 w-4 text-success-500" />
+            <h3 className="text-sm font-bold text-ink-900 dark:text-white">Galley &amp; Victualling Status</h3>
+            <Badge tone="success" className="!text-[10px]">{galley.headcount} on board</Badge>
+          </div>
+          <p className="mt-1 text-[11px] text-ink-400">Today's provisioning plan, recalculated automatically from the real onboard headcount.</p>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            {([
+              ['Breakfast', galley.breakfast_kg],
+              ['Lunch', galley.lunch_kg],
+              ['Dinner', galley.dinner_kg],
+              ['Snacks', galley.snack_kg],
+            ] as const).map(([label, kg]) => (
+              <div key={label} className="rounded-lg border border-ink-100 p-2.5 text-center dark:border-ink-800">
+                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-400">{label}</p>
+                <p className="mt-1 text-sm font-bold text-ink-900 dark:text-white">{kg} kg</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="rounded-xl border border-ink-200/70 bg-white dark:border-ink-800 dark:bg-ink-900">
         <div className="flex items-center justify-between border-b border-ink-100 p-4 dark:border-ink-800">
@@ -299,8 +352,8 @@ export function CrewSignOnPanel({
               <div className="flex items-start gap-2 rounded-lg border border-success-200 bg-success-50 p-3 text-xs text-success-700 dark:border-success-800 dark:bg-success-900/20 dark:text-success-300">
                 <UtensilsCrossed className="mt-0.5 h-4 w-4 shrink-0" />
                 <div>
-                  <p className="font-bold">Galley Victualling Cascade</p>
-                  <p className="mt-0.5">The HACCP/Galley module will automatically update victualling headcount (+1) and adjust daily meal provisioning calculations.</p>
+                  <p className="font-bold">Galley Victualling Update</p>
+                  <p className="mt-0.5">Vessel headcount will increase to {galley ? galley.headcount + 1 : '—'} and today's meal provisioning plan will be recalculated automatically.</p>
                 </div>
               </div>
             )}
