@@ -35,16 +35,21 @@ jobs:
     needs: ci
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
-      - uses: google-github-actions/setup-gcloud@v1
+      - id: auth
+        uses: google-github-actions/auth@v2
         with:
           project_id: ${{ secrets.GCP_PROJECT_ID }}
-          service_account_key: ${{ secrets.GCP_SA_KEY }}
-          export_default_credentials: true
+          workload_identity_provider: projects/345713065794/locations/global/workloadIdentityPools/github-pool/providers/github-provider
+          service_account: 345713065794-compute@developer.gserviceaccount.com
+      - uses: google-github-actions/setup-gcloud@v2
       - name: Deploy Cloud Run service
         run: |
           gcloud run deploy $CLOUD_RUN_SERVICE \

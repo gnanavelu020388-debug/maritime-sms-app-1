@@ -8,10 +8,11 @@ This repository includes a GitHub Actions workflow at `.github/workflows/gcp-clo
 - deploys to Google Cloud Run from the `main` branch
 - uses the Dockerfile in the repository for production builds
 
+Authentication to GCP uses Workload Identity Federation, not a service account key — this project's org policy blocks creating new SA keys entirely. The workflow exchanges a short-lived GitHub OIDC token for GCP credentials via the `github-pool`/`github-provider` Workload Identity Pool (scoped to this exact repo) and deploys as the default compute service account. Nothing to rotate or leak.
+
 ### Required GitHub secrets
 
 - `GCP_PROJECT_ID`
-- `GCP_SA_KEY` (service account JSON key)
 - `GCP_REGION`
 - `CLOUD_RUN_SERVICE` (existing Cloud Run service name)
 - `JWT_SECRET`
