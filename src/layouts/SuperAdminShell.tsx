@@ -90,7 +90,7 @@ function SuperAdminShellInner({ user, internalRole, onSignOut }: { user: User; r
         <Sidebar active={active} onNavigate={setActive} open={sidebarOpen} onClose={() => setSidebarOpen(false)} roleKey={roleKey} />
         <div className="flex min-w-0 flex-1 flex-col">
           <MaintenanceBanner />
-          <Topbar active={active} onMenu={() => setSidebarOpen(true)} />
+          <Topbar active={active} onMenu={() => setSidebarOpen(true)} onNavigate={setActive} />
           <div className="flex items-center justify-between border-b border-ink-100 bg-white px-4 py-2 dark:border-ink-800 dark:bg-ink-900">
             <span className="text-xs text-ink-500">Signed in as <strong className="text-ink-800 dark:text-white">{user.email}</strong> · <span className="font-semibold text-primary-600">{INTERNAL_ROLE_LABEL[roleKey]}</span></span>
             <button onClick={onSignOut} className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-semibold text-ink-600 hover:bg-ink-100 dark:text-ink-300 dark:hover:bg-ink-800">

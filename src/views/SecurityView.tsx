@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type ReactNode } from 'react';
-import { ShieldCheck, Filter, Eye, Lock, AlertOctagon, ScrollText, Download, ShieldAlert, ChevronRight, ChevronDown, User, Mail, Globe, Target, Clock, GitCompare } from 'lucide-react';
+import { ShieldCheck, Filter, Eye, Lock, AlertOctagon, ScrollText, Download, ShieldAlert, ChevronRight, ChevronDown, ChevronLeft, User, Mail, Globe, Target, Clock, GitCompare } from 'lucide-react';
 import { Card } from '../components/Card';
 import { Badge } from '../components/Badge';
 import { useStore } from '../store';
@@ -98,6 +98,8 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
   const [roleFilter, setRoleFilter] = useState<'all' | AdminRole>('all');
   const [actorQuery, setActorQuery] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [page, setPage] = useState(0);
+  const pageSize = 10;
 
   const actorMap = useMemo(() => buildActorMap(internalUsers), [internalUsers]);
 
@@ -117,6 +119,10 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
     }
     return true;
   }), [audit, impersonationOnly, category, roleFilter, actorQuery, actorMap]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, totalPages - 1);
+  const pageRows = filtered.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
 
   const stats = {
     total: audit.length,
@@ -152,17 +158,17 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
           <div className="flex flex-wrap items-center gap-2">
             <Filter className="h-4 w-4 text-ink-400" />
             <button
-              onClick={() => setImpersonationOnly((v) => !v)}
+              onClick={() => { setImpersonationOnly((v) => !v); setPage(0); }}
               className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${impersonationOnly ? 'border-danger-300 bg-danger-50 text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-300' : 'border-ink-200 text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800'}`}
             >
               <Eye className="h-3.5 w-3.5" /> Impersonation only
             </button>
-            <select value={category} onChange={(e) => setCategory(e.target.value as AuditCategory | 'all')} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200">
+            <select value={category} onChange={(e) => { setCategory(e.target.value as AuditCategory | 'all'); setPage(0); }} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200">
               <option value="all">All categories</option>
               {(Object.keys(CATEGORY_TONE) as AuditCategory[]).map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
             {/* Role filter */}
-            <select value={roleFilter} onChange={(e) => setRoleFilter(e.target.value as 'all' | AdminRole)} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200">
+            <select value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value as 'all' | AdminRole); setPage(0); }} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200">
               <option value="all">All Roles</option>
               <option value="Super-Admin">Super-Admin</option>
               <option value="Platform Auditor">Platform Auditor</option>
@@ -175,7 +181,7 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
             <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
             <input
               value={actorQuery}
-              onChange={(e) => setActorQuery(e.target.value)}
+              onChange={(e) => { setActorQuery(e.target.value); setPage(0); }}
               placeholder="Search actor email or Admin ID…"
               className="input pl-9 py-1.5 text-xs"
             />
@@ -200,7 +206,7 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
               {filtered.length === 0 ? (
                 <tr><td colSpan={7} className="px-4 py-10 text-center text-ink-400">No audit events match the current filters.</td></tr>
               ) : (
-                filtered.slice(0, 10).map((e) => {
+                pageRows.map((e) => {
                   const isExpanded = expandedId === e.id;
                   const user = actorMap[e.actor];
                   const role = user?.role ?? 'Unknown';
@@ -269,10 +275,26 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
           </table>
         </div>
 
-        {filtered.length > 10 && (
-          <p className="mt-3 text-center text-xs text-ink-400">Showing 10 of {filtered.length} filtered records. Refine filters to narrow results.</p>
+        {filtered.length > 0 && (
+          <div className="mt-3 flex items-center justify-between text-xs text-ink-500 dark:text-ink-400">
+            <span>
+              Showing <span className="font-semibold text-ink-700 dark:text-ink-200">{currentPage * pageSize + 1}</span>–
+              <span className="font-semibold text-ink-700 dark:text-ink-200">{Math.min(filtered.length, currentPage * pageSize + pageSize)}</span> of{' '}
+              <span className="font-semibold text-ink-700 dark:text-ink-200">{filtered.length}</span> records
+            </span>
+            {totalPages > 1 && (
+              <div className="flex items-center gap-1">
+                <button disabled={currentPage === 0} onClick={() => setPage((p) => p - 1)} className="btn-ghost rounded-md p-1.5 disabled:opacity-40">
+                  <ChevronLeft className="h-4 w-4" />
+                </button>
+                <span className="px-2 font-medium">{currentPage + 1} / {totalPages}</span>
+                <button disabled={currentPage >= totalPages - 1} onClick={() => setPage((p) => p + 1)} className="btn-ghost rounded-md p-1.5 disabled:opacity-40">
+                  <ChevronRight className="h-4 w-4" />
+                </button>
+              </div>
+            )}
+          </div>
         )}
-        <span className="mt-3 block text-xs text-ink-500">{filtered.length} records match current filters</span>
       </Card>
 
       <Card title="Impersonation Log Isolation View" subtitle="All read/write activity during administrative override sessions" icon={<Eye className="h-4 w-4" />}>
