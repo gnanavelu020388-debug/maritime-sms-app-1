@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Users, ShieldCheck, KeyRound, Lock, Unlock, Search, UserPlus, AlertTriangle,
+  Users, ShieldCheck, ShieldOff, KeyRound, Lock, Unlock, Search, UserPlus, AlertTriangle,
   Pencil, Trash2, Copy, Check,
 } from 'lucide-react';
 import { Card } from '../components/Card';
@@ -17,6 +17,7 @@ import type { Capabilities } from '../lib/permissions';
 import {
   apiInvitePlatformStaff, apiUpdatePlatformStaff, apiTogglePlatformStaffLock, apiResetPlatformStaffPassword, apiDeletePlatformStaff,
   apiGetMfaEnforcement, apiSetMfaEnforcement, apiForceTenantPasswordReset, apiUpdateTenant,
+  apiSearchTenantUsers, apiResetUserMfa, type TenantUserSearchResult,
 } from '../lib/api';
 import { logAudit } from '../lib/audit';
 import type { PlatformStaffRow } from '../lib/supabase';
@@ -43,6 +44,10 @@ export function UsersView({ caps }: { caps: Capabilities }) {
   const [deleteTarget, setDeleteTarget] = useState<InternalUser | null>(null);
   const [emergencyAction, setEmergencyAction] = useState<'reset' | 'lockdown' | null>(null);
   const [tempPasswordReveal, setTempPasswordReveal] = useState<{ email: string; password: string } | null>(null);
+  const [mfaSearchQuery, setMfaSearchQuery] = useState('');
+  const [mfaSearchResults, setMfaSearchResults] = useState<TenantUserSearchResult[]>([]);
+  const [mfaSearchBusy, setMfaSearchBusy] = useState(false);
+  const [mfaResetTarget, setMfaResetTarget] = useState<TenantUserSearchResult | null>(null);
 
   const currentEmail = user?.email ?? '';
   const isSelf = (u: InternalUser) => u.email === currentEmail;
@@ -50,6 +55,19 @@ export function UsersView({ caps }: { caps: Capabilities }) {
   useEffect(() => {
     apiGetMfaEnforcement().then((r) => dispatch({ type: 'MFA_GLOBAL_HYDRATE', enforced: r.enforced })).catch(() => {});
   }, [dispatch]);
+
+  useEffect(() => {
+    const q = mfaSearchQuery.trim();
+    if (!q) { setMfaSearchResults([]); return; }
+    setMfaSearchBusy(true);
+    const handle = setTimeout(() => {
+      apiSearchTenantUsers(q)
+        .then(setMfaSearchResults)
+        .catch(() => setMfaSearchResults([]))
+        .finally(() => setMfaSearchBusy(false));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [mfaSearchQuery]);
 
   const columns: Column<InternalUser>[] = [
     {
@@ -188,6 +206,45 @@ export function UsersView({ caps }: { caps: Capabilities }) {
         </Card>
       </div>
 
+      <Card title="Reset User MFA" subtitle="Clear a tenant user's authenticator enrollment across any company" icon={<ShieldOff className="h-4 w-4" />}>
+        <div className="space-y-3">
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
+            <input
+              value={mfaSearchQuery}
+              onChange={(e) => setMfaSearchQuery(e.target.value)}
+              placeholder="Search by name or email…"
+              className="input pl-9"
+            />
+          </div>
+          {mfaSearchBusy && <p className="text-xs text-ink-500">Searching…</p>}
+          {!mfaSearchBusy && mfaSearchQuery.trim() && mfaSearchResults.length === 0 && (
+            <p className="text-xs text-ink-500">No matching users found.</p>
+          )}
+          {mfaSearchResults.length > 0 && (
+            <div className="space-y-2">
+              {mfaSearchResults.map((u) => (
+                <div key={u.id} className="flex items-center justify-between rounded-lg border border-ink-200/70 p-3 dark:border-ink-800">
+                  <div>
+                    <p className="text-sm font-medium text-ink-800 dark:text-ink-100">{u.name} <span className="text-xs font-normal text-ink-500">({u.rank})</span></p>
+                    <p className="text-xs text-ink-500">{u.email} · {u.company}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    {u.mfa_enabled ? <Badge tone="success" dot>Enabled</Badge> : <Badge tone="warning" dot>Off</Badge>}
+                    <button
+                      onClick={() => setMfaResetTarget(u)}
+                      disabled={!caps.securityEdit || !u.mfa_enabled}
+                      className="btn-secondary disabled:cursor-not-allowed disabled:opacity-30"
+                      title={u.mfa_enabled ? 'Reset MFA' : 'MFA is not enabled for this account'}
+                    ><ShieldOff className="h-4 w-4" /> Reset MFA</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Card>
+
       <Card title="Internal Access Matrix" subtitle="Platform owner's internal team" icon={<Users className="h-4 w-4" />}>
         <DataTable columns={columns} rows={internalUsers} pageSize={6} searchPlaceholder="Search staff…" searchFn={(u, q) => u.name.toLowerCase().includes(q) || u.email.toLowerCase().includes(q)} />
       </Card>
@@ -283,6 +340,19 @@ export function UsersView({ caps }: { caps: Capabilities }) {
 
       {tempPasswordReveal && (
         <TempPasswordModal reveal={tempPasswordReveal} onClose={() => setTempPasswordReveal(null)} />
+      )}
+
+      {mfaResetTarget && (
+        <MfaResetModal
+          target={mfaResetTarget}
+          actorEmail={currentEmail || 'unknown'}
+          onClose={() => setMfaResetTarget(null)}
+          onDone={(id) => {
+            setMfaSearchResults((rows) => rows.map((r) => (r.id === id ? { ...r, mfa_enabled: false } : r)));
+            setMfaResetTarget(null);
+          }}
+          toast={toast}
+        />
       )}
 
       {emergencyAction && (
@@ -464,6 +534,57 @@ function EmergencyTenantActionModal({
             {tenants.length === 0 && <option value="">No tenants loaded</option>}
             {tenants.map((t) => <option key={t.id} value={t.id}>{t.company}</option>)}
           </select>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
+function MfaResetModal({
+  target, actorEmail, onClose, onDone, toast,
+}: {
+  target: TenantUserSearchResult;
+  actorEmail: string;
+  onClose: () => void;
+  onDone: (id: string) => void;
+  toast: (t: { tone: 'info' | 'success' | 'warning' | 'danger'; title: string; message?: string }) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+
+  const execute = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await apiResetUserMfa(target.tenant_id, target.id);
+      await logAudit({ tenantId: target.tenant_id, actorEmail, category: 'security', action: `MFA reset for ${target.email}`, target: target.email, severity: 'warning' });
+      toast({ tone: 'success', title: 'MFA reset', message: `${target.email} will be prompted for fresh authenticator setup on next sign-in.` });
+      onDone(target.id);
+    } catch (err) {
+      toast({ tone: 'danger', title: 'Could not reset MFA', message: (err as Error).message });
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      open
+      onClose={onClose}
+      title="Reset User MFA"
+      subtitle={`${target.name} — ${target.email}`}
+      icon={<ShieldOff className="h-5 w-5" />}
+      size="sm"
+      footer={
+        <>
+          <button onClick={onClose} className="btn-secondary">Cancel</button>
+          <button disabled={busy} onClick={execute} className="btn-danger">{busy ? 'Working…' : 'Reset MFA'}</button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="rounded-lg bg-warning-50 p-3 text-xs text-warning-700 dark:bg-warning-900/20 dark:text-warning-300">
+          <AlertTriangle className="mr-1 inline h-3.5 w-3.5" />
+          This clears the authenticator secret and backup codes for this account at {target.company}. They'll go through fresh QR setup the next time they sign in.
         </div>
       </div>
     </Modal>

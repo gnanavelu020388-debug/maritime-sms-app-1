@@ -22,7 +22,7 @@ export function MasterSmsLibraryView() {
       <div className="flex items-center gap-2">
         <Library className="h-5 w-5 text-accent-600 dark:text-accent-400" />
         <div>
-          <h1 className="text-xl font-bold text-ink-900 dark:text-white">Master SMS Library</h1>
+          <h1 className="text-xl font-bold text-ink-900 dark:text-white">SMS Library</h1>
           <p className="text-sm text-ink-500 dark:text-ink-400">
             Read-only reference of all approved Safety Management System documents across fleet profiles.
           </p>

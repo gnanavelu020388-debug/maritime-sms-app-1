@@ -58,7 +58,12 @@ import {
 import { useFleetScope } from "../lib/useFleetScope";
 import { onSyncEvent, postSyncEvent } from "../lib/syncChannel";
 import { enqueueSyncEntry } from "../lib/syncService";
-import { apiUploadFile, apiGetSignedUrl, ApiFileError } from "../lib/api";
+import {
+  apiUploadFile,
+  apiGetSignedUrl,
+  apiDownloadFileAsBlobUrl,
+  ApiFileError,
+} from "../lib/api";
 import { Modal } from "../components/Modal";
 import { Badge } from "../components/Badge";
 
@@ -225,11 +230,26 @@ export function SmsLibrarySplitView({
       return;
     }
     let cancelled = false;
+    let objectUrlToRevoke: string | null = null;
     setPreviewSignedUrlError(false);
     apiGetSignedUrl(previewDoc.content)
       .then((url) => { if (!cancelled) setPreviewSignedUrl(url); })
-      .catch(() => { if (!cancelled) setPreviewSignedUrlError(true); });
-    return () => { cancelled = true; };
+      .catch(() =>
+        // Signing requires a service-account private key, which local dev
+        // environments usually don't have — fall back to streaming the
+        // file through our own authenticated API instead.
+        apiDownloadFileAsBlobUrl(previewDoc.content!)
+          .then((blobUrl) => {
+            if (cancelled) { URL.revokeObjectURL(blobUrl); return; }
+            objectUrlToRevoke = blobUrl;
+            setPreviewSignedUrl(blobUrl);
+          })
+          .catch(() => { if (!cancelled) setPreviewSignedUrlError(true); }),
+      );
+    return () => {
+      cancelled = true;
+      if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
+    };
   }, [previewDoc]);
   const [editingDoc, setEditingDoc] = useState<SmsDocRow | null>(null);
 

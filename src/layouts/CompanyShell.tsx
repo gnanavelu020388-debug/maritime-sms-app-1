@@ -14,7 +14,7 @@ import { NetworkStatusBadge } from '../components/NetworkStatusBadge';
 import { ReconnectionBanner } from '../components/ReconnectionBanner';
 import type { PlatformRole } from '../lib/supabase';
 
-export type CompanySection = 'overview' | 'vessels' | 'crew_management' | 'permissions' | 'sms_dpa' | 'master_library' | 'audit' | 'security';
+export type CompanySection = 'overview' | 'vessels' | 'crew_management' | 'permissions' | 'sms_dpa' | 'sms_library' | 'audit' | 'security';
 
 function useCompanyNav(): { id: CompanySection; label: string; icon: ReactNode; roles: PlatformRole[]; feature?: ModuleKey }[] {
   const { defs } = useModuleDefinitions();
@@ -24,16 +24,13 @@ function useCompanyNav(): { id: CompanySection; label: string; icon: ReactNode; 
     { id: 'overview', label: 'Overview', icon: <LayoutDashboard className="h-4 w-4" />, roles: ['company_admin', 'dpa'] },
     { id: 'vessels', label: 'Fleet & Vessel Profiles', icon: <Ship className="h-4 w-4" />, roles: ['company_admin'] },
     { id: 'sms_dpa', label: `${smsLabel} Review & Deployment`, icon: <FileText className="h-4 w-4" />, roles: ['company_admin', 'dpa'], feature: 'sms_documentation' },
-    { id: 'master_library', label: 'Master SMS Library', icon: <Library className="h-4 w-4" />, roles: ['company_admin', 'dpa'], feature: 'sms_documentation' },
+    { id: 'sms_library', label: 'SMS Library', icon: <Library className="h-4 w-4" />, roles: ['company_admin', 'dpa'], feature: 'sms_documentation' },
     { id: 'permissions', label: 'Role & Permissions Matrix', icon: <KeyRound className="h-4 w-4" />, roles: ['company_admin'] },
     { id: 'crew_management', label: `${crewLabel} & User Management`, icon: <Users className="h-4 w-4" />, roles: ['company_admin'] },
     { id: 'security', label: 'Security Settings', icon: <Shield className="h-4 w-4" />, roles: ['company_admin'] },
     { id: 'audit', label: 'Audit & Compliance Ledger', icon: <Shield className="h-4 w-4" />, roles: ['company_admin', 'dpa'] },
   ];
 }
-
-
-
 
 export function CompanyShell({ children, active }: { children: ReactNode; active: CompanySection }) {
   const { user, role, tenant, tenantUser, signOut } = useAuth();

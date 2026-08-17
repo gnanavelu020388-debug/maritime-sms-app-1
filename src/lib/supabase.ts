@@ -32,7 +32,7 @@ export type Rank = string;
 
 export const ALL_RANKS: Rank[] = ['Master', 'Chief Engineer', 'Chief Mate', 'Second Engineer', 'Bosun', 'AB', 'Oiler', 'Cook', 'Crew'];
 export const CORE_RANKS: Rank[] = ['Master', 'Chief Engineer', 'Chief Mate', 'Second Engineer', 'Bosun', 'AB', 'Oiler', 'Cook', 'Crew'];
-export type ApprovalState = 'draft' | 'pending_dpa' | 'approved' | 'rejected';
+export type ApprovalState = 'draft' | 'pending_dpa' | 'approved' | 'rejected' | 'pending_delete';
 
 export interface TenantRow {
   id: string;

@@ -37,7 +37,9 @@ import {
   demoUpdateSmsDocContent,
   demoApproveSmsDoc,
   demoApproveAllSmsDocs,
-  demoDeleteSmsDoc,
+  demoRequestDeleteSmsDoc,
+  demoApproveDeleteSmsDoc,
+  demoRejectDeleteSmsDoc,
   getDemoCustomTabs,
   createDemoCustomTab,
   renameDemoCustomTab,
@@ -54,7 +56,12 @@ import {
   type SmsProfileWithVessels,
 } from "../../lib/smsProfiles";
 import { deployBaseline } from "../../lib/deployBaseline";
-import { apiUploadFile, apiGetSignedUrl, ApiFileError } from "../../lib/api";
+import {
+  apiUploadFile,
+  apiGetSignedUrl,
+  apiDownloadFileAsBlobUrl,
+  ApiFileError,
+} from "../../lib/api";
 import {
   saveDocumentVersion,
   fetchDocumentVersions,
@@ -161,11 +168,16 @@ export function SmsDpaView() {
   const [renameTabKey, setRenameTabKey] = useState<string | null>(null);
   const [deleteTabKey, setDeleteTabKey] = useState<string | null>(null);
   const [pendingDocs, setPendingDocs] = useState<SmsDocRow[]>([]);
+  const [pendingDeleteDocs, setPendingDeleteDocs] = useState<SmsDocRow[]>([]);
+  const [pendingDeleteCount, setPendingDeleteCount] = useState(0);
   const [allDocsIndex, setAllDocsIndex] = useState<Map<string, SmsDocRow>>(
     new Map(),
   );
   const [reviewOpen, setReviewOpen] = useState(false);
+  const [deleteReviewOpen, setDeleteReviewOpen] = useState(false);
   const [approvingId, setApprovingId] = useState<string | null>(null);
+  const [approvingDeleteId, setApprovingDeleteId] = useState<string | null>(null);
+  const [cancelingDeleteId, setCancelingDeleteId] = useState<string | null>(null);
 
   // SMS Fleet Profiles state
   const [profiles, setProfiles] = useState<SmsProfileWithVessels[]>([]);
@@ -260,6 +272,9 @@ export function SmsDpaView() {
     const pending = all.filter((r) => r.approval_state === "pending_dpa");
     setPendingDocs(pending);
     setPendingCount(pending.length);
+    const pendingDeletes = all.filter((r) => r.approval_state === "pending_delete");
+    setPendingDeleteDocs(pendingDeletes);
+    setPendingDeleteCount(pendingDeletes.length);
   }
 
   function resolveLocation(doc: SmsDocRow): string {
@@ -459,12 +474,12 @@ export function SmsDpaView() {
 
   async function confirmDeleteNode() {
     if (!deleteFor || !tenant) return;
-    await demoDeleteSmsDoc(tenant.id, deleteFor.id);
+    await demoRequestDeleteSmsDoc(tenant.id, deleteFor.id);
     await logAudit({
       tenantId: tenant.id,
       actorEmail: tenantUser!.email,
       category: "sms",
-      action: `Deleted: ${deleteFor.label}`,
+      action: `Requested deletion (pending DPA review): ${deleteFor.label}`,
       target: treeKind,
       location: tenant.company,
       severity: "warning",
@@ -473,7 +488,7 @@ export function SmsDpaView() {
       type: "SMS_UPDATED",
       tenantId: tenant.id,
       payload: {
-        action: "deleted",
+        action: "delete_requested",
         nodeId: deleteFor.id,
         label: deleteFor.label,
       },
@@ -482,6 +497,53 @@ export function SmsDpaView() {
     await loadTree();
     await loadAllCounts();
     await loadCustomTabs();
+    await loadAllPending();
+  }
+
+  async function approveDeleteOne(doc: SmsDocRow) {
+    if (!tenant) return;
+    setApprovingDeleteId(doc.id);
+    await demoApproveDeleteSmsDoc(tenant.id, doc.id);
+    await logAudit({
+      tenantId: tenant.id,
+      actorEmail: tenantUser!.email,
+      category: "sms",
+      action: `DPA approved deletion: ${doc.label}`,
+      target: doc.tree_kind,
+      location: tenant.company,
+      severity: "warning",
+    });
+    postSyncEvent({
+      type: "SMS_UPDATED",
+      tenantId: tenant.id,
+      payload: { action: "delete_approved", docId: doc.id, label: doc.label },
+    });
+    setApprovingDeleteId(null);
+    await loadTree();
+    await loadAllPending();
+    await loadAllCounts();
+    await loadCustomTabs();
+  }
+
+  async function cancelDeleteRequest(doc: SmsDocRow) {
+    if (!tenant) return;
+    setCancelingDeleteId(doc.id);
+    await demoRejectDeleteSmsDoc(tenant.id, doc.id);
+    await logAudit({
+      tenantId: tenant.id,
+      actorEmail: tenantUser!.email,
+      category: "sms",
+      action: `Deletion request withdrawn/rejected: ${doc.label}`,
+      target: doc.tree_kind,
+      location: tenant.company,
+    });
+    postSyncEvent({
+      type: "SMS_UPDATED",
+      tenantId: tenant.id,
+      payload: { action: "delete_rejected", docId: doc.id, label: doc.label },
+    });
+    setCancelingDeleteId(null);
+    await loadTree();
     await loadAllPending();
   }
 
@@ -800,9 +862,12 @@ export function SmsDpaView() {
         ? "success"
         : node.approval_state === "pending_dpa"
           ? "warning"
-          : "neutral";
+          : node.approval_state === "pending_delete"
+            ? "danger"
+            : "neutral";
     const childCount = node.children.length;
     const isRootFolder = depth === 0 && node.node_kind === "folder";
+    const isPendingDelete = node.approval_state === "pending_delete";
 
     return (
       <div key={node.id}>
@@ -870,21 +935,25 @@ export function SmsDpaView() {
               PDF
             </span>
           )}
-          {node.node_kind === "document" && (
+          {(node.node_kind === "document" || isPendingDelete) && (
             <span
               className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold ${
                 stateColor === "success"
                   ? "bg-success-100 text-success-700 dark:bg-success-900/30 dark:text-success-400"
                   : stateColor === "warning"
                     ? "bg-warning-100 text-warning-700 dark:bg-warning-900/30 dark:text-warning-400"
-                    : "bg-ink-100 text-ink-500 dark:bg-ink-700 dark:text-ink-300"
+                    : stateColor === "danger"
+                      ? "bg-danger-100 text-danger-700 dark:bg-danger-900/30 dark:text-danger-400"
+                      : "bg-ink-100 text-ink-500 dark:bg-ink-700 dark:text-ink-300"
               }`}
             >
               {node.approval_state === "approved"
                 ? "Approved"
                 : node.approval_state === "pending_dpa"
                   ? "Pending"
-                  : "Draft"}
+                  : node.approval_state === "pending_delete"
+                    ? "Pending Deletion"
+                    : "Draft"}
             </span>
           )}
 
@@ -914,8 +983,28 @@ export function SmsDpaView() {
             </>
           )}
 
+          {/* Pending-deletion notice — replaces the normal action buttons while a delete request is awaiting DPA review */}
+          {canEdit && isPendingDelete && !isEditing && (
+            <button
+              onClick={(e) => {
+                e.stopPropagation();
+                cancelDeleteRequest(node);
+              }}
+              disabled={cancelingDeleteId === node.id}
+              className="inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-[11px] font-semibold text-danger-600 transition-colors hover:bg-danger-100 disabled:opacity-50 dark:text-danger-400 dark:hover:bg-danger-900/30"
+              title="Withdraw this deletion request"
+            >
+              {cancelingDeleteId === node.id ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <X className="h-3.5 w-3.5" />
+              )}
+              Cancel Request
+            </button>
+          )}
+
           {/* Folder inline action buttons — always visible, not hover-only */}
-          {canEdit && node.node_kind === "folder" && !isEditing && (
+          {canEdit && node.node_kind === "folder" && !isEditing && !isPendingDelete && (
             <div className="flex shrink-0 items-center gap-0.5">
               <button
                 onClick={(e) => {
@@ -961,7 +1050,7 @@ export function SmsDpaView() {
           )}
 
           {/* Document inline action buttons — always visible */}
-          {canEdit && node.node_kind === "document" && !isEditing && (
+          {canEdit && node.node_kind === "document" && !isEditing && !isPendingDelete && (
             <div className="flex shrink-0 items-center gap-0.5">
               <button
                 onClick={(e) => {
@@ -1167,6 +1256,121 @@ export function SmsDpaView() {
                                 <CheckCircle2 className="h-3.5 w-3.5" />
                               )}
                               Approve &amp; Deploy
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {pendingDeleteCount > 0 && (
+        <div className="flex items-center gap-2 rounded-xl border border-danger-200 bg-danger-50 p-3 text-sm text-danger-700 dark:border-danger-800 dark:bg-danger-900/20 dark:text-danger-300">
+          <Trash2 className="h-4 w-4 shrink-0" />
+          {pendingDeleteCount} item(s) awaiting DPA approval for deletion. They
+          remain in place — and stay visible to the fleet — until the DPA
+          decides.
+        </div>
+      )}
+      {pendingDeleteDocs.length > 0 && canEdit && (
+        <div className="rounded-xl border border-danger-200 bg-white dark:border-danger-800 dark:bg-ink-900">
+          <button
+            onClick={() => setDeleteReviewOpen((v) => !v)}
+            className="flex w-full items-center justify-between px-4 py-3 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <Trash2 className="h-4 w-4 text-danger-500" />
+              <span className="text-sm font-bold text-ink-900 dark:text-white">
+                Deletions Awaiting DPA Review
+              </span>
+              <span className="rounded-full bg-danger-100 px-2 py-0.5 text-[10px] font-bold text-danger-700 dark:bg-danger-900/30 dark:text-danger-400">
+                {pendingDeleteDocs.length}
+              </span>
+            </div>
+            {deleteReviewOpen ? (
+              <ChevronDown className="h-4 w-4 text-ink-400" />
+            ) : (
+              <ChevronRight className="h-4 w-4 text-ink-400" />
+            )}
+          </button>
+          {deleteReviewOpen && (
+            <div className="border-t border-ink-100 dark:border-ink-800">
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-ink-100 text-left text-[11px] uppercase tracking-wide text-ink-400 dark:border-ink-800">
+                      <th className="px-4 py-2 font-semibold">Item Name</th>
+                      <th className="px-4 py-2 font-semibold">Location</th>
+                      <th className="px-4 py-2 font-semibold">Requested</th>
+                      <th className="px-4 py-2 text-right font-semibold">
+                        Review Actions
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pendingDeleteDocs.map((doc) => (
+                      <tr
+                        key={doc.id}
+                        className="border-b border-ink-50 last:border-0 hover:bg-ink-50 dark:border-ink-800/50 dark:hover:bg-ink-800/30"
+                      >
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center gap-2">
+                            {doc.node_kind === "folder" ? (
+                              <Folder className="h-3.5 w-3.5 shrink-0 text-accent-500" />
+                            ) : (
+                              <FileText className="h-3.5 w-3.5 shrink-0 text-ink-400" />
+                            )}
+                            <span className="font-medium text-ink-800 dark:text-ink-200">
+                              {doc.label}
+                            </span>
+                            {doc.node_kind === "folder" && (
+                              <span className="rounded bg-accent-100 px-1 text-[9px] font-bold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300">
+                                FOLDER
+                              </span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="px-4 py-2.5 text-xs text-ink-500 dark:text-ink-400">
+                          {resolveLocation(doc)}
+                        </td>
+                        <td className="whitespace-nowrap px-4 py-2.5 text-xs text-ink-500 dark:text-ink-400">
+                          {new Date(doc.updated_at).toLocaleString()}
+                        </td>
+                        <td className="px-4 py-2.5">
+                          <div className="flex items-center justify-end gap-1.5">
+                            <button
+                              onClick={() => cancelDeleteRequest(doc)}
+                              disabled={cancelingDeleteId === doc.id}
+                              className="inline-flex items-center gap-1 rounded-lg border border-ink-300 bg-ink-50 px-2.5 py-1 text-xs font-bold text-ink-600 transition hover:bg-ink-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-ink-600 dark:bg-ink-800 dark:text-ink-300"
+                              title="Withdraw this deletion request"
+                            >
+                              {cancelingDeleteId === doc.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <X className="h-3.5 w-3.5" />
+                              )}
+                              Withdraw
+                            </button>
+                            <button
+                              onClick={() => approveDeleteOne(doc)}
+                              disabled={approvingDeleteId === doc.id || !canApprove}
+                              title={
+                                canApprove
+                                  ? undefined
+                                  : "Statutory Release Authorized for DPA Role Only."
+                              }
+                              className="inline-flex items-center gap-1 rounded-lg bg-danger-600 px-2.5 py-1 text-xs font-bold text-white transition hover:bg-danger-700 disabled:cursor-not-allowed disabled:opacity-50"
+                            >
+                              {approvingDeleteId === doc.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3.5 w-3.5" />
+                              )}
+                              Approve Deletion
                             </button>
                           </div>
                         </td>
@@ -1485,16 +1689,33 @@ function DocumentPreview({
       return;
     }
     let cancelled = false;
+    let objectUrlToRevoke: string | null = null;
     setSignedUrlError(false);
     apiGetSignedUrl(node.content)
       .then((url) => {
         if (!cancelled) setSignedUrl(url);
       })
-      .catch(() => {
-        if (!cancelled) setSignedUrlError(true);
-      });
+      .catch(() =>
+        // Signing requires a service-account private key, which local dev
+        // environments usually don't have (see server/storage.js). Fall
+        // back to streaming the file through our own authenticated API
+        // instead of failing the preview outright.
+        apiDownloadFileAsBlobUrl(node.content!)
+          .then((blobUrl) => {
+            if (cancelled) {
+              URL.revokeObjectURL(blobUrl);
+              return;
+            }
+            objectUrlToRevoke = blobUrl;
+            setSignedUrl(blobUrl);
+          })
+          .catch(() => {
+            if (!cancelled) setSignedUrlError(true);
+          }),
+      );
     return () => {
       cancelled = true;
+      if (objectUrlToRevoke) URL.revokeObjectURL(objectUrlToRevoke);
     };
   }, [hasRealFile, node.content]);
 
@@ -1864,7 +2085,7 @@ function DeleteNodeModal({
     <Modal
       open
       onClose={onClose}
-      title={`Delete ${node.node_kind === "folder" ? "Folder" : "Document"}`}
+      title={`Request Deletion — ${node.node_kind === "folder" ? "Folder" : "Document"}`}
       subtitle={node.label}
       icon={<Trash2 className="h-5 w-5" />}
       size="sm"
@@ -1881,7 +2102,7 @@ function DeleteNodeModal({
             {busy ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              `Delete ${node.node_kind === "folder" ? "Folder" : "Document"}`
+              "Submit Deletion Request"
             )}
           </button>
         </>
@@ -1899,7 +2120,16 @@ function DeleteNodeModal({
                 inside this folder.
               </span>
             )}
-            This action cannot be undone.
+          </p>
+        </div>
+        <div className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-300">
+          <Shield className="mt-0.5 h-4 w-4 shrink-0" />
+          <p>
+            This will not delete anything immediately. It submits a{" "}
+            <strong>deletion request</strong> that must be reviewed and
+            approved by the DPA before {node.node_kind === "folder" ? "this folder" : "this document"}{" "}
+            is permanently removed. You can withdraw the request at any time
+            before the DPA decides.
           </p>
         </div>
       </div>

@@ -12,12 +12,14 @@ import { postSyncEvent, onSyncEvent } from '../../lib/syncChannel';
 import {
   getEffectiveDemoSmsDocs, demoApproveSmsDoc, demoRejectSmsDoc,
   demoCreateSmsDoc, demoUpdateSmsDocContent, demoRenameSmsDoc, demoDeleteSmsDoc,
+  demoApproveDeleteSmsDoc, demoRejectDeleteSmsDoc,
   demoGetWorkspaceFrozen, getDemoCustomTabs,
 } from '../../lib/demoData';
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { useFleetScope } from '../../lib/useFleetScope';
 import { deployBaseline } from '../../lib/deployBaseline';
 import { useShoreRolePermissions, canDoShore, resolveShoreRoleName, dpaFullAuthority, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS } from '../../lib/shoreRoles';
+import { apiGetSignedUrl, apiDownloadFileAsBlobUrl } from '../../lib/api';
 import { Modal } from '../../components/Modal';
 
 interface Crumb {
@@ -27,6 +29,13 @@ interface Crumb {
 
 function escapeHtml(str: string): string {
   return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+// A real GCS object path looks like `tenants/{tenantId}/sms-documents/{id}.{ext}`
+// (see server/routes/files.js) — used to tell a genuinely-uploaded PDF apart
+// from a pre-fix document whose `content` is just a bare filename string.
+function isGcsPath(content: string | null | undefined): content is string {
+  return !!content && content.startsWith('tenants/');
 }
 
 function openDocInNewTab(node: SmsDocRow) {
@@ -67,6 +76,10 @@ export function SmsApprovalsView() {
   const { tenant, tenantUser, refresh } = useAuth();
   const fleetScope = useFleetScope();
   const [pendingDocs, setPendingDocs] = useState<SmsDocRow[]>([]);
+  const [pendingDeleteDocs, setPendingDeleteDocs] = useState<SmsDocRow[]>([]);
+  const [deleteApprovingId, setDeleteApprovingId] = useState<string | null>(null);
+  const [deleteRejectingId, setDeleteRejectingId] = useState<string | null>(null);
+  const [confirmDeleteDoc, setConfirmDeleteDoc] = useState<SmsDocRow | null>(null);
   const [allDocsIndex, setAllDocsIndex] = useState<Map<string, SmsDocRow>>(new Map());
   const [selectedDoc, setSelectedDoc] = useState<SmsDocRow | null>(null);
   const [rejectMode, setRejectMode] = useState(false);
@@ -128,6 +141,7 @@ export function SmsApprovalsView() {
       setAllDocsIndex(idx);
       const pending = filtered.filter((r) => r.approval_state === 'pending_dpa');
       setPendingDocs(pending);
+      setPendingDeleteDocs(filtered.filter((r) => r.approval_state === 'pending_delete'));
       if (selectedDoc && !pending.find((d) => d.id === selectedDoc.id)) {
         setSelectedDoc(null);
         setRejectMode(false);
@@ -181,6 +195,33 @@ export function SmsApprovalsView() {
   function showToast(msg: string, ok: boolean) {
     setToast({ msg, ok });
     setTimeout(() => setToast(null), 5000);
+  }
+
+  // Opens a genuinely-uploaded PDF (a real GCS object) in a new tab. Tries
+  // a signed URL first (fast, direct-from-storage); if that fails — e.g.
+  // local dev has no service-account key to sign with — falls back to
+  // streaming the file through our own authenticated API. The tab is
+  // opened synchronously (before either request resolves) so browsers
+  // don't treat the later redirect as a blocked popup.
+  async function openPdfInNewTab(node: SmsDocRow) {
+    if (!isGcsPath(node.content)) {
+      showToast('Original file not available — this document was uploaded before file storage was wired up. Use Edit Section to re-upload the PDF.', false);
+      return;
+    }
+    const win = window.open('', '_blank');
+    try {
+      const url = await apiGetSignedUrl(node.content).catch(() => apiDownloadFileAsBlobUrl(node.content!));
+      if (win) win.location.href = url;
+      else window.open(url, '_blank');
+    } catch (err) {
+      win?.close();
+      showToast((err as Error).message || 'Failed to open the file.', false);
+    }
+  }
+
+  function openInNewTab(node: SmsDocRow) {
+    if (node.content_kind === 'pdf') openPdfInNewTab(node);
+    else openDocInNewTab(node);
   }
 
   function resolveCrumbs(doc: SmsDocRow): Crumb[] {
@@ -292,6 +333,55 @@ export function SmsApprovalsView() {
       showToast((err as Error).message || 'Failed to purge draft.', false);
     } finally {
       setPurgingId(null);
+    }
+  }
+
+  // ── Deletion requests (company-admin-initiated) ────────────────────
+  async function handleApproveDelete(doc: SmsDocRow) {
+    if (!tenant) return;
+    setDeleteApprovingId(doc.id);
+    try {
+      await demoApproveDeleteSmsDoc(tenant.id, doc.id);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: 'sms',
+        action: `DPA approved deletion: ${doc.label}`,
+        target: doc.tree_kind,
+        location: tenant!.company,
+        severity: 'warning',
+      });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'delete_approved', docId: doc.id, label: doc.label } });
+      setConfirmDeleteDoc(null);
+      setSyncTick((t) => t + 1);
+      showToast(`"${doc.label}" permanently deleted.`, true);
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to approve deletion.', false);
+    } finally {
+      setDeleteApprovingId(null);
+    }
+  }
+
+  async function handleRejectDelete(doc: SmsDocRow) {
+    if (!tenant) return;
+    setDeleteRejectingId(doc.id);
+    try {
+      await demoRejectDeleteSmsDoc(tenant.id, doc.id);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: 'sms',
+        action: `DPA rejected deletion request: ${doc.label}`,
+        target: doc.tree_kind,
+        location: tenant!.company,
+      });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'delete_rejected', docId: doc.id, label: doc.label } });
+      setSyncTick((t) => t + 1);
+      showToast(`Deletion request for "${doc.label}" rejected — restored to approved.`, true);
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to reject deletion request.', false);
+    } finally {
+      setDeleteRejectingId(null);
     }
   }
 
@@ -481,6 +571,51 @@ export function SmsApprovalsView() {
         </div>
       </div>
 
+      {/* Deletion Requests — approve to permanently remove, reject to restore */}
+      {pendingDeleteDocs.length > 0 && (
+        <div className="shrink-0 rounded-xl border border-danger-200 bg-white dark:border-danger-800 dark:bg-ink-900">
+          <div className="flex items-center gap-2 border-b border-danger-100 px-4 py-3 dark:border-danger-900/40">
+            <Trash2 className="h-4 w-4 text-danger-500" />
+            <span className="text-sm font-bold text-ink-900 dark:text-white">Deletion Requests</span>
+            <span className="rounded-full bg-danger-100 px-2 py-0.5 text-[10px] font-bold text-danger-700 dark:bg-danger-900/30 dark:text-danger-400">{pendingDeleteDocs.length}</span>
+            <span className="ml-2 text-xs text-ink-400">Submitted by Company Admin — requires DPA decision</span>
+          </div>
+          <div className="divide-y divide-ink-100 dark:divide-ink-800">
+            {pendingDeleteDocs.map((doc) => (
+              <div key={doc.id} className="flex flex-wrap items-center gap-3 px-4 py-3">
+                <div className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg ${doc.node_kind === 'folder' ? 'bg-accent-50 text-accent-600 dark:bg-accent-900/30 dark:text-accent-300' : 'bg-danger-50 text-danger-600 dark:bg-danger-900/30 dark:text-danger-300'}`}>
+                  {doc.node_kind === 'folder' ? <Folder className="h-4 w-4" /> : <FileText className="h-4 w-4" />}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-bold text-ink-800 dark:text-ink-200">{doc.label}</p>
+                  <BreadcrumbChips crumbs={resolveCrumbs(doc)} size="xs" />
+                </div>
+                <div className="flex shrink-0 items-center gap-2">
+                  <button
+                    onClick={() => handleRejectDelete(doc)}
+                    disabled={deleteRejectingId === doc.id || deleteApprovingId === doc.id || workspaceFrozen || !canApprove}
+                    className="inline-flex items-center gap-1.5 rounded-lg border border-ink-300 bg-ink-50 px-3 py-1.5 text-xs font-bold text-ink-600 transition hover:bg-ink-100 disabled:cursor-not-allowed disabled:opacity-50 dark:border-ink-600 dark:bg-ink-800 dark:text-ink-300"
+                    title={!canApprove ? 'You do not have permission to decide SMS deletion requests' : 'Reject — restore to approved, fleet-visible'}
+                  >
+                    {deleteRejectingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <XCircle className="h-3.5 w-3.5" />}
+                    Reject
+                  </button>
+                  <button
+                    onClick={() => setConfirmDeleteDoc(doc)}
+                    disabled={deleteApprovingId === doc.id || deleteRejectingId === doc.id || workspaceFrozen || !canApprove}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-danger-600 px-3 py-1.5 text-xs font-bold text-white transition hover:bg-danger-700 disabled:cursor-not-allowed disabled:opacity-50"
+                    title={!canApprove ? 'You do not have permission to decide SMS deletion requests' : 'Approve — permanently delete'}
+                  >
+                    {deleteApprovingId === doc.id ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                    Approve Deletion
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Split-screen: queue list + document reviewer */}
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-4 lg:grid-cols-[380px_1fr]">
         {/* Left: Pending queue */}
@@ -596,7 +731,7 @@ export function SmsApprovalsView() {
                         <Pencil className="h-3.5 w-3.5" /> Edit Section
                       </button>
                     )}
-                    <button onClick={() => openDocInNewTab(selectedDoc)} className="rounded-lg p-2 text-ink-400 hover:bg-primary-100 hover:text-primary-600 dark:hover:bg-primary-900/40" title="Open in new tab">
+                    <button onClick={() => openInNewTab(selectedDoc)} className="rounded-lg p-2 text-ink-400 hover:bg-primary-100 hover:text-primary-600 dark:hover:bg-primary-900/40" title="Open in new tab">
                       <ExternalLink className="h-4 w-4" />
                     </button>
                     <button onClick={() => window.print()} className="rounded-lg p-2 text-ink-400 hover:bg-primary-100 hover:text-primary-600 dark:hover:bg-primary-900/40" title="Print">
@@ -630,8 +765,10 @@ export function SmsApprovalsView() {
                 ) : selectedDoc.content_kind === 'pdf' ? (
                   <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-ink-200 bg-ink-50 py-16 dark:border-ink-700 dark:bg-ink-800/50">
                     <FileText className="h-12 w-12 text-warning-400" />
-                    <p className="mt-3 text-sm font-semibold text-ink-600 dark:text-ink-300">PDF: {selectedDoc.content}</p>
-                    <button onClick={() => openDocInNewTab(selectedDoc)} className="mt-3 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400">Open PDF in new tab →</button>
+                    <p className="mt-3 text-sm font-semibold text-ink-600 dark:text-ink-300">
+                      {isGcsPath(selectedDoc.content) ? selectedDoc.label : `PDF: ${selectedDoc.content}`}
+                    </p>
+                    <button onClick={() => openPdfInNewTab(selectedDoc)} className="mt-3 text-xs font-semibold text-primary-600 hover:underline dark:text-primary-400">Open PDF in new tab →</button>
                   </div>
                 ) : selectedDoc.content ? (
                   <div className="rounded-lg border border-ink-200 bg-white p-6 dark:border-ink-700 dark:bg-ink-800">
@@ -706,6 +843,39 @@ export function SmsApprovalsView() {
           )}
         </div>
       </div>
+
+      {/* ── Approve Deletion Confirmation Modal ── */}
+      {confirmDeleteDoc && (
+        <Modal
+          open
+          onClose={() => setConfirmDeleteDoc(null)}
+          title="Approve Deletion"
+          subtitle={confirmDeleteDoc.label}
+          icon={<Trash2 className="h-5 w-5 text-danger-500" />}
+          size="sm"
+          footer={
+            <>
+              <button onClick={() => setConfirmDeleteDoc(null)} className="btn-secondary" disabled={!!deleteApprovingId}>Cancel</button>
+              <button
+                onClick={() => handleApproveDelete(confirmDeleteDoc)}
+                disabled={!!deleteApprovingId}
+                className="inline-flex items-center gap-2 rounded-lg bg-danger-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-danger-700 disabled:opacity-50"
+              >
+                {deleteApprovingId === confirmDeleteDoc.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Permanently Delete
+              </button>
+            </>
+          }
+        >
+          <div className="flex items-start gap-3 rounded-lg border border-danger-300 bg-danger-50 p-4 dark:border-danger-700 dark:bg-danger-900/20">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-danger-600 dark:text-danger-400" />
+            <div>
+              <p className="text-sm font-bold text-danger-800 dark:text-danger-300">Permanently delete this {confirmDeleteDoc.node_kind === 'folder' ? 'folder and everything inside it' : 'document'}?</p>
+              <p className="mt-1 text-sm text-danger-700 dark:text-danger-400">This removes it from the fleet library and the review queue. This action will be logged in the Audit &amp; Compliance Ledger for ISM tracking and cannot be undone.</p>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* ── Upload Modal ── */}
       {showUploadModal && tenant && (

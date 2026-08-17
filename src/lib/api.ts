@@ -250,6 +250,25 @@ export async function apiEmergencyResetUserPassword(tenantId: string, userId: st
   return request<{ tempPassword: string }>(`/users/${tenantId}/${userId}/emergency-reset`, { method: 'PUT' });
 }
 
+export interface TenantUserSearchResult {
+  id: string;
+  tenant_id: string;
+  name: string;
+  email: string;
+  rank: string;
+  role: string;
+  mfa_enabled: boolean;
+  company: string;
+}
+
+export async function apiSearchTenantUsers(q: string): Promise<TenantUserSearchResult[]> {
+  return request<TenantUserSearchResult[]>(`/users/search?q=${encodeURIComponent(q)}`);
+}
+
+export async function apiResetUserMfa(tenantId: string, userId: string): Promise<{ success: boolean }> {
+  return request<{ success: boolean }>(`/users/${tenantId}/${userId}/mfa-reset`, { method: 'PUT' });
+}
+
 // ── Vessels ───────────────────────────────────────────────
 
 export async function apiGetVessels<T>(tenantId: string): Promise<T[]> {
@@ -457,6 +476,23 @@ export async function apiUploadFile(tenantId: string, docId: string, file: File)
 export async function apiGetSignedUrl(filePath: string): Promise<string> {
   const res = await request<{ url: string }>(`/files/signed-url?filePath=${encodeURIComponent(filePath)}`);
   return res.url;
+}
+
+// Fallback for when signed-URL generation isn't available (e.g. local dev —
+// see server/routes/files.js) — downloads the file through our own
+// authenticated API instead of a direct GCS URL, and hands back a local
+// blob: URL the caller can use exactly like a signed URL.
+export async function apiDownloadFileAsBlobUrl(filePath: string): Promise<string> {
+  const token = getToken();
+  const res = await fetch(`${getApiBase()}/files/download?filePath=${encodeURIComponent(filePath)}`, {
+    headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({ error: 'Download failed' }));
+    throw new ApiFileError(body.error || 'Download failed');
+  }
+  const blob = await res.blob();
+  return URL.createObjectURL(blob);
 }
 
 // ── Platform storage (Super Admin) ─────────────────────────

@@ -27,6 +27,28 @@ function parseUser(row) {
   };
 }
 
+// Super Admin cross-tenant lookup — "which company/user does this email
+// belong to" without already knowing the tenantId. Must be registered
+// before GET /:tenantId below or Express would match "search" as a
+// tenantId value instead of reaching this route.
+router.get('/search', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q) return res.json([]);
+    const like = `%${q}%`;
+    const [rows] = await pool.query(
+      `SELECT tu.id, tu.tenant_id, tu.name, tu.email, tu.\`rank\`, tu.\`role\`, tu.mfa_enabled, t.company
+       FROM tenant_users tu
+       JOIN tenants t ON t.id = tu.tenant_id
+       WHERE tu.email LIKE ? OR tu.name LIKE ?
+       ORDER BY tu.name
+       LIMIT 10`,
+      [like, like],
+    );
+    return res.json(rows.map((r) => ({ ...r, mfa_enabled: !!r.mfa_enabled })));
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
 router.get('/:tenantId', authMiddleware, async (req, res) => {
   try {
     if (req.user.role !== 'super_admin' && req.user.tenant_id !== req.params.tenantId) {
@@ -148,6 +170,22 @@ router.put('/:tenantId/force-password-reset', authMiddleware, requireSuperAdmin,
   try {
     const [result] = await pool.query('UPDATE tenant_users SET must_change_password = TRUE WHERE tenant_id = ?', [req.params.tenantId]);
     return res.json({ affected: result.affectedRows });
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+});
+
+// Super Admin "Reset MFA" — clears an account's enrolled authenticator so
+// its next sign-in goes through fresh QR setup instead of asking for a
+// code from an authenticator the user may have lost. Super-Admin-only
+// (unlike most routes in this file) since forcibly dropping someone's
+// second factor is itself a security-sensitive action.
+router.put('/:tenantId/:userId/mfa-reset', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const [result] = await pool.query(
+      'UPDATE tenant_users SET mfa_enabled = FALSE, mfa_secret = NULL, mfa_backup_codes = NULL WHERE id = ? AND tenant_id = ?',
+      [req.params.userId, req.params.tenantId],
+    );
+    if (result.affectedRows === 0) return res.status(404).json({ error: 'User not found' });
+    return res.json({ success: true });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 

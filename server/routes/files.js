@@ -2,7 +2,7 @@ import { Router } from 'express';
 import multer from 'multer';
 import { v4 as uuidv4 } from 'uuid';
 import { authMiddleware } from '../middleware/auth.js';
-import { uploadFile, getSignedReadUrl, deleteFile } from '../storage.js';
+import { uploadFile, getSignedReadUrl, getObjectStream, deleteFile } from '../storage.js';
 import { refreshTenantStorage } from '../jobs/refreshStorageUsage.js';
 import pool from '../db.js';
 
@@ -78,6 +78,27 @@ router.get('/signed-url', authMiddleware, async (req, res) => {
     const url = await getSignedReadUrl(filePath);
     return res.json({ url });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Failed to generate URL' }); }
+});
+
+// Fallback for environments where signed-URL generation isn't available
+// (e.g. local dev running under a user's `gcloud auth application-default
+// login`, which has no private key to sign with) — proxies the object
+// bytes through this authenticated route instead. Used by the frontend
+// only when /files/signed-url fails.
+router.get('/download', authMiddleware, async (req, res) => {
+  try {
+    const { filePath } = req.query;
+    if (!filePath) return res.status(400).json({ error: 'filePath required' });
+    if (!tenantOwnsPath(req, filePath)) return res.status(403).json({ error: 'Access denied' });
+    const ext = filePath.split('.').pop()?.toLowerCase();
+    res.setHeader('Content-Type', ext === 'pdf' ? 'application/pdf' : 'application/octet-stream');
+    const stream = getObjectStream(filePath);
+    stream.on('error', (err) => {
+      console.error(err);
+      if (!res.headersSent) res.status(404).json({ error: 'File not found' });
+    });
+    stream.pipe(res);
+  } catch (err) { console.error(err); return res.status(500).json({ error: 'Download failed' }); }
 });
 
 router.delete('/', authMiddleware, async (req, res) => {

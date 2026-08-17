@@ -20,12 +20,29 @@ export function getBucketName() {
   return process.env.GCS_BUCKET_NAME || 'maritime-sms-platform-docs';
 }
 
+// Returns the bare `tenants/...` object path (not a `gs://` URI) — every
+// other consumer (isGcsPath on the frontend, the signed-url endpoint's
+// tenantOwnsPath check, the delete endpoint) works off that bare-path
+// convention, so returning anything else here breaks preview/print/delete
+// for every file uploaded through this function.
 export async function uploadFile(filePath, buffer, contentType = 'application/octet-stream') {
   const storage = getStorage();
   const bucket = storage.bucket(getBucketName());
   const file = bucket.file(filePath);
   await file.save(buffer, { contentType });
-  return `gs://${getBucketName()}/${filePath}`;
+  return filePath;
+}
+
+// Streams the object directly through our own server instead of handing the
+// browser a GCS URL. Unlike getSignedReadUrl, this needs no signing
+// capability (no client_email/private key) — it works with plain
+// Application Default Credentials, which is what local development has
+// (a `gcloud auth application-default login` user account can read objects
+// it has IAM access to, it just can't sign a URL on GCS's behalf).
+export function getObjectStream(filePath) {
+  const storage = getStorage();
+  const bucket = storage.bucket(getBucketName());
+  return bucket.file(filePath).createReadStream();
 }
 
 export async function getSignedReadUrl(filePath, expiresInMinutes = 15) {

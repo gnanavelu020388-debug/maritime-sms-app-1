@@ -385,6 +385,30 @@ export async function demoResubmitSmsDoc(tenantId: string, docId: string, conten
   dataCache.upsertCachedSmsDoc(tenantId, d);
 }
 
+// Deletion by a company admin (or DPA) never removes a document outright —
+// it only flags the document as awaiting DPA sign-off, mirroring the
+// add/edit review flow above. The document (and its content) is left
+// untouched in the database; only `approval_state` changes, which also
+// has the side effect of hiding it from the fleet-facing view (same as a
+// pending edit) until the DPA reaches a decision.
+export async function demoRequestDeleteSmsDoc(tenantId: string, docId: string): Promise<void> {
+  const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { approval_state: 'pending_delete', rejection_comments: null });
+  dataCache.upsertCachedSmsDoc(tenantId, d);
+}
+
+// DPA approves the deletion request — this is the only path that actually
+// removes the row (and, via ON DELETE CASCADE, any children).
+export async function demoApproveDeleteSmsDoc(tenantId: string, docId: string): Promise<number> {
+  return demoDeleteSmsDoc(tenantId, docId);
+}
+
+// DPA rejects the deletion request — the document is restored to its
+// previous approved, fleet-visible state.
+export async function demoRejectDeleteSmsDoc(tenantId: string, docId: string, comments?: string): Promise<void> {
+  const d = await api.apiUpdateSmsDoc<SmsDocRow>(tenantId, docId, { approval_state: 'approved', rejection_comments: comments ?? null });
+  dataCache.upsertCachedSmsDoc(tenantId, d);
+}
+
 export async function demoDeleteSmsDoc(tenantId: string, docId: string): Promise<number> {
   const all = getEffectiveDemoSmsDocs(tenantId);
   const toDelete = new Set<string>([docId]);
