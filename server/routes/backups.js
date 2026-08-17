@@ -2,7 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../db.js';
 import { authMiddleware, requireSuperAdmin } from '../middleware/auth.js';
-import { SNAPSHOT_TABLES, captureSnapshotData } from '../lib/backupSnapshot.js';
+import { SNAPSHOT_TABLES, captureSnapshotData, enforceSnapshotLimit } from '../lib/backupSnapshot.js';
 
 const router = Router();
 
@@ -13,6 +13,32 @@ const SELECT_JOINED = 'SELECT b.id, b.tenant_id, b.taken_at, b.size_gb, b.type, 
 function parseBackup(row) {
   if (!row) return null;
   return { ...row, size_gb: Number(row.size_gb) };
+}
+
+// sms_documents self-references via parent_id (folder trees). Snapshot rows
+// come back in arbitrary PK order (UUIDs), so a naive insert can hit a child
+// row before its parent and fail the parent_id FK — reorder parents first.
+function topoSortDocuments(rows) {
+  const byId = new Set(rows.map((r) => r.id));
+  const childrenOf = new Map();
+  const roots = [];
+  for (const row of rows) {
+    if (row.parent_id && byId.has(row.parent_id)) {
+      if (!childrenOf.has(row.parent_id)) childrenOf.set(row.parent_id, []);
+      childrenOf.get(row.parent_id).push(row);
+    } else {
+      roots.push(row);
+    }
+  }
+  const ordered = [];
+  const queue = [...roots];
+  while (queue.length) {
+    const node = queue.shift();
+    ordered.push(node);
+    const kids = childrenOf.get(node.id);
+    if (kids) queue.push(...kids);
+  }
+  return ordered;
 }
 
 router.get('/', authMiddleware, requireSuperAdmin, async (_req, res) => {
@@ -37,6 +63,7 @@ router.post('/', authMiddleware, requireSuperAdmin, async (req, res) => {
       'INSERT INTO backup_snapshots (id, tenant_id, size_gb, type, status, expiry, reason, created_by, snapshot_data) VALUES (?,?,?,?,?,?,?,?,?)',
       [id, tenant_id, sizeGb, type || 'manual', status || 'completed', expiryDate, reason || null, req.user.email || null, JSON.stringify(snapshotData)],
     );
+    await enforceSnapshotLimit(tenant_id);
     const [rows] = await pool.query(`${SELECT_JOINED} WHERE b.id = ?`, [id]);
     return res.status(201).json(parseBackup(rows[0]));
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
@@ -63,7 +90,8 @@ router.post('/:id/restore', authMiddleware, requireSuperAdmin, async (req, res) 
     }
     const restoredCounts = {};
     for (const table of SNAPSHOT_TABLES) {
-      const tableRows = snapshotData[table] || [];
+      const rawRows = snapshotData[table] || [];
+      const tableRows = table === 'sms_documents' ? topoSortDocuments(rawRows) : rawRows;
       restoredCounts[table] = tableRows.length;
       for (const row of tableRows) {
         const columns = Object.keys(row);

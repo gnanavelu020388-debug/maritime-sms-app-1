@@ -16,3 +16,17 @@ export async function captureSnapshotData(tenantId) {
   }
   return data;
 }
+
+// Tenant Backup & Recovery tab keeps only the 2 most recent snapshots per
+// tenant (current + previous) — called after every manual snapshot insert
+// in server/routes/backups.js so a third snapshot pushes the oldest out.
+export async function enforceSnapshotLimit(tenantId) {
+  await pool.query(
+    `DELETE FROM backup_snapshots WHERE tenant_id = ? AND id NOT IN (
+       SELECT id FROM (
+         SELECT id FROM backup_snapshots WHERE tenant_id = ? ORDER BY taken_at DESC LIMIT 2
+       ) AS keep
+     )`,
+    [tenantId, tenantId],
+  );
+}

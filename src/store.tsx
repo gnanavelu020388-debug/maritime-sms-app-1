@@ -295,7 +295,14 @@ function reducer(state: State, action: Action): State {
     // here would spam the ledger. The real logAudit() call happens once,
     // in BillingView's "Save tiers" handler, after the real API write.
     case 'TIER_CONFIG_UPDATE': { const tierConfigs = state.tierConfigs.map((t, i) => (i === action.index ? { ...t, ...action.patch } : t)); const tenants = applyTierLimits(state.tenants, tierConfigs); return { ...state, tierConfigs, tenants }; }
-    case 'BACKUP_ADD': return { ...state, backups: [action.snapshot, ...state.backups] };
+    // Tenant Backup & Recovery tab keeps only the 2 most recent snapshots per
+    // tenant, mirroring the server-side cap in server/lib/backupSnapshot.js.
+    case 'BACKUP_ADD': {
+      const others = state.backups.filter((b) => b.tenantId !== action.snapshot.tenantId);
+      const sameTenant = state.backups.filter((b) => b.tenantId === action.snapshot.tenantId);
+      const kept = [action.snapshot, ...sameTenant].slice(0, 2);
+      return { ...state, backups: [...others, ...kept].sort((a, b) => +new Date(b.takenAt) - +new Date(a.takenAt)) };
+    }
     case 'BACKUP_RESTORE': return state;
     case 'BACKUP_DELETE': return { ...state, backups: state.backups.filter((b) => b.id !== action.snapshotId) };
     case 'INVOICE_ADD': return { ...state, invoices: [action.invoice, ...state.invoices] };
