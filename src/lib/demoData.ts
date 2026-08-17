@@ -83,7 +83,7 @@ export async function demoUpdateTenantSmsVersion(tenantId: string, smsVersion: s
 // uses; writes go through the real tenant-update endpoint.
 
 export function demoGetWorkspaceFrozen(tenantId: string): boolean {
-  return dataCache.getCachedTenants().find((t) => t.id === tenantId)?.workspace_frozen ?? false;
+  return !!dataCache.getCachedTenants().find((t) => t.id === tenantId)?.workspace_frozen;
 }
 
 export async function demoSetWorkspaceFrozen(tenantId: string, frozen: boolean): Promise<void> {

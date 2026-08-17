@@ -236,7 +236,7 @@ function reducer(state: State, action: Action): State {
             percentage: row.storage_percentage ?? 0,
             status: row.storage_status ?? 'NORMAL',
           },
-          guardrails: { workspaceFrozen: row.workspace_frozen, maxSubfolderDepth: row.max_subfolder_depth, maxUploadSizeMb: row.max_upload_size_mb },
+          guardrails: { workspaceFrozen: !!row.workspace_frozen, maxSubfolderDepth: row.max_subfolder_depth, maxUploadSizeMb: row.max_upload_size_mb },
           autoBackupIntervalHours: row.auto_backup_interval_hours,
           lastAutoBackupAt: row.last_auto_backup_at,
         };
@@ -256,7 +256,7 @@ function reducer(state: State, action: Action): State {
         modules: row.modules as ModuleKey[], mfaEnforced: row.mfa_enforced,
         createdAt: row.created_at, contractExpires: row.contract_expires,
         monthlyRevenue: Number(row.monthly_revenue), region: row.region,
-        guardrails: { workspaceFrozen: row.workspace_frozen, maxSubfolderDepth: row.max_subfolder_depth, maxUploadSizeMb: row.max_upload_size_mb },
+        guardrails: { workspaceFrozen: !!row.workspace_frozen, maxSubfolderDepth: row.max_subfolder_depth, maxUploadSizeMb: row.max_upload_size_mb },
         autoBackupIntervalHours: row.auto_backup_interval_hours,
         lastAutoBackupAt: row.last_auto_backup_at,
         demoTenantId: null,
