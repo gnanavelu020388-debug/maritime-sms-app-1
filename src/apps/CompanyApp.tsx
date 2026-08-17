@@ -24,7 +24,7 @@ export function CompanyApp() {
   const performNav = useCallback((section: CompanySection) => {
     navQueue.current = null;
     // Feature-gate: block route access if the underlying module is disabled
-    if ((section === 'sms_dpa' || section === 'master_library') && !isEnabled('sms_documentation')) {
+    if ((section === 'sms_dpa' || section === 'sms_library') && !isEnabled('sms_documentation')) {
       setBlockedSection(section);
       return;
     }
@@ -83,7 +83,7 @@ export function CompanyApp() {
       {active === 'overview' && <CompanyOverview onNavigate={setActive} />}
       {active === 'vessels' && <VesselsView />}
       {active === 'sms_dpa' && <SmsDpaView />}
-      {active === 'master_library' && <MasterSmsLibraryView />}
+      {active === 'sms_library' && <MasterSmsLibraryView />}
       {active === 'crew_management' && <CrewRosterView />}
       {active === 'permissions' && <PermissionsMatrixView />}
       {active === 'audit' && <CompanyAuditView />}
