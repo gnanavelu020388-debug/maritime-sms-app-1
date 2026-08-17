@@ -17,9 +17,17 @@ function todayUtc() {
 
 /** Recomputes and upserts today's provisioning plan for a vessel from its current headcount. Called after every real headcount change (sign-on/sign-off). */
 export async function recomputeGalleyPlan(tenantId, vesselId) {
-  const [[vessel]] = await pool.query('SELECT headcount FROM vessels WHERE id = ? AND tenant_id = ?', [vesselId, tenantId]);
+  const [[vessel]] = await pool.query('SELECT id FROM vessels WHERE id = ? AND tenant_id = ?', [vesselId, tenantId]);
   if (!vessel) return null;
-  const headcount = vessel.headcount;
+  // Count active crew directly rather than trust vessels.headcount: that
+  // column is only ever mutated by adjustHeadcount() on sign-on/sign-off,
+  // so any crew_assignments row inserted another way (seed data, a direct
+  // DB fix, a restored backup) leaves it permanently out of sync with the
+  // real onboard headcount.
+  const [[{ headcount }]] = await pool.query(
+    'SELECT COUNT(*) AS headcount FROM crew_assignments WHERE vessel_id = ? AND tenant_id = ? AND signed_off_at IS NULL',
+    [vesselId, tenantId],
+  );
   const plan = {
     breakfast_kg: +(headcount * GALLEY_RATION_KG_PER_HEAD.breakfast).toFixed(2),
     lunch_kg: +(headcount * GALLEY_RATION_KG_PER_HEAD.lunch).toFixed(2),

@@ -89,7 +89,7 @@ export async function getProfileForVessel(tenantId: string, vesselId: string): P
     const vesselIds = await apiGetProfileVessels(tenantId, p.id);
     if (vesselIds.includes(vesselId)) return p;
   }
-  return profiles[0] ?? null;
+  return null;
 }
 
 export async function getVesselsForTenant(tenantId: string): Promise<{ id: string; name: string; vessel_type: string | null }[]> {

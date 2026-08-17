@@ -488,7 +488,11 @@ export function SmsApprovalsView() {
 
   const filteredPending = filterTreeKind === 'all' ? pendingDocs : pendingDocs.filter((d) => d.tree_kind === filterTreeKind);
   const treeKinds = ['all', ...Array.from(new Set(pendingDocs.map((d) => d.tree_kind)))];
-  const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? profiles[0] ?? null;
+  // No fallback to profiles[0] here: activeProfileId is explicitly null when
+  // the DPA has selected "All Profiles" (see the dropdown below), and that
+  // choice must render as "All Profiles" rather than silently reverting to
+  // whichever profile happens to be first in the list.
+  const activeProfile = profiles.find((p) => p.id === activeProfileId) ?? null;
   const selectedCrumbs = selectedDoc ? resolveCrumbs(selectedDoc) : [];
   const sections = sectionGroups();
 

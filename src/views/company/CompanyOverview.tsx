@@ -121,7 +121,7 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
             <UsageBar label="Users" used={stats.users} max={tenant?.seats_max ?? 0} />
             <UsageBar
               label="Document Storage"
-              used={Math.round(((tenant?.storage_bytes_used ?? 0) / (1024 ** 3)) * 100) / 100}
+              used={(tenant?.storage_bytes_used ?? 0) / (1024 ** 3)}
               max={tenant?.storage_gb_max ?? 0}
               unit="GB"
             />
@@ -189,14 +189,26 @@ function StorageStatusBanner({
   );
 }
 
+// Rounding `used` and `max` to a fixed 2 decimals independently can make a
+// tiny quota (e.g. a demo tenant with a 0.0098 GB limit) display as "used"
+// exceeding "max" even when the real, unrounded values are the other way
+// around. Pick enough decimal places to represent `max` meaningfully, and
+// apply that same precision to `used` so the two numbers stay comparable.
+function formatUsageValue(value: number, max: number): string {
+  const decimals = max > 0 && max < 1 ? Math.min(6, Math.max(2, -Math.floor(Math.log10(max)) + 1)) : 2;
+  return value.toFixed(decimals);
+}
+
 function UsageBar({ label, used, max, unit }: { label: string; used: number; max: number; unit?: string }) {
   const pct = max > 0 ? Math.min(100, (used / max) * 100) : 0;
   const tone = pct > 90 ? 'bg-danger-500' : pct > 75 ? 'bg-warning-500' : 'bg-primary-500';
+  const usedText = unit ? formatUsageValue(used, max) : used;
+  const maxText = unit ? formatUsageValue(max, max) : max;
   return (
     <div>
       <div className="mb-1 flex justify-between text-xs">
         <span className="text-ink-600 dark:text-ink-300">{label}</span>
-        <span className="font-semibold text-ink-800 dark:text-white">{used} / {max}{unit ? ` ${unit}` : ''}</span>
+        <span className="font-semibold text-ink-800 dark:text-white">{usedText} / {maxText}{unit ? ` ${unit}` : ''}</span>
       </div>
       <div className="h-2 w-full overflow-hidden rounded-full bg-ink-200 dark:bg-ink-700">
         <div className={`h-full rounded-full ${tone} transition-all`} style={{ width: `${pct}%` }} />

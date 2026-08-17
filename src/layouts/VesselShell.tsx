@@ -7,7 +7,6 @@ import { useAuth } from '../lib/auth';
 import { startSyncLoop, getSyncStatus, getVesselSyncState, replicateToShoreNow, type SyncResult } from '../lib/syncService';
 import { getLocalSmsVersion } from '../lib/localVesselDb';
 import { getEffectiveDemoVessels, getEffectiveDemoAssignments, getEffectiveDemoUsers } from '../lib/demoData';
-import { getProfileForVessel, type SmsProfile } from '../lib/smsProfiles';
 import { useVesselConnection } from '../lib/useVesselConnection';
 import { VesselSyncStatusPill } from '../components/VesselSyncStatusPill';
 import { useSyncConfig, useModuleDefinitions, getDisplayName, type ModuleKey } from '../lib/featureFlags';
@@ -121,13 +120,6 @@ export function VesselShell({
     });
     return () => { cancelled = true; };
   }, [tenant?.id, activeVesselId, lastSync]);
-
-  const [_vesselProfile, setVesselProfile] = useState<SmsProfile | null>(null);
-  useEffect(() => {
-    const vesselId = activeAssignment?.vessel_id ?? currentVessel?.id;
-    if (!tenant?.id || !vesselId) { setVesselProfile(null); return; }
-    getProfileForVessel(tenant.id, vesselId).then(setVesselProfile);
-  }, [tenant?.id, activeAssignment?.vessel_id, currentVessel?.id]);
 
   async function handleReplicateToShore() {
     if (!tenant?.id || !canReplicate || isReplicating) return;

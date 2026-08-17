@@ -3,6 +3,7 @@ import { StoreProvider, useStore, type HydratedTenantRow } from '../store';
 import { Sidebar } from '../components/Sidebar';
 import { Topbar } from '../components/Topbar';
 import { MaintenanceBanner } from '../components/MaintenanceBanner';
+import { ImpersonationOverlay } from '../components/ImpersonationOverlay';
 import { Toaster } from '../components/Toaster';
 import { DashboardView } from '../views/DashboardView';
 import { TenantsView } from '../views/TenantsView';
@@ -87,6 +88,7 @@ function SuperAdminShellInner({ user, internalRole, onSignOut }: { user: User; r
 
   return (
       <div className="flex h-screen overflow-hidden bg-ink-50 dark:bg-ink-950">
+        <ImpersonationOverlay />
         <Sidebar active={active} onNavigate={setActive} open={sidebarOpen} onClose={() => setSidebarOpen(false)} roleKey={roleKey} />
         <div className="flex min-w-0 flex-1 flex-col">
           <MaintenanceBanner />
