@@ -10,6 +10,7 @@ import { useFleetScope } from '../../lib/useFleetScope';
 import { ShoreLaunchpadView } from '../../components/ShoreLaunchpadView';
 import { FleetSyncWidget } from '../../components/FleetSyncWidget';
 import type { DpaSection } from '../../layouts/DpaShell';
+import { getSelectedProfileId, onSelectedProfileChange } from '../../lib/dpaProfileSelection';
 
 interface DpaStats {
   pendingApprovals: number;
@@ -26,21 +27,46 @@ export function DpaDashboard({ onNavigate }: { onNavigate: (s: DpaSection) => vo
 
   useEffect(() => {
     if (!tenant) return;
-    const docs = getEffectiveDemoSmsDocs(tenant.id);
     const demoVessels = fleetScope.filterVessels(getEffectiveDemoVessels(tenant.id));
-    setStats({
-      pendingApprovals: docs.filter((d) => d.approval_state === 'pending_dpa' && d.node_kind === 'document').length,
-      approvedDocs: docs.filter((d) => d.approval_state === 'approved' && d.node_kind === 'document').length,
-    });
     setVesselCount(demoVessels.length);
     setVessels(demoVessels);
-    loadProfiles(tenant.id).then((list) => setProfiles(fleetScope.filterProfiles(list)));
+
+    // Recomputes the counters for whichever fleet profile is currently
+    // selected — mirrors SmsApprovalsView's "Profile:" dropdown, and stays
+    // live-synced with it via dpaProfileSelection, so this count never
+    // drifts out of sync with what the Approvals queue actually shows.
+    function recompute(scoped: SmsProfileWithVessels[]) {
+      if (!tenant) return;
+      const docs = getEffectiveDemoSmsDocs(tenant.id);
+      const persisted = fleetScope.isRestricted ? null : getSelectedProfileId(tenant.id);
+      const effectiveProfileId = fleetScope.isRestricted
+        ? (scoped[0]?.id ?? null)
+        : (persisted && (persisted === 'all' || scoped.some((p) => p.id === persisted))
+          ? (persisted === 'all' ? null : persisted)
+          : (scoped[0]?.id ?? null));
+      const scopedDocs = effectiveProfileId ? docs.filter((d) => d.profile_id === null || d.profile_id === effectiveProfileId) : docs;
+      setStats({
+        pendingApprovals: scopedDocs.filter((d) => d.approval_state === 'pending_dpa' && d.node_kind === 'document').length,
+        approvedDocs: scopedDocs.filter((d) => d.approval_state === 'approved' && d.node_kind === 'document').length,
+      });
+    }
+
+    let scopedProfiles: SmsProfileWithVessels[] = [];
+    loadProfiles(tenant.id).then((list) => {
+      scopedProfiles = fleetScope.filterProfiles(list);
+      setProfiles(scopedProfiles);
+      recompute(scopedProfiles);
+    });
+
+    return onSelectedProfileChange(tenant.id, () => recompute(scopedProfiles));
   }, [tenant, fleetScope.isGlobal, fleetScope.assignedVesselIds.join(','), fleetScope.assignedFleetProfileIds.join(',')]);
 
   const cards = [
     { label: 'Pending SMS Approvals', value: stats.pendingApprovals, icon: <Clock className="h-5 w-5" />, section: 'approvals' as DpaSection, tone: 'warning' },
     { label: 'Approved SMS Documents', value: stats.approvedDocs, icon: <CheckCircle2 className="h-5 w-5" />, section: 'master_library' as DpaSection, tone: 'success' },
   ];
+
+
 
   return (
     <div className="space-y-5">

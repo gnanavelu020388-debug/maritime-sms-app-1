@@ -18,6 +18,7 @@ import {
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { useFleetScope } from '../../lib/useFleetScope';
 import { deployBaseline } from '../../lib/deployBaseline';
+import { getSelectedProfileId, setSelectedProfileId, onSelectedProfileChange } from '../../lib/dpaProfileSelection';
 import { useShoreRolePermissions, canDoShore, resolveShoreRoleName, dpaFullAuthority, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS } from '../../lib/shoreRoles';
 import { apiGetSignedUrl, apiDownloadFileAsBlobUrl } from '../../lib/api';
 import { Modal } from '../../components/Modal';
@@ -161,11 +162,21 @@ export function SmsApprovalsView() {
         if (!activeProfileId || !scoped.some((p) => p.id === activeProfileId)) {
           setActiveProfileId(scoped.length > 0 ? scoped[0].id : null);
         }
-      } else if (!activeProfileId && scoped.length > 0) {
-        setActiveProfileId(scoped[0].id);
+      } else if (!activeProfileId) {
+        const persisted = getSelectedProfileId(tenant.id);
+        const initial = persisted && (persisted === 'all' || scoped.some((p) => p.id === persisted))
+          ? (persisted === 'all' ? null : persisted)
+          : (scoped.length > 0 ? scoped[0].id : null);
+        setActiveProfileId(initial);
       }
     });
   }, [tenant, syncTick, fleetScope.isGlobal, fleetScope.assignedVesselIds.join(','), fleetScope.assignedFleetProfileIds.join(',')]);
+
+  // Keep in sync if the profile selection changes from another view/tab.
+  useEffect(() => {
+    if (!tenant || fleetScope.isRestricted) return;
+    return onSelectedProfileChange(tenant.id, (profileId) => setActiveProfileId(profileId));
+  }, [tenant, fleetScope.isRestricted]);
 
   useEffect(() => {
     if (!tenant) return;
@@ -524,7 +535,7 @@ export function SmsApprovalsView() {
               <div className="absolute left-0 z-40 mt-1 min-w-[260px] rounded-lg border border-ink-200 bg-white shadow-lg dark:border-ink-700 dark:bg-ink-900">
                 {!fleetScope.isRestricted && (
                 <button
-                  onClick={() => { setActiveProfileId(null); setProfileDropdownOpen(false); }}
+                  onClick={() => { setActiveProfileId(null); if (tenant) setSelectedProfileId(tenant.id, 'all'); setProfileDropdownOpen(false); }}
                   className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm text-ink-700 hover:bg-ink-50 dark:text-ink-200 dark:hover:bg-ink-800"
                 >
                   All Profiles
@@ -533,7 +544,7 @@ export function SmsApprovalsView() {
                 {profiles.map((p) => (
                   <button
                     key={p.id}
-                    onClick={() => { setActiveProfileId(p.id); setProfileDropdownOpen(false); }}
+                    onClick={() => { setActiveProfileId(p.id); if (tenant) setSelectedProfileId(tenant.id, p.id); setProfileDropdownOpen(false); }}
                     className={`flex w-full items-center justify-between px-3 py-2.5 text-left text-sm hover:bg-ink-50 dark:hover:bg-ink-800 ${activeProfileId === p.id ? 'font-bold text-accent-700 dark:text-accent-300' : 'text-ink-700 dark:text-ink-200'}`}
                   >
                     <span className="flex items-center gap-2 truncate"><Ship className="h-3.5 w-3.5 text-accent-500" />{p.name}</span>
