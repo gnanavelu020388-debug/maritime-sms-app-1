@@ -17,7 +17,7 @@ import type { Capabilities } from '../lib/permissions';
 import {
   apiInvitePlatformStaff, apiUpdatePlatformStaff, apiTogglePlatformStaffLock, apiResetPlatformStaffPassword, apiDeletePlatformStaff,
   apiGetMfaEnforcement, apiSetMfaEnforcement, apiForceTenantPasswordReset, apiUpdateTenant,
-  apiSearchTenantUsers, apiResetUserMfa, type TenantUserSearchResult,
+  apiSearchTenantUsers, apiResetUserMfa, apiEmergencyResetUserPassword, type TenantUserSearchResult,
 } from '../lib/api';
 import { logAudit } from '../lib/audit';
 import type { PlatformStaffRow } from '../lib/supabase';
@@ -48,6 +48,8 @@ export function UsersView({ caps }: { caps: Capabilities }) {
   const [mfaSearchResults, setMfaSearchResults] = useState<TenantUserSearchResult[]>([]);
   const [mfaSearchBusy, setMfaSearchBusy] = useState(false);
   const [mfaResetTarget, setMfaResetTarget] = useState<TenantUserSearchResult | null>(null);
+  const [accountSearchResults, setAccountSearchResults] = useState<TenantUserSearchResult[]>([]);
+  const [accountSearchBusy, setAccountSearchBusy] = useState(false);
 
   const currentEmail = user?.email ?? '';
   const isSelf = (u: InternalUser) => u.email === currentEmail;
@@ -68,6 +70,23 @@ export function UsersView({ caps }: { caps: Capabilities }) {
     }, 300);
     return () => clearTimeout(handle);
   }, [mfaSearchQuery]);
+
+  // "Search any client account" must search real tenant users, not the
+  // internal staff roster — same debounced cross-tenant lookup as the MFA
+  // reset search above.
+  useEffect(() => {
+    if (!searchOpen) return;
+    const q = query.trim();
+    if (!q) { setAccountSearchResults([]); return; }
+    setAccountSearchBusy(true);
+    const handle = setTimeout(() => {
+      apiSearchTenantUsers(q)
+        .then(setAccountSearchResults)
+        .catch(() => setAccountSearchResults([]))
+        .finally(() => setAccountSearchBusy(false));
+    }, 300);
+    return () => clearTimeout(handle);
+  }, [query, searchOpen]);
 
   const columns: Column<InternalUser>[] = [
     {
@@ -313,22 +332,34 @@ export function UsersView({ caps }: { caps: Capabilities }) {
       )}
 
       {searchOpen && (
-        <Modal open onClose={() => setSearchOpen(false)} title="Account Search" subtitle="Search any client account across all tenants" icon={<Search className="h-5 w-5" />} size="md">
+        <Modal open onClose={() => { setSearchOpen(false); setQuery(''); setAccountSearchResults([]); }} title="Account Search" subtitle="Search any client account across all tenants" icon={<Search className="h-5 w-5" />} size="md">
           <div className="space-y-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
               <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Email, company, or user ID…" className="input pl-9" />
             </div>
             <div className="space-y-2">
-              {internalUsers.filter((u) => !query || u.email.includes(query) || u.name.toLowerCase().includes(query.toLowerCase())).slice(0, 5).map((u) => (
+              {accountSearchBusy && <p className="py-2 text-center text-xs text-ink-400">Searching…</p>}
+              {!accountSearchBusy && query.trim() && accountSearchResults.length === 0 && (
+                <p className="py-2 text-center text-xs text-ink-400">No matching tenant users found.</p>
+              )}
+              {accountSearchResults.map((u) => (
                 <div key={u.id} className="flex items-center justify-between rounded-lg border border-ink-200/70 p-3 dark:border-ink-800">
                   <div>
                     <p className="text-sm font-medium text-ink-800 dark:text-ink-100">{u.name}</p>
-                    <p className="text-xs text-ink-500">{u.email}</p>
+                    <p className="text-xs text-ink-500">{u.email} · {u.company}</p>
                   </div>
                   <div className="flex items-center gap-2">
-                    <StatusBadge status={u.status} />
-                    <button onClick={async () => { const result = await apiResetPlatformStaffPassword(u.id); dispatch({ type: 'USER_RESET_PASSWORD', id: u.id }); await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' }); setTempPasswordReveal({ email: u.email, password: result.tempPassword }); }} className="btn-ghost rounded-md p-1.5"><KeyRound className="h-4 w-4" /></button>
+                    <Badge tone={u.mfa_enabled ? 'success' : 'warning'} dot>{u.mfa_enabled ? 'MFA On' : 'MFA Off'}</Badge>
+                    <button
+                      title="Emergency password reset"
+                      onClick={async () => {
+                        const result = await apiEmergencyResetUserPassword(u.tenant_id, u.id);
+                        await logAudit({ tenantId: u.tenant_id, actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' });
+                        setTempPasswordReveal({ email: u.email, password: result.tempPassword });
+                      }}
+                      className="btn-ghost rounded-md p-1.5"
+                    ><KeyRound className="h-4 w-4" /></button>
                   </div>
                 </div>
               ))}
@@ -545,6 +576,8 @@ function MfaResetModal({
 }: {
   target: TenantUserSearchResult;
   actorEmail: string;
+  
+
   onClose: () => void;
   onDone: (id: string) => void;
   toast: (t: { tone: 'info' | 'success' | 'warning' | 'danger'; title: string; message?: string }) => void;

@@ -215,6 +215,8 @@ async function resolveFromApi(userObj: {
   tenant_id?: string;
   rank?: string;
   name?: string;
+  internalRole?: string;
+  adminName?: string;
 }): Promise<
   Pick<
     AuthState,
@@ -232,8 +234,8 @@ async function resolveFromApi(userObj: {
     if (userObj.role === "super_admin") {
       return {
         role: "super_admin",
-        internalRole: "super_admin",
-        adminName: "Platform Admin",
+        internalRole: (userObj.internalRole as InternalRole | undefined) ?? "super_admin",
+        adminName: userObj.adminName ?? userObj.name ?? "Platform Admin",
         tenant: null,
         tenantUser: null,
         activeAssignment: null,

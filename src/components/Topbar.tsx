@@ -360,7 +360,7 @@ const SOP_SECTIONS = [
       'Super Admins can impersonate tenant sessions via the Impersonation control. All impersonation actions are recorded in the immutable audit ledger with actor, target, and timestamp.',
       'When provisioning a new tenant, use the Provisioning module — it generates the tenant record, assigns the plan tier, and bootstraps the initial admin user in one transaction.',
       'Archiving a tenant soft-disables access but preserves data. Hard deletion requires the 4-step Critical Action Wizard with explicit confirmation phrase.',
-      'Internal roles (Billing Admin, Read-Only Auditor) are scoped via the capability matrix — they see only the console sections their role permits.',
+      'Internal roles (Platform Auditor, Global Support Staff) are scoped via the capability matrix — they see only the console sections their role permits.',
     ],
   },
   {
@@ -382,9 +382,9 @@ const SOP_SECTIONS = [
     title: 'Emergency Lockdown',
     summary: 'Incident response: revoke sessions and freeze tenant access',
     steps: [
-      'Navigate to Security → Emergency Controls to access the lockdown panel.',
+      'Navigate to User & Role Configuration → Quick Account Actions → Emergency Account Lockdown to suspend a company outright.',
       'Session Revocation: instantly invalidates all active JWT sessions for a specific tenant or the entire platform. Users are force-logged-out on next API call.',
-      'Tenant Freeze: blocks all write operations for a tenant while preserving read access for forensic analysis. Toggle via the Tenant status dropdown in Tenants view.',
+      'Tenant Freeze: blocks SMS document edits for a tenant while preserving read access for forensic analysis. Toggle via Workspace Freeze under SMS Documentation → Governance & Override Controls (select the tenant in Inspector Mode first).',
       'Maintenance Banner: broadcast a platform-wide notice via the Maintenance Banner control. This appears at the top of every tenant vessel and company portal.',
       'Post-incident: lift the lockdown by reversing each control in reverse order (banner → freeze → sessions). Document the incident in the audit ledger with severity: critical.',
     ],
@@ -493,7 +493,7 @@ function HelpDrawer({ open, onClose, onNavigate }: { open: boolean; onClose: () 
           {/* Quick links */}
           <div className="mt-5 rounded-xl border border-ink-200 bg-ink-50/60 p-4 dark:border-ink-800 dark:bg-ink-800/30">
             <p className="mb-2 text-xs font-bold uppercase tracking-wide text-ink-400">Quick Reference</p>
-            <div className="space-y-1.5">
+            <div className="grid grid-cols-2 gap-2">
               {[
                 { label: 'Critical Action Wizard', hint: '4-step safeguard for destructive ops', icon: <ShieldAlert className="h-3.5 w-3.5" />, section: 'tenants' as SectionId },
                 { label: 'Isolated Snapshot Restore', hint: 'Non-destructive per-tenant recovery', icon: <RotateCcw className="h-3.5 w-3.5" />, section: 'backups' as SectionId },
@@ -502,14 +502,14 @@ function HelpDrawer({ open, onClose, onNavigate }: { open: boolean; onClose: () 
                 <button
                   key={link.label}
                   onClick={() => onNavigate(link.section)}
-                  className="flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-xs transition-colors hover:bg-white dark:hover:bg-ink-800/60"
+                  className="flex flex-col items-start gap-1.5 rounded-lg border border-transparent bg-white p-2.5 text-left transition-colors hover:border-primary-200 hover:bg-primary-50/50 dark:bg-ink-900 dark:hover:border-primary-800 dark:hover:bg-primary-900/20"
                 >
-                  <span className="text-primary-500">{link.icon}</span>
-                  <span className="font-semibold text-ink-700 dark:text-ink-200">{link.label}</span>
-                  <span className="ml-auto flex items-center gap-1 text-ink-400">
-                    {link.hint}
-                    <ExternalLink className="h-3 w-3" />
-                  </span>
+                  <div className="flex w-full items-center justify-between gap-1.5">
+                    <span className="text-primary-500">{link.icon}</span>
+                    <ExternalLink className="h-3 w-3 text-ink-300" />
+                  </div>
+                  <span className="text-xs font-semibold leading-tight text-ink-700 dark:text-ink-200">{link.label}</span>
+                  <span className="text-[11px] leading-snug text-ink-400">{link.hint}</span>
                 </button>
               ))}
             </div>
@@ -521,7 +521,7 @@ function HelpDrawer({ open, onClose, onNavigate }: { open: boolean; onClose: () 
             <div>
               <p className="text-xs font-bold text-danger-700 dark:text-danger-300">Emergency Response</p>
               <p className="mt-0.5 text-xs text-ink-600 dark:text-ink-400">
-                For critical incidents requiring immediate platform intervention, use the Security → Emergency Controls panel or escalate to on-call SRE.
+                For critical incidents requiring immediate platform intervention, use Emergency Account Lockdown under User &amp; Role Configuration, or escalate to on-call SRE.
               </p>
             </div>
           </div>

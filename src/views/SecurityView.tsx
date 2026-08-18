@@ -3,6 +3,7 @@ import { ShieldCheck, Filter, Eye, Lock, AlertOctagon, ScrollText, Download, Shi
 import { Card } from '../components/Card';
 import { Badge } from '../components/Badge';
 import { useStore } from '../store';
+import { useAuth } from '../lib/auth';
 import { relativeTime, formatUtc } from '../constants';
 import type { AuditEvent, AuditCategory, InternalUser } from '../types';
 import type { Capabilities } from '../lib/permissions';
@@ -26,14 +27,22 @@ const SEVERITY_STYLE: Record<string, string> = {
 
 type AdminRole = 'Super-Admin' | 'Platform Auditor' | 'Global Support Staff';
 
+// Audit events store the actor's email (see logAudit's actorEmail param),
+// not their internal_user id — key the lookup map the same way so it
+// actually matches, and only invited platform_staff rows are indexable
+// here (the root account owner in super_admins isn't part of this roster
+// but still performs actions, so they're handled as a fallback below).
 function buildActorMap(users: InternalUser[]): Record<string, InternalUser> {
   const map: Record<string, InternalUser> = {};
-  for (const u of users) map[u.id] = u;
+  for (const u of users) map[u.email] = u;
   return map;
 }
 
-function actorRole(actorId: string, actorMap: Record<string, InternalUser>): AdminRole | null {
-  return actorMap[actorId]?.role ?? null;
+function actorRole(actorEmail: string, actorMap: Record<string, InternalUser>, ownerEmail: string | null): AdminRole | null {
+  const matched = actorMap[actorEmail]?.role ?? null;
+  if (matched) return matched;
+  if (ownerEmail && actorEmail === ownerEmail) return 'Super-Admin';
+  return null;
 }
 
 // Classify an audit action into the role-specific tracking bucket
@@ -93,6 +102,8 @@ function exportLedgerCsv(events: AuditEvent[]): void {
 
 export function SecurityView({ caps }: { caps: Capabilities }) {
   const { audit, internalUsers } = useStore();
+  const { user: currentUser } = useAuth();
+  const ownerEmail = currentUser?.email ?? null;
   const [impersonationOnly, setImpersonationOnly] = useState(false);
   const [category, setCategory] = useState<AuditCategory | 'all'>('all');
   const [roleFilter, setRoleFilter] = useState<'all' | AdminRole>('all');
@@ -107,7 +118,7 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
     if (impersonationOnly && !e.impersonation) return false;
     if (category !== 'all' && e.category !== category) return false;
     if (roleFilter !== 'all') {
-      const role = actorRole(e.actor, actorMap);
+      const role = actorRole(e.actor, actorMap, ownerEmail);
       if (role !== roleFilter) return false;
     }
     if (actorQuery) {
@@ -190,7 +201,7 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
 
         {/* Expandable audit table */}
         <div className="overflow-x-auto rounded-xl border border-ink-200/70 dark:border-ink-800">
-          <table className="w-full table-fixed text-left text-sm">
+          <table className="w-max min-w-full text-left text-sm">
             <thead className="bg-ink-50/80 text-xs uppercase tracking-wide text-ink-500 dark:bg-ink-950/50 dark:text-ink-400">
               <tr>
                 <th className="w-10 px-3 py-3" />
@@ -209,7 +220,7 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
                 pageRows.map((e) => {
                   const isExpanded = expandedId === e.id;
                   const user = actorMap[e.actor];
-                  const role = user?.role ?? 'Unknown';
+                  const role = actorRole(e.actor, actorMap, ownerEmail) ?? 'Unknown';
                   const bucket = roleActionBucket(e);
                   return (
                     <Fragment key={e.id}>

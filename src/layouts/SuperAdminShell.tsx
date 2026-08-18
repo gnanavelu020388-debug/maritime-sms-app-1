@@ -24,6 +24,8 @@ import { getEffectiveDemoTenants, getEffectiveDemoUsers, getEffectiveDemoVessels
 import * as api from '../lib/api';
 import type { AuditLogRow, InvoiceRow, BackupSnapshotRow, PlatformStaffRow, ErrorLogRow } from '../lib/supabase';
 
+const VALID_SECTIONS: SectionId[] = ['dashboard', 'tenants', 'provisioning', 'sms', 'users', 'security', 'monitoring', 'billing', 'backups', 'features'];
+
 export function SuperAdminShell(props: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
   return (
     <StoreProvider>
@@ -34,7 +36,13 @@ export function SuperAdminShell(props: { user: User; role: PlatformRole; interna
 
 function SuperAdminShellInner({ user, internalRole, onSignOut }: { user: User; role: PlatformRole; internalRole: InternalRole | null; onSignOut: () => void }) {
   const { dispatch } = useStore();
-  const [active, setActive] = useState<SectionId>('dashboard');
+  // "Inspect Workspace" (SmsView) and similar deep-link actions open a new
+  // tab at ?view=<section> expecting to land directly on that section —
+  // pick that up here instead of always defaulting to the dashboard.
+  const [active, setActive] = useState<SectionId>(() => {
+    const requested = new URLSearchParams(window.location.search).get('view');
+    return VALID_SECTIONS.includes(requested as SectionId) ? (requested as SectionId) : 'dashboard';
+  });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const roleKey: InternalRole = internalRole ?? 'super_admin';
   const caps = capabilitiesFor(roleKey);

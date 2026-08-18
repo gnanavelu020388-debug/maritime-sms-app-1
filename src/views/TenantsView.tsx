@@ -63,6 +63,7 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
   } | null>(null);
   const [creating, setCreating] = useState(false);
   const [archiveConfirm, setArchiveConfirm] = useState<Tenant | null>(null);
+  const [suspendConfirm, setSuspendConfirm] = useState<Tenant | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Tenant | null>(null);
   const [showArchived, setShowArchived] = useState(false);
   const [saveBusy, setSaveBusy] = useState(false);
@@ -476,14 +477,7 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
               </button>
               {t.status === "active" || t.status === "trial" ? (
                 <button
-                  onClick={async () => {
-                    if (!(await setTenantStatus(t, "suspended"))) return;
-                    toast({
-                      tone: "warning",
-                      title: "Suspended",
-                      message: t.company,
-                    });
-                  }}
+                  onClick={() => setSuspendConfirm(t)}
                   disabled={!caps.tenantEdit}
                   className="rounded p-1 text-ink-400 hover:bg-danger-50 hover:text-danger-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-danger-900/30 dark:hover:text-danger-400"
                   title="Suspend"
@@ -669,6 +663,61 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
             </li>
             <li>
               · The tenant can be restored at any time using the Restore action.
+            </li>
+          </ul>
+        </Modal>
+      )}
+
+      {suspendConfirm && (
+        <Modal
+          open
+          onClose={() => setSuspendConfirm(null)}
+          title="Suspend Tenant"
+          subtitle={`${suspendConfirm.company} · ${suspendConfirm.id}`}
+          icon={<Ban className="h-5 w-5" />}
+          size="sm"
+          footer={
+            <>
+              <button
+                onClick={() => setSuspendConfirm(null)}
+                className="btn-secondary"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={async () => {
+                  if (!(await setTenantStatus(suspendConfirm, "suspended")))
+                    return;
+                  toast({
+                    tone: "warning",
+                    title: "Suspended",
+                    message: suspendConfirm.company,
+                  });
+                  setSuspendConfirm(null);
+                }}
+                className="btn-primary"
+              >
+                <Ban className="h-4 w-4" /> Suspend & block logins
+              </button>
+            </>
+          }
+        >
+          <p className="text-sm text-ink-600 dark:text-ink-300">
+            Suspending <strong>{suspendConfirm.company}</strong> will instantly
+            block login access for all users across shore and ship portals.
+          </p>
+          <ul className="mt-3 space-y-1 text-xs text-ink-500 dark:text-ink-400">
+            <li>
+              · All tenant database records, SMS history, and audit logs are
+              retained.
+            </li>
+            <li>
+              · The tenant is excluded from active subscription revenue
+              calculations while suspended.
+            </li>
+            <li>
+              · The tenant can be reactivated at any time using the Activate
+              action.
             </li>
           </ul>
         </Modal>

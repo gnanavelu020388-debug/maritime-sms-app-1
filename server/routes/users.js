@@ -101,6 +101,30 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
     }
     const [rows] = await pool.query('SELECT * FROM tenant_users WHERE id = ?', [id]);
     return res.status(201).json(parseUser(rows[0]));
+  } catch (err) {
+    console.error(err);
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: `An account with the email "${req.body.email}" already exists.` });
+    }
+    return res.status(500).json({ error: 'Database error' });
+  }
+});
+
+// Super Admin "Trigger tenant password reset" emergency action — forces
+// every user at a tenant to set a new password on next sign-in. A real,
+// tenant-wide write, not a per-user endpoint, since the emergency-response
+// use case is "something at this company may be compromised."
+//
+// Registered ahead of the generic PUT /:tenantId/:userId route below —
+// Express matches routes in registration order, and :userId would
+// otherwise greedily match the literal "force-password-reset" segment,
+// silently routing every call here into the single-user update handler
+// instead (which then no-ops with "No fields to update" since this call
+// sends no body, so this reset never actually fired).
+router.put('/:tenantId/force-password-reset', authMiddleware, requireSuperAdmin, async (req, res) => {
+  try {
+    const [result] = await pool.query('UPDATE tenant_users SET must_change_password = TRUE WHERE tenant_id = ?', [req.params.tenantId]);
+    return res.json({ affected: result.affectedRows });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
@@ -159,17 +183,6 @@ router.put('/:tenantId/:userId/emergency-reset', authMiddleware, async (req, res
     );
     if (result.affectedRows === 0) return res.status(404).json({ error: 'User not found' });
     return res.json({ tempPassword });
-  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
-});
-
-// Super Admin "Trigger tenant password reset" emergency action — forces
-// every user at a tenant to set a new password on next sign-in. A real,
-// tenant-wide write, not a per-user endpoint, since the emergency-response
-// use case is "something at this company may be compromised."
-router.put('/:tenantId/force-password-reset', authMiddleware, requireSuperAdmin, async (req, res) => {
-  try {
-    const [result] = await pool.query('UPDATE tenant_users SET must_change_password = TRUE WHERE tenant_id = ?', [req.params.tenantId]);
-    return res.json({ affected: result.affectedRows });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 

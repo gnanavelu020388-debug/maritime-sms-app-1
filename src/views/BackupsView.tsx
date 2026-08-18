@@ -91,7 +91,7 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
         </div>
 
         <div className="overflow-x-auto rounded-xl border border-ink-200/70 dark:border-ink-800">
-          <table className="w-full table-fixed text-left text-sm">
+          <table className="w-max min-w-full text-left text-sm">
             <thead className="bg-ink-50/80 text-xs uppercase tracking-wide text-ink-500 dark:bg-ink-950/50 dark:text-ink-400">
               <tr>
                 <th className="w-10 px-3 py-3" />

@@ -14,13 +14,14 @@ import { getSelectedProfileId, onSelectedProfileChange } from '../../lib/dpaProf
 
 interface DpaStats {
   pendingApprovals: number;
+  pendingDeletions: number;
   approvedDocs: number;
 }
 
 export function DpaDashboard({ onNavigate }: { onNavigate: (s: DpaSection) => void }) {
   const { tenant } = useAuth();
   const fleetScope = useFleetScope();
-  const [stats, setStats] = useState<DpaStats>({ pendingApprovals: 0, approvedDocs: 0 });
+  const [stats, setStats] = useState<DpaStats>({ pendingApprovals: 0, pendingDeletions: 0, approvedDocs: 0 });
   const [profiles, setProfiles] = useState<SmsProfileWithVessels[]>([]);
   const [vesselCount, setVesselCount] = useState(0);
   const [vessels, setVessels] = useState<VesselRow[]>([]);
@@ -47,6 +48,7 @@ export function DpaDashboard({ onNavigate }: { onNavigate: (s: DpaSection) => vo
       const scopedDocs = effectiveProfileId ? docs.filter((d) => d.profile_id === null || d.profile_id === effectiveProfileId) : docs;
       setStats({
         pendingApprovals: scopedDocs.filter((d) => d.approval_state === 'pending_dpa' && d.node_kind === 'document').length,
+        pendingDeletions: scopedDocs.filter((d) => d.approval_state === 'pending_delete').length,
         approvedDocs: scopedDocs.filter((d) => d.approval_state === 'approved' && d.node_kind === 'document').length,
       });
     }
@@ -62,7 +64,15 @@ export function DpaDashboard({ onNavigate }: { onNavigate: (s: DpaSection) => vo
   }, [tenant, fleetScope.isGlobal, fleetScope.assignedVesselIds.join(','), fleetScope.assignedFleetProfileIds.join(',')]);
 
   const cards = [
-    { label: 'Pending SMS Approvals', value: stats.pendingApprovals, icon: <Clock className="h-5 w-5" />, section: 'approvals' as DpaSection, tone: 'warning' },
+    {
+      label: stats.pendingDeletions > 0
+        ? `Pending SMS Approvals (${stats.pendingDeletions} deletion${stats.pendingDeletions !== 1 ? 's' : ''})`
+        : 'Pending SMS Approvals',
+      value: stats.pendingApprovals + stats.pendingDeletions,
+      icon: <Clock className="h-5 w-5" />,
+      section: 'approvals' as DpaSection,
+      tone: 'warning',
+    },
     { label: 'Approved SMS Documents', value: stats.approvedDocs, icon: <CheckCircle2 className="h-5 w-5" />, section: 'master_library' as DpaSection, tone: 'success' },
   ];
 
@@ -168,7 +178,7 @@ export function DpaDashboard({ onNavigate }: { onNavigate: (s: DpaSection) => vo
                 desc="Inspect admin-uploaded drafts against the approved baseline. Approve & push to fleet, or reject with comments."
                 onClick={() => onNavigate('approvals')}
                 tone="warning"
-                badge={stats.pendingApprovals > 0 ? `${stats.pendingApprovals} pending` : undefined}
+                badge={stats.pendingApprovals + stats.pendingDeletions > 0 ? `${stats.pendingApprovals + stats.pendingDeletions} pending` : undefined}
               />
               <ActionCard
                 icon={<BookOpen className="h-5 w-5" />}

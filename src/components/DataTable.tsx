@@ -93,7 +93,7 @@ export function DataTable<T extends { id: string }>({
       ) : null}
 
       <div className={fullWidth ? 'w-full' : 'overflow-x-auto rounded-xl border border-ink-200/70 dark:border-ink-800'}>
-        <table className="w-full table-fixed text-left text-sm">
+        <table className={`text-left text-sm ${fullWidth ? 'w-full table-fixed' : 'w-max min-w-full'}`}>
           <thead className="bg-ink-50/80 text-xs uppercase tracking-wide text-ink-500 dark:bg-ink-950/50 dark:text-ink-400">
             <tr>
               {columns.map((c) => (

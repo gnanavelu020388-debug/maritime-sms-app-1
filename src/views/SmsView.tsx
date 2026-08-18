@@ -20,7 +20,12 @@ import type { Capabilities } from '../lib/permissions';
 import type { SmsSnapshot, PlanTier } from '../types';
 
 export function SmsView({ caps: _caps }: { caps: Capabilities }) {
-  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  // The "Inspect" button opens a new tab pointed at ?view=sms&tenant=<id> —
+  // pick that tenant up here so the deep link actually lands on its
+  // Inspector Mode view instead of silently opening on "no tenant selected".
+  const [selectedTenantId, setSelectedTenantId] = useState<string | null>(
+    () => new URLSearchParams(window.location.search).get('tenant'),
+  );
   const { defs } = useModuleDefinitions();
 
   return (
@@ -199,9 +204,9 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
         </p>
       )}
 
-      <div className="grid gap-4 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
         {/* Freeze Toggle */}
-        <section className="rounded-xl border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900">
+        <section className="min-w-0 rounded-xl border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900">
           <div className="flex items-center gap-2 border-b border-ink-100 px-4 py-3 dark:border-ink-800">
             {isFrozen ? <Lock className="h-4 w-4 text-danger-500" /> : <Unlock className="h-4 w-4 text-ink-400" />}
             <p className="text-sm font-bold text-ink-800 dark:text-ink-100">Workspace Freeze</p>
@@ -234,7 +239,7 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
         </section>
 
         {/* Guardrails */}
-        <section className="rounded-xl border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900">
+        <section className="min-w-0 rounded-xl border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900">
           <div className="flex items-center gap-2 border-b border-ink-100 px-4 py-3 dark:border-ink-800">
             <Sliders className="h-4 w-4 text-primary-500" />
             <p className="text-sm font-bold text-ink-800 dark:text-ink-100">{isGlobal ? 'Default Guardrails' : 'Custom Guardrails'}</p>
@@ -278,7 +283,7 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
         </section>
 
         {/* Rollback (tenant-only) / Audit Stream */}
-        <section className="rounded-xl border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900">
+        <section className="min-w-0 rounded-xl border border-ink-200 bg-white dark:border-ink-800 dark:bg-ink-900">
           {isGlobal ? (
             <>
               <div className="flex items-center gap-2 border-b border-ink-100 px-4 py-3 dark:border-ink-800">

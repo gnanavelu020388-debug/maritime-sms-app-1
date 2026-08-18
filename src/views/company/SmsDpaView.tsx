@@ -25,6 +25,7 @@ import {
   ChevronDown as ChevronDownIcon,
   FilePlus2,
   Printer,
+  XCircle,
 } from "lucide-react";
 import { type SmsDocRow } from "../../lib/supabase";
 import { useAuth } from "../../lib/auth";
@@ -862,7 +863,7 @@ export function SmsDpaView() {
         ? "success"
         : node.approval_state === "pending_dpa"
           ? "warning"
-          : node.approval_state === "pending_delete"
+          : node.approval_state === "pending_delete" || node.approval_state === "rejected"
             ? "danger"
             : "neutral";
     const childCount = node.children.length;
@@ -953,7 +954,9 @@ export function SmsDpaView() {
                   ? "Pending"
                   : node.approval_state === "pending_delete"
                     ? "Pending Deletion"
-                    : "Draft"}
+                    : node.approval_state === "rejected"
+                      ? "Rejected"
+                      : "Draft"}
             </span>
           )}
 
@@ -1085,6 +1088,15 @@ export function SmsDpaView() {
             </div>
           )}
         </div>
+        {node.node_kind === "document" && node.approval_state === "rejected" && node.rejection_comments && (
+          <div
+            className="mb-1 flex items-start gap-1.5 rounded-md bg-danger-50 px-2 py-1.5 text-[11px] text-danger-700 dark:bg-danger-900/20 dark:text-danger-300"
+            style={{ marginLeft: `${depth * 24 + 34}px` }}
+          >
+            <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span><span className="font-bold">DPA rejected this draft:</span> {node.rejection_comments}</span>
+          </div>
+        )}
         {isOpen && node.children.length > 0 && (
           <div className="relative">
             {node.children.map((c) => renderNode(c, depth + 1))}

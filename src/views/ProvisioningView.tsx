@@ -324,7 +324,7 @@ function UserFormModal({ tenant, busy, error, onClose, onCreate }: {
       </div>
       <div className="mt-3 flex items-center gap-2 rounded-lg bg-ink-50 p-3 text-xs text-ink-600 dark:bg-ink-800 dark:text-ink-300">
         <ExternalLink className="h-4 w-4 text-primary-500" />
-        After provisioning, open a new incognito window → <strong>Sign Up</strong> with this email + any password (6+ chars). On login they're routed to their role's window automatically.
+        After provisioning, open a new incognito window → <strong>Sign In</strong> with this email and password <strong>demo</strong> (the account already exists — no separate sign-up step). On login they're routed to their role's window automatically.
       </div>
     </Modal>
   );

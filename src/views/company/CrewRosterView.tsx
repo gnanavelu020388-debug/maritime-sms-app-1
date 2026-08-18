@@ -94,7 +94,12 @@ export function CrewRosterView() {
     if (!tenant) return;
     setLoading(true);
     const userList = getEffectiveDemoUsers(tenant.id);
-    const activeAssignments = getEffectiveDemoAssignments(tenant.id);
+    // getEffectiveDemoAssignments returns full sign-on/off history, not just
+    // current assignments — signing off updates signed_off_at on the same
+    // row rather than removing it, so this must be filtered to active rows
+    // or a signed-off crew member's stale assignment keeps matching here and
+    // they appear onboard forever (see VesselsView.tsx for the same filter).
+    const activeAssignments = getEffectiveDemoAssignments(tenant.id).filter((a) => !a.signed_off_at);
     const vesselList = getEffectiveDemoVessels(tenant.id);
     setVessels(vesselList);
     const personnel = userList.map((u) => {
@@ -567,7 +572,7 @@ export function CrewRosterView() {
             await demoCreateUser(tenant.id, {
               name: data.name, email: data.email, employee_id: data.employeeId,
               passport_number: null, seaman_book_number: null, nationality: null,
-              rank: data.rank, role, status,
+              rank: data.rank, role, status, password: data.password,
               fleet_scope: data.fleetScope,
               assigned_vessel_ids: isShoreside ? data.fleetVessels : [],
               assigned_fleet_profile_ids: isShoreside ? data.fleetProfiles : [],
