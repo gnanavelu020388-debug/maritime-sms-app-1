@@ -48,7 +48,7 @@ export function VesselsView() {
   }, [rows, scopeFilter]);
 
   async function load() {
-    if (!tenant) return;
+    if (!tenant) return [];
     setLoading(true);
     const profileList = await loadProfiles(tenant.id);
     setProfiles(profileList);
