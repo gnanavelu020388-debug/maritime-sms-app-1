@@ -17,7 +17,7 @@ async function traceSyncIntervalFlow() {
   // console.log('═══════════════════════════════════════════════════════════════\n');
 
   const testTenantId = 'test-tenant-sync-trace';
-  const intervals = [2, 4, 6, 12, 24];
+  const intervals = [0, 2, 4, 6, 8, 12, 24]; // 0 = "Always" (continuous sync)
 
   // ── STEP 1: Simulate Super Admin setting each interval ───────────
   // console.log('── STEP 1: Super Admin writes sync interval to database ──\n');

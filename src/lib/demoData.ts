@@ -171,8 +171,32 @@ export interface DemoSyncConfigEntry {
 
 const syncConfigCache = new Map<string, DemoSyncConfigEntry>();
 
-export function getDemoSyncConfigForTenant(tenantId: string): DemoSyncConfigEntry | null {
-  return syncConfigCache.get(tenantId) ?? null;
+// Same pattern as getDemoFeatureFlagsForTenant: a cache miss must trigger a
+// real fetch from the backend, not be treated as "no config exists" — a
+// tenant whose sync interval was set in an earlier session still has that
+// value persisted server-side even though this session's cache is empty.
+export async function getDemoSyncConfigForTenant(tenantId: string): Promise<DemoSyncConfigEntry | null> {
+  const cached = syncConfigCache.get(tenantId);
+  if (cached) return cached;
+  try {
+    const row = await api.apiGetSyncConfig<{
+      auto_sync_interval_hours: number;
+      manual_replicate_enabled: boolean;
+      updated_by: string | null;
+      updated_at: string;
+    }>(tenantId);
+    const entry: DemoSyncConfigEntry = {
+      tenant_id: tenantId,
+      auto_sync_interval_hours: row.auto_sync_interval_hours,
+      manual_replicate_enabled: row.manual_replicate_enabled,
+      updated_by: row.updated_by ?? null,
+      updated_at: row.updated_at ?? new Date().toISOString(),
+    };
+    syncConfigCache.set(tenantId, entry);
+    return entry;
+  } catch {
+    return null;
+  }
 }
 
 export function getDemoSyncConfigs(): DemoSyncConfigEntry[] {

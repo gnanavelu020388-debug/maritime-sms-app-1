@@ -52,8 +52,9 @@ export function VesselShell({
     const intervalMs = syncConfig.auto_sync_interval_hours * 60 * 60 * 1000;
     setSyncIntervalMs(intervalMs);
     setManualReplicateEnabled(syncConfig.manual_replicate_enabled);
+    const intervalLabel = syncConfig.auto_sync_interval_hours === 0 ? 'always' : `${syncConfig.auto_sync_interval_hours}h`;
     console.log(
-      `[VesselShell] sync config loaded tenant=${tenant?.id} interval=${syncConfig.auto_sync_interval_hours}h (${intervalMs}ms) manualReplicate=${syncConfig.manual_replicate_enabled} updatedBy=${syncConfig.updated_by ?? 'N/A'}`,
+      `[VesselShell] sync config loaded tenant=${tenant?.id} interval=${intervalLabel} (${intervalMs}ms) manualReplicate=${syncConfig.manual_replicate_enabled} updatedBy=${syncConfig.updated_by ?? 'N/A'}`,
     );
   }, [syncConfig]);
 

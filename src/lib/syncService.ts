@@ -118,11 +118,14 @@ export function startSyncLoop(
   intervalMs: number = DEFAULT_CHECK_INTERVAL_MS,
   vesselId?: string,
 ): () => void {
+  // intervalMs === 0 is the "Always" preset — it deliberately falls through
+  // to the same 30s floor as any other interval below the minimum, giving
+  // continuous sync without needing separate always-on logic.
   const safeInterval = Math.min(Math.max(intervalMs, 30_000), 24 * 60 * 60 * 1000);
-  const intervalHours = (safeInterval / (60 * 60 * 1000)).toFixed(1);
+  const intervalLabel = intervalMs === 0 ? 'always (30s)' : `${(safeInterval / (60 * 60 * 1000)).toFixed(1)}h`;
 
   console.log(
-    `[syncService] startSyncLoop tenant=${tenantId} vessel=${vesselId ?? 'N/A'} interval=${intervalHours}h (${safeInterval}ms)`,
+    `[syncService] startSyncLoop tenant=${tenantId} vessel=${vesselId ?? 'N/A'} interval=${intervalLabel} (${safeInterval}ms)`,
   );
 
   const initialTimeout = setTimeout(() => {

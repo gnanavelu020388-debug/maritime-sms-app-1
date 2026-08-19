@@ -5,7 +5,9 @@ import crypto from 'crypto';
 
 const router = Router();
 
-const ALLOWED_INTERVALS = [2, 4, 6, 12, 24];
+// 0 = "Always" (continuous sync, floored to the sync loop's 30s minimum
+// interval client-side) rather than a fixed number of hours between check-ins.
+const ALLOWED_INTERVALS = [0, 2, 4, 6, 8, 12, 24];
 
 router.get('/:tenantId', authMiddleware, async (req, res) => {
   try {

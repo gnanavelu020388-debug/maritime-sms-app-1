@@ -30,7 +30,7 @@ interface SyncConfigState {
   manualReplicate: boolean;
 }
 
-const SYNC_PRESETS = [2, 4, 6, 8, 12, 24];
+const SYNC_PRESETS = [0, 2, 4, 6, 8, 12, 24];
 
 export function FeatureMatrixView({ caps }: { caps: Capabilities }) {
   const { tenants: mockTenants, dispatch } = useStore();
@@ -85,7 +85,7 @@ export function FeatureMatrixView({ caps }: { caps: Capabilities }) {
         const explicit = overrides.get(k);
         f[t.id][k] = explicit === false ? false : DEFAULT_ENABLED_MODULES.includes(k);
       });
-      const sc = getDemoSyncConfigForTenant(t.id);
+      const sc = await getDemoSyncConfigForTenant(t.id);
       s[t.id] = {
         intervalHours: sc?.auto_sync_interval_hours ?? 6,
         manualReplicate: sc?.manual_replicate_enabled ?? true,
@@ -314,7 +314,7 @@ export function FeatureMatrixView({ caps }: { caps: Capabilities }) {
                           className="rounded-md border border-ink-200 bg-white px-2 py-1 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200 disabled:opacity-50"
                         >
                           {SYNC_PRESETS.map((h) => (
-                            <option key={h} value={h}>{h}h</option>
+                            <option key={h} value={h}>{h === 0 ? 'Always' : `${h}h`}</option>
                           ))}
                         </select>
                       </div>
