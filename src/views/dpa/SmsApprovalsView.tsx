@@ -17,7 +17,6 @@ import {
 } from '../../lib/demoData';
 import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { useFleetScope } from '../../lib/useFleetScope';
-import { deployBaseline } from '../../lib/deployBaseline';
 import { getSelectedProfileId, setSelectedProfileId, onSelectedProfileChange } from '../../lib/dpaProfileSelection';
 import { useShoreRolePermissions, canDoShore, resolveShoreRoleName, dpaFullAuthority, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS } from '../../lib/shoreRoles';
 import { apiGetSignedUrl, apiDownloadFileAsBlobUrl } from '../../lib/api';
@@ -269,23 +268,21 @@ export function SmsApprovalsView() {
     if (!tenant || !selectedDoc || !signatureName.trim() || !signatureTitle.trim()) return;
     setDeploying(true);
     try {
-      const oldVersion = tenant.sms_version;
       await demoApproveSmsDoc(tenant.id, selectedDoc.id);
-      let newVersion: string | null = null;
+      const versionSuffix = activeProfile ? ` (${activeProfile.name} v${activeProfile.version})` : '';
       if (canDeploy) {
-        newVersion = await deployBaseline(tenant.id, tenantUser!.email);
+        postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'baseline_deployed', version: activeProfile?.version ?? null } });
       }
-      const versionLabel = newVersion ?? oldVersion;
       await logAudit({
         tenantId: tenant.id,
         actorEmail: tenantUser!.email,
         category: 'sms',
-        action: `DPA APPROVED & DEPLOYED: ${selectedDoc.label} (SMS v${oldVersion} → v${versionLabel}). Digital signature: ${signatureName} (${signatureTitle}). Document deployed to all fleet vessels.`,
+        action: `DPA APPROVED & DEPLOYED: ${selectedDoc.label}${versionSuffix}. Digital signature: ${signatureName} (${signatureTitle}). Document deployed to all fleet vessels.`,
         target: selectedDoc.tree_kind,
         location: tenant!.company,
         severity: 'warning',
       });
-      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'approved', docId: selectedDoc.id, label: selectedDoc.label, version: versionLabel } });
+      postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'approved', docId: selectedDoc.id, label: selectedDoc.label, version: activeProfile?.version ?? null } });
       await refresh();
       setShowSignModal(false);
       setSignatureName('');
@@ -294,7 +291,7 @@ export function SmsApprovalsView() {
       setRejectMode(false);
       setRejectComments('');
       setSyncTick((t) => t + 1);
-      showToast(`Approved & deployed to fleet. SMS v${versionLabel}. Signed by ${signatureName}.`, true);
+      showToast(`Approved & deployed to fleet.${versionSuffix} Signed by ${signatureName}.`, true);
     } catch (err) {
       showToast((err as Error).message || 'Failed to approve & deploy.', false);
     } finally {

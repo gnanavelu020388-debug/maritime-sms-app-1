@@ -59,7 +59,7 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
       <div className="flex flex-row items-center justify-between gap-4">
         <div>
           <h1 className="text-xl font-bold text-ink-900 dark:text-white">{tenant?.company}</h1>
-          <p className="text-sm text-ink-500 dark:text-ink-400">Welcome, {tenantUser?.name}. Plan: {tenant?.plan} · SMS v{tenant?.sms_version}</p>
+          <p className="text-sm text-ink-500 dark:text-ink-400">Welcome, {tenantUser?.name}. Plan: {tenant?.plan}</p>
         </div>
         <div className="hidden items-center gap-2.5 rounded-full border border-ink-200/70 bg-white px-4 py-2 shadow-sm dark:border-ink-800 dark:bg-ink-900 sm:flex">
           <div className="flex h-7 w-7 items-center justify-center rounded-full bg-gradient-to-br from-primary-500 to-accent-500 text-white">
@@ -134,7 +134,6 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
             <h3 className="text-sm font-bold text-ink-900 dark:text-white">Compliance Status</h3>
           </div>
           <div className="space-y-2 text-sm">
-            <Row label="SMS Version" value={`v${tenant?.sms_version}`} />
             <Row label="MFA Enforced" value={tenant?.mfa_enforced ? 'Yes' : 'No'} />
             <Row label="Plan" value={tenant?.plan ?? '—'} />
             <Row label="Region" value={tenant?.region ?? '—'} />

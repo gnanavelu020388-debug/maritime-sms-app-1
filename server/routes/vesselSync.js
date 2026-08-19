@@ -13,12 +13,54 @@ const router = Router();
 const LIVE_CONNECTIVITY_WINDOW_MINUTES = 10;
 const IS_ONLINE_SQL = `(s.server_reachable = TRUE AND s.last_heartbeat_at IS NOT NULL AND s.last_heartbeat_at >= (NOW() - INTERVAL ? MINUTE))`;
 
+// Per-module (per-app) pending/failed outbox counts, joined in whenever a
+// moduleKey filter is given. Every platform app writes its queue entries
+// into the same vessel_sync_outbox table tagged with its own module_key
+// (see src/lib/syncTypes.ts), so filtering the Connectivity Log to one app
+// never needs a schema change — it's already there for every future module,
+// not just SMS.
+function moduleOutboxJoin(moduleKey) {
+  if (!moduleKey) return { join: '', params: [], pendingExpr: 's.pending_outbox_count', failedExpr: 's.failed_outbox_count' };
+  return {
+    join: `LEFT JOIN (
+        SELECT vessel_id,
+          SUM(status = 'pending') AS m_pending,
+          SUM(status = 'failed') AS m_failed
+        FROM vessel_sync_outbox
+        WHERE module_key = ?
+        GROUP BY vessel_id
+      ) mo ON mo.vessel_id = v.id`,
+    params: [moduleKey],
+    pendingExpr: 'COALESCE(mo.m_pending, 0)',
+    failedExpr: 'COALESCE(mo.m_failed, 0)',
+  };
+}
+
+// MySQL's SUM()/CAST(...AS SIGNED|UNSIGNED) both produce a BIGINT result,
+// and mysql2 always serializes BIGINT as a JS string (regardless of size,
+// unlike its handling of plain INT columns) to avoid silent precision loss.
+// The frontend's `sum + count` reducers don't know that and do string
+// concatenation instead of addition on it ("0" + "0" + "0" -> "000") — this
+// coerces the two count columns back to real numbers before the response
+// goes out, for both the plain INT path and the per-module SUM() path.
+function coerceOutboxCounts(rows) {
+  for (const row of rows) {
+    row.pending_outbox_count = Number(row.pending_outbox_count) || 0;
+    row.failed_outbox_count = Number(row.failed_outbox_count) || 0;
+  }
+  return rows;
+}
+
 // Super Admin: every vessel across every tenant, left-joined with its
 // vessel_sync_state row (may not exist yet if the vessel has never gone
 // through the unified sync engine — those come back with null status
-// fields rather than a fabricated default).
-router.get('/', authMiddleware, requireSuperAdmin, async (_req, res) => {
+// fields rather than a fabricated default). Optional ?moduleKey= narrows
+// the pending/failed counts to a single app.
+router.get('/', authMiddleware, requireSuperAdmin, async (req, res) => {
   try {
+    const moduleKey = (req.query.moduleKey || '').toString().trim();
+    const { join: moduleJoin, params: moduleJoinParams, pendingExpr, failedExpr } = moduleOutboxJoin(moduleKey);
+
     const [rows] = await pool.query(
       `SELECT
         v.id AS vessel_id,
@@ -28,17 +70,18 @@ router.get('/', authMiddleware, requireSuperAdmin, async (_req, res) => {
         s.last_heartbeat_at,
         s.last_sync_at AS state_last_sync_at,
         s.last_sync_method,
-        s.pending_outbox_count,
-        s.failed_outbox_count,
+        ${pendingExpr} AS pending_outbox_count,
+        ${failedExpr} AS failed_outbox_count,
         s.total_payloads_synced,
         s.total_bytes_synced,
         s.updated_at AS state_updated_at,
         ${IS_ONLINE_SQL} AS is_online
       FROM vessels v
-      LEFT JOIN vessel_sync_state s ON s.vessel_id = v.id`,
-      [LIVE_CONNECTIVITY_WINDOW_MINUTES],
+      LEFT JOIN vessel_sync_state s ON s.vessel_id = v.id
+      ${moduleJoin}`,
+      [LIVE_CONNECTIVITY_WINDOW_MINUTES, ...moduleJoinParams],
     );
-    return res.json(rows);
+    return res.json(coerceOutboxCounts(rows));
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 
@@ -53,6 +96,7 @@ router.get('/log', authMiddleware, requireSuperAdmin, async (req, res) => {
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, parseInt(req.query.pageSize, 10) || 10));
     const search = (req.query.search || '').toString().trim();
     const tenantId = (req.query.tenantId || '').toString().trim();
+    const moduleKey = (req.query.moduleKey || '').toString().trim();
     const offset = (page - 1) * pageSize;
 
     // Search matches on the vessel's own name OR its company's name (so
@@ -76,6 +120,8 @@ router.get('/log', authMiddleware, requireSuperAdmin, async (req, res) => {
     );
     const total = countRows[0].total;
 
+    const { join: moduleJoin, params: moduleJoinParams, pendingExpr, failedExpr } = moduleOutboxJoin(moduleKey);
+
     const [rows] = await pool.query(
       `SELECT
          v.id AS vessel_id,
@@ -89,19 +135,20 @@ router.get('/log', authMiddleware, requireSuperAdmin, async (req, res) => {
          s.last_sync_method,
          s.server_reachable,
          s.last_heartbeat_at,
-         s.pending_outbox_count,
-         s.failed_outbox_count,
+         ${pendingExpr} AS pending_outbox_count,
+         ${failedExpr} AS failed_outbox_count,
          ${IS_ONLINE_SQL} AS is_online
        FROM vessels v
        JOIN tenants t ON t.id = v.tenant_id
        LEFT JOIN vessel_sync_state s ON s.vessel_id = v.id
+       ${moduleJoin}
        ${where}
        ORDER BY v.name ASC
        LIMIT ? OFFSET ?`,
-      [LIVE_CONNECTIVITY_WINDOW_MINUTES, ...whereParams, pageSize, offset],
+      [LIVE_CONNECTIVITY_WINDOW_MINUTES, ...moduleJoinParams, ...whereParams, pageSize, offset],
     );
 
-    return res.json({ rows, total, page, pageSize });
+    return res.json({ rows: coerceOutboxCounts(rows), total, page, pageSize });
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });
 

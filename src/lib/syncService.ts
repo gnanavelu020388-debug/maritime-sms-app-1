@@ -37,10 +37,9 @@ export interface SyncResult {
 /**
  * Real top-down pull: fetches every SMS document + the tenant's current
  * sms_version from the backend and replaces the local cache with it. This
- * is a full-refresh "delta" (see the note in deltaPackager.ts on why a
- * true incremental delta isn't implemented), but it's real — the vessel's
- * local cache genuinely reflects shore's current state afterward, which
- * it previously never did.
+ * is a full-refresh "delta" rather than a true incremental one, but it's
+ * real — the vessel's local cache genuinely reflects shore's current state
+ * afterward, which it previously never did.
  */
 async function pullFromShore(tenantId: string): Promise<string | null> {
   const [tenant, docs] = await Promise.all([

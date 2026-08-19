@@ -2,12 +2,7 @@ import { useMemo, useState, useEffect, type ReactNode } from "react";
 import {
   Wifi,
   WifiOff,
-  Copy,
-  Check,
-  Bug,
-  Terminal,
   FileWarning,
-  ShieldAlert,
   TrendingUp,
   ArrowUpRight,
   Filter,
@@ -39,7 +34,7 @@ import {
   relativeTime,
 } from "../constants";
 import { PLAN_TIERS, PLAN_DEFAULTS } from "../constants";
-import type { ErrorLog, Tenant, PlanTier } from "../types";
+import type { Tenant, PlanTier } from "../types";
 import type { Capabilities } from "../lib/permissions";
 import {
   getEffectiveDemoTenants,
@@ -47,6 +42,8 @@ import {
   getEffectiveDemoSmsDocs,
   isRealTenantId,
 } from "../lib/demoData";
+import { LIVE_MODULES, getDisplayName, useModuleDefinitions } from "../lib/featureFlags";
+import { ScrollSelect } from "../components/ScrollSelect";
 import * as api from "../lib/api";
 
 
@@ -61,21 +58,11 @@ function detectBreaches(t: Tenant): BreachType[] {
 }
 
 export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
-  const { tenants, errorLogs, dispatch, toast } = useStore();
+  const { tenants, dispatch, toast } = useStore();
   const { user } = useAuth();
-  const [copied, setCopied] = useState<string | null>(null);
   const [upgradeFor, setUpgradeFor] = useState<Tenant | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<PlanTier>("Professional");
   const [breachFilter, setBreachFilter] = useState<"all" | BreachType>("all");
-  const [collisions, setCollisions] = useState<api.SyncCollisionRow[]>([]);
-  const [collisionsLoading, setCollisionsLoading] = useState(true);
-
-  useEffect(() => {
-    api.apiGetSyncCollisions(10)
-      .then(setCollisions)
-      .catch(() => {})
-      .finally(() => setCollisionsLoading(false));
-  }, []);
 
   const breaches = useMemo(
     () =>
@@ -208,92 +195,6 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
     [],
   );
 
-  const errColumns: Column<ErrorLog>[] = [
-    {
-      key: "ts",
-      header: "Timestamp",
-      sortValue: (e) => e.ts,
-      render: (e) => (
-        <span className="font-mono text-xs text-ink-600 dark:text-ink-300">
-          {new Date(e.ts).toLocaleString("en-GB", { hour12: false })}
-        </span>
-      ),
-    },
-    {
-      key: "level",
-      header: "Level",
-      sortValue: (e) => e.level,
-      render: (e) => (
-        <Badge
-          tone={
-            e.level === "critical"
-              ? "danger"
-              : e.level === "error"
-                ? "warning"
-                : "info"
-          }
-        >
-          {e.level}
-        </Badge>
-      ),
-    },
-    {
-      key: "source",
-      header: "Source",
-      sortValue: (e) => e.source,
-      render: (e) => (
-        <span className="font-mono text-xs text-ink-700 dark:text-ink-200">
-          {e.source}
-        </span>
-      ),
-    },
-    {
-      key: "message",
-      header: "Message",
-      render: (e) => (
-        <span className="text-sm text-ink-800 dark:text-ink-100">
-          {e.message}
-        </span>
-      ),
-    },
-    {
-      key: "tenant",
-      header: "Tenant",
-      render: (e) =>
-        e.tenantId ? (
-          <span className="font-mono text-xs text-ink-500">{e.tenantId}</span>
-        ) : (
-          <span className="text-xs text-ink-400">platform</span>
-        ),
-    },
-    {
-      key: "actions",
-      header: "Payload",
-      render: (e) => (
-        <button
-          onClick={() => {
-            navigator.clipboard?.writeText(e.payload);
-            setCopied(e.id);
-            setTimeout(() => setCopied(null), 1500);
-            toast({
-              tone: "success",
-              title: "Payload copied",
-              message: "Error payload copied to developer clipboard.",
-            });
-          }}
-          className="btn-ghost rounded-md p-1.5"
-          title="Copy payload to developer clipboard"
-        >
-          {copied === e.id ? (
-            <Check className="h-4 w-4 text-success-500" />
-          ) : (
-            <Copy className="h-4 w-4" />
-          )}
-        </button>
-      ),
-    },
-  ];
-
   return (
     <div className="space-y-6">
       <div>
@@ -307,61 +208,6 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
 
       {/* ── Company / Vessel connectivity & sync evidence log ── */}
       <SyncConnectivityLog />
-
-      <Card
-        title="Offline Data Collision Logic Guard"
-        subtitle="Real write collisions detected on the bottom-up vessel sync outbox"
-        icon={<ShieldAlert className="h-4 w-4" />}
-      >
-        <div className="space-y-3">
-          <div className="rounded-xl border-2 border-dashed border-accent-300 bg-accent-50/40 p-4 dark:border-accent-800 dark:bg-accent-900/10">
-            <p className="text-xs font-bold uppercase tracking-wide text-accent-700 dark:text-accent-300">
-              Deduplication rule
-            </p>
-            <p className="mt-1.5 text-sm text-ink-700 dark:text-ink-200">
-              When a vessel queues a second unsynced write for the same document/record
-              before the first one reaches shore, the engine records the collision here and
-              resolves it latest-wins — the newer queued entry is what ships on check-in.
-            </p>
-          </div>
-          <div className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">
-              Recent collision events
-            </p>
-            {collisionsLoading ? (
-              <p className="py-4 text-center text-xs text-ink-400">Loading…</p>
-            ) : collisions.length === 0 ? (
-              <p className="rounded-lg border border-dashed border-ink-200 p-4 text-center text-xs text-ink-400 dark:border-ink-700">
-                No write collisions detected across the fleet.
-              </p>
-            ) : (
-              collisions.map((c) => (
-                <div
-                  key={c.id}
-                  className="flex items-center justify-between rounded-lg border border-ink-200/70 p-2.5 dark:border-ink-800"
-                >
-                  <div className="min-w-0">
-                    <span className="font-mono text-xs text-ink-600 dark:text-ink-300">
-                      {c.vessel_name} · {c.module_key}:{c.entity_id}
-                    </span>
-                    <p className="text-[11px] text-ink-400">{c.company} · {relativeTime(c.detected_at)}</p>
-                  </div>
-                  <Badge tone="success" dot>
-                    {c.resolution === "latest_wins" ? "Latest wins" : c.resolution}
-                  </Badge>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="flex items-center gap-2 rounded-lg bg-success-50/60 p-3 text-xs text-success-700 dark:bg-success-900/20 dark:text-success-300">
-            <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
-            <span>
-              Bottom-up report syncs and top-down SMS baseline pushes operate on
-              independent queues — no cross-blocking.
-            </span>
-          </div>
-        </div>
-      </Card>
 
       <Card
         title="License Compliance — Over-Limit Flagging"
@@ -399,25 +245,6 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
             </div>
           }
         />
-      </Card>
-
-      <Card
-        title="Platform Technical Error Logs"
-        subtitle="System-level crashes, failed API handshakes & database exceptions"
-        icon={<Bug className="h-4 w-4" />}
-        actions={<Badge tone="neutral">{errorLogs.length} entries</Badge>}
-      >
-        <DataTable
-          columns={errColumns}
-          rows={errorLogs}
-          pageSize={6}
-          searchable={false}
-        />
-        <div className="mt-3 flex items-center gap-2 rounded-lg bg-ink-50 p-3 text-xs text-ink-500 dark:bg-ink-800/50">
-          <Terminal className="h-3.5 w-3.5" />
-          Copy payload utility copies the raw JSON stack to your clipboard for
-          forwarding to the platform engineering team.
-        </div>
       </Card>
 
       {upgradeFor && (
@@ -869,7 +696,23 @@ function SyncConnectivityLog() {
   // Vessel-tab-only company dropdown filter, applied together with the
   // search box (AND, not either/or) — "" means all companies.
   const [companyFilter, setCompanyFilter] = useState("");
+  // App/module filter — applies to both tabs. "" means all apps. Options
+  // are sourced from LIVE_MODULES, so a new app only needs to be added
+  // there (and start writing module_key-tagged outbox entries) to show up
+  // here — no further change to this view.
+  const [appFilter, setAppFilter] = useState("");
   const [page, setPage] = useState(1);
+
+  // Display names come from the global module-definition overrides that
+  // Super Admin can rename in the tenant feature matrix — falls back to the
+  // built-in MODULE_LABELS until those load. The filter itself is keyed on
+  // the stable module_key (e.g. "sms_documentation"), which a rename never
+  // touches, so filtering keeps working correctly regardless of the label.
+  const { defs: moduleDefs } = useModuleDefinitions();
+  const appOptions = useMemo(
+    () => LIVE_MODULES.map((m) => ({ value: m, label: getDisplayName(m, moduleDefs) })),
+    [moduleDefs],
+  );
   const [pageRows, setPageRows] = useState<VesselConnRow[]>([]);
   const [pageTotal, setPageTotal] = useState(0);
   const [pageLoading, setPageLoading] = useState(true);
@@ -892,7 +735,7 @@ function SyncConnectivityLog() {
     async function load() {
       try {
         const syncStates = await api
-          .apiGetVesselSyncStates<VesselSyncStateRow>()
+          .apiGetVesselSyncStates<VesselSyncStateRow>(appFilter)
           .catch(() => [] as VesselSyncStateRow[]);
 
         const syncStateByVessel = new Map(
@@ -944,7 +787,7 @@ function SyncConnectivityLog() {
     return () => {
       mounted = false;
     };
-  }, [refreshKey]);
+  }, [refreshKey, appFilter]);
 
   const companyRows: CompanyConnRow[] = useMemo(() => {
     const byTenant = new Map<string, CompanyConnRow>();
@@ -1009,10 +852,10 @@ function SyncConnectivityLog() {
     return () => clearTimeout(t);
   }, [searchQuery]);
 
-  // Changing the company filter jumps back to page 1, same as a new search.
+  // Changing the company or app filter jumps back to page 1, same as a new search.
   useEffect(() => {
     setPage(1);
-  }, [companyFilter]);
+  }, [companyFilter, appFilter]);
 
   /*
    * Load the current vessel log page.
@@ -1038,6 +881,7 @@ function SyncConnectivityLog() {
           LOG_PAGE_SIZE,
           debouncedSearch,
           companyFilter,
+          appFilter,
         );
 
         const rows: VesselConnRow[] = res.rows.map((r) => {
@@ -1080,7 +924,7 @@ function SyncConnectivityLog() {
     return () => {
       mounted = false;
     };
-  }, [scope, page, debouncedSearch, companyFilter, refreshKey]);
+  }, [scope, page, debouncedSearch, companyFilter, appFilter, refreshKey]);
 
   const pageTotalPages = Math.max(1, Math.ceil(pageTotal / LOG_PAGE_SIZE));
 
@@ -1238,21 +1082,27 @@ function SyncConnectivityLog() {
               />
             </div>
 
-            {scope === "vessel" && (
-              <select
-                value={companyFilter}
-                onChange={(e) => setCompanyFilter(e.target.value)}
-                className="input w-full sm:w-auto sm:max-w-[220px]"
-                title="Filter by company"
-              >
-                <option value="">All companies</option>
-                {companyOptions.map((c) => (
-                  <option key={c.tenantId} value={c.tenantId}>
-                    {c.company}
-                  </option>
-                ))}
-              </select>
-            )}
+            <div className="flex w-full gap-2 sm:w-auto">
+              <ScrollSelect
+                value={appFilter}
+                onChange={setAppFilter}
+                options={appOptions}
+                placeholder="All apps"
+                title="Filter by app"
+                className="w-full sm:w-auto sm:min-w-[180px]"
+              />
+
+              {scope === "vessel" && (
+                <ScrollSelect
+                  value={companyFilter}
+                  onChange={setCompanyFilter}
+                  options={companyOptions.map((c) => ({ value: c.tenantId, label: c.company }))}
+                  placeholder="All companies"
+                  title="Filter by company"
+                  className="w-full sm:w-auto sm:min-w-[200px]"
+                />
+              )}
+            </div>
           </div>
 
           {scope === "vessel" ? (

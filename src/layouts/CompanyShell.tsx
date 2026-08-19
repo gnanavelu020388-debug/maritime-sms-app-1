@@ -106,7 +106,6 @@ export function CompanyShell({ children, active }: { children: ReactNode; active
             <NetworkStatusBadge />
             <div className="text-right">
               <p className="text-xs font-semibold text-ink-800 dark:text-white">{user?.email}</p>
-              <p className="text-[10px] text-ink-400">SMS v{tenant?.sms_version ?? '—'}</p>
             </div>
             <button onClick={handleSignOut} className="rounded-lg p-2 text-ink-500 hover:bg-danger-50 hover:text-danger-600 dark:hover:bg-danger-900/30" title="Sign Out">
               <LogOut className="h-4 w-4" />

@@ -5,6 +5,8 @@ import {
   Globe, Building2, Wifi, Table2, Pencil, Search,
 } from 'lucide-react';
 import { TenantInspectionBar } from '../components/TenantInspectionBar';
+import { Card } from '../components/Card';
+import { Badge } from '../components/Badge';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
 import { CriticalActionWizard } from '../components/CriticalActionWizard';
@@ -12,7 +14,7 @@ import { Modal } from '../components/Modal';
 import { postSyncEvent } from '../lib/syncChannel';
 import { demoSetWorkspaceFrozen, demoGetWorkspaceFrozen, demoSetGuardrails } from '../lib/demoData';
 import { relativeTime } from '../constants';
-import { apiGetSmsSnapshots, apiRollbackSmsSnapshot } from '../lib/api';
+import { apiGetSmsSnapshots, apiRollbackSmsSnapshot, apiGetSyncCollisions, type SyncCollisionRow } from '../lib/api';
 import { logAudit } from '../lib/audit';
 import { useModuleDefinitions, getDisplayName } from '../lib/featureFlags';
 import type { SmsSnapshotRow } from '../lib/supabase';
@@ -60,7 +62,84 @@ export function SmsView({ caps: _caps }: { caps: Capabilities }) {
 
       {/* ── Section 3: Document Rights & Rank Governance ─────────────────────── */}
       <RankGovernanceSection />
+
+      {/* ── Section 4: Offline Data Collision Logic Guard (SMS Documentation's own dedup rule) ── */}
+      <OfflineCollisionGuardSection />
     </div>
+  );
+}
+
+/* ── Offline Data Collision Logic Guard ───────────────────────────────────
+   Dedup rule specific to the SMS Documentation module's bottom-up vessel
+   sync outbox. Other apps added to the Super Admin console later will have
+   their own collision/dedup rules — this one belongs only here. */
+
+function OfflineCollisionGuardSection() {
+  const [collisions, setCollisions] = useState<SyncCollisionRow[]>([]);
+  const [collisionsLoading, setCollisionsLoading] = useState(true);
+
+  useEffect(() => {
+    apiGetSyncCollisions(10)
+      .then(setCollisions)
+      .catch(() => {})
+      .finally(() => setCollisionsLoading(false));
+  }, []);
+
+  return (
+    <Card
+      title="Offline Data Collision Logic Guard"
+      subtitle="Real write collisions detected on the bottom-up vessel sync outbox"
+      icon={<ShieldAlert className="h-4 w-4" />}
+    >
+      <div className="space-y-3">
+        <div className="rounded-xl border-2 border-dashed border-accent-300 bg-accent-50/40 p-4 dark:border-accent-800 dark:bg-accent-900/10">
+          <p className="text-xs font-bold uppercase tracking-wide text-accent-700 dark:text-accent-300">
+            Deduplication rule
+          </p>
+          <p className="mt-1.5 text-sm text-ink-700 dark:text-ink-200">
+            When a vessel queues a second unsynced write for the same document/record
+            before the first one reaches shore, the engine records the collision here and
+            resolves it latest-wins — the newer queued entry is what ships on check-in.
+          </p>
+        </div>
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-ink-500">
+            Recent collision events
+          </p>
+          {collisionsLoading ? (
+            <p className="py-4 text-center text-xs text-ink-400">Loading…</p>
+          ) : collisions.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-ink-200 p-4 text-center text-xs text-ink-400 dark:border-ink-700">
+              No write collisions detected across the fleet.
+            </p>
+          ) : (
+            collisions.map((c) => (
+              <div
+                key={c.id}
+                className="flex items-center justify-between rounded-lg border border-ink-200/70 p-2.5 dark:border-ink-800"
+              >
+                <div className="min-w-0">
+                  <span className="font-mono text-xs text-ink-600 dark:text-ink-300">
+                    {c.vessel_name} · {c.module_key}:{c.entity_id}
+                  </span>
+                  <p className="text-[11px] text-ink-400">{c.company} · {relativeTime(c.detected_at)}</p>
+                </div>
+                <Badge tone="success" dot>
+                  {c.resolution === "latest_wins" ? "Latest wins" : c.resolution}
+                </Badge>
+              </div>
+            ))
+          )}
+        </div>
+        <div className="flex items-center gap-2 rounded-lg bg-success-50/60 p-3 text-xs text-success-700 dark:bg-success-900/20 dark:text-success-300">
+          <ShieldAlert className="h-3.5 w-3.5 shrink-0" />
+          <span>
+            Bottom-up report syncs and top-down SMS baseline pushes operate on
+            independent queues — no cross-blocking.
+          </span>
+        </div>
+      </div>
+    </Card>
   );
 }
 

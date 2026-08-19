@@ -276,7 +276,10 @@ export async function demoDeleteVessel(tenantId: string, vesselId: string): Prom
 }
 
 export async function demoUpdateVesselSync(tenantId: string, vesselId: string, smsVersion: string): Promise<void> {
-  const v = await api.apiUpdateVessel<VesselRow>(tenantId, vesselId, { sms_active_version: smsVersion, last_sync_at: new Date().toISOString() });
+  // MySQL TIMESTAMP columns reject ISO-8601 ('T'/'Z'/milliseconds) string
+  // literals — format as 'YYYY-MM-DD HH:MM:SS' (UTC) instead.
+  const lastSyncAt = new Date().toISOString().slice(0, 19).replace('T', ' ');
+  const v = await api.apiUpdateVessel<VesselRow>(tenantId, vesselId, { sms_active_version: smsVersion, last_sync_at: lastSyncAt });
   dataCache.upsertCachedVessel(tenantId, v);
 }
 

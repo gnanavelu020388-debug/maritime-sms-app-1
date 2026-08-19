@@ -172,11 +172,10 @@ export function DpaShell({ children, active }: { children: ReactNode; active: Dp
               <VesselSyncStatusCompact
                 lastSyncAt={lastSyncAt}
                 pendingSyncItems={0}
-                localVersion={tenant?.sms_version ?? null}
               />
               <div className="text-right">
                 <p className="text-xs font-semibold text-ink-800 dark:text-white">{user?.email}</p>
-                <p className="text-[10px] text-accent-600 dark:text-accent-400">{tenantUser?.rank ? resolveShoreRoleName(tenantUser.rank) : 'DPA'} · SMS v{tenant?.sms_version ?? '—'}</p>
+                <p className="text-[10px] text-accent-600 dark:text-accent-400">{tenantUser?.rank ? resolveShoreRoleName(tenantUser.rank) : 'DPA'}</p>
               </div>
               <button onClick={handleSignOut} className="rounded-lg p-2 text-ink-500 hover:bg-danger-50 hover:text-danger-600 dark:hover:bg-danger-900/30" title="Sign Out">
                 <LogOut className="h-4 w-4" />

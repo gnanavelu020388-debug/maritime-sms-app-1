@@ -114,16 +114,6 @@ export function DpaDashboard({ onNavigate }: { onNavigate: (s: DpaSection) => vo
         <div className="space-y-4">
           {/* SMS Version + Fleet Profiles */}
           <div className="flex flex-col gap-4 rounded-xl border border-ink-200/70 bg-white p-5 dark:border-ink-800 dark:bg-ink-900">
-            <div className="flex items-center gap-3">
-              <div className="flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br from-accent-500 to-primary-500 text-white">
-                <Layers className="h-5 w-5" />
-              </div>
-              <div>
-                <p className="text-[10px] font-bold uppercase tracking-wide text-ink-400">Active SMS Version</p>
-                <p className="text-lg font-bold text-ink-900 dark:text-white">v{tenant?.sms_version ?? '—'}</p>
-              </div>
-            </div>
-            <div className="h-px w-full bg-ink-100 dark:bg-ink-800" />
             <div>
               <p className="text-[10px] font-bold uppercase tracking-wide text-ink-400">Assigned Fleet Profiles</p>
               <div className="mt-1 flex flex-wrap gap-1.5">

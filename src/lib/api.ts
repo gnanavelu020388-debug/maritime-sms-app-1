@@ -543,8 +543,11 @@ export async function apiGetPlatformMetricsHistory(range: DateRange): Promise<Pl
 
 // ── Vessel Sync State (unified sync engine) ────────────────
 
-export async function apiGetVesselSyncStates<T>(): Promise<T[]> {
-  return request<T[]>('/vessel-sync');
+export async function apiGetVesselSyncStates<T>(moduleKey?: string): Promise<T[]> {
+  const qs = new URLSearchParams();
+  if (moduleKey) qs.set('moduleKey', moduleKey);
+  const suffix = qs.toString();
+  return request<T[]>(`/vessel-sync${suffix ? `?${suffix}` : ''}`);
 }
 
 export interface PagedResult<T> {
@@ -554,10 +557,11 @@ export interface PagedResult<T> {
   pageSize: number;
 }
 
-export async function apiGetVesselSyncLog<T>(page: number, pageSize: number, search: string, tenantId?: string): Promise<PagedResult<T>> {
+export async function apiGetVesselSyncLog<T>(page: number, pageSize: number, search: string, tenantId?: string, moduleKey?: string): Promise<PagedResult<T>> {
   const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
   if (search) qs.set('search', search);
   if (tenantId) qs.set('tenantId', tenantId);
+  if (moduleKey) qs.set('moduleKey', moduleKey);
   return request<PagedResult<T>>(`/vessel-sync/log?${qs.toString()}`);
 }
 

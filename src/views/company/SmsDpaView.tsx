@@ -56,11 +56,11 @@ import {
   getVesselsForTenant,
   type SmsProfileWithVessels,
 } from "../../lib/smsProfiles";
-import { deployBaseline } from "../../lib/deployBaseline";
 import {
   apiUploadFile,
   apiGetSignedUrl,
   apiDownloadFileAsBlobUrl,
+  apiUpdateSmsProfile,
   ApiFileError,
 } from "../../lib/api";
 import {
@@ -298,16 +298,13 @@ export function SmsDpaView() {
   async function approveOne(doc: SmsDocRow) {
     if (!tenant) return;
     setApprovingId(doc.id);
-    const oldVersion = tenant.sms_version;
     await demoApproveSmsDoc(tenant.id, doc.id);
-    // Bump fleet SMS version + build delta package (top-down baseline push)
-    const newVersion = await deployBaseline(tenant.id, tenantUser!.email);
-    const versionLabel = newVersion ?? oldVersion;
+    const versionSuffix = activeProfile ? ` (${activeProfile.name} v${activeProfile.version})` : "";
     await logAudit({
       tenantId: tenant.id,
       actorEmail: tenantUser!.email,
       category: "sms",
-      action: `DPA approved & deployed: ${doc.label} (SMS v${oldVersion} → v${versionLabel})`,
+      action: `DPA approved & deployed: ${doc.label}${versionSuffix}`,
       target: doc.tree_kind,
       location: tenant.company,
       severity: "warning",
@@ -319,7 +316,7 @@ export function SmsDpaView() {
         action: "approved",
         docId: doc.id,
         label: doc.label,
-        version: versionLabel,
+        version: activeProfile?.version ?? null,
       },
     });
     setApprovingId(null);
@@ -551,17 +548,14 @@ export function SmsDpaView() {
   async function approveAll() {
     if (!tenant) return;
     setApproving(true);
-    const oldVersion = tenant.sms_version;
     const count = await demoApproveAllSmsDocs(tenant.id);
     if (count > 0) {
-      // Bump fleet SMS version + build delta package (top-down baseline push)
-      const newVersion = await deployBaseline(tenant.id, tenantUser!.email);
-      const versionLabel = newVersion ?? oldVersion;
+      const versionSuffix = activeProfile ? ` (${activeProfile.name} v${activeProfile.version})` : "";
       await logAudit({
         tenantId: tenant.id,
         actorEmail: tenantUser!.email,
         category: "sms",
-        action: `DPA approval — ${count} documents approved (SMS v${oldVersion} → v${versionLabel})`,
+        action: `DPA approval — ${count} documents approved${versionSuffix}`,
         target: `${count} documents`,
         location: tenant.company,
         severity: "warning",
@@ -569,12 +563,67 @@ export function SmsDpaView() {
       postSyncEvent({
         type: "SMS_UPDATED",
         tenantId: tenant.id,
-        payload: { action: "approve_all", version: versionLabel, count },
+        payload: { action: "approve_all", version: activeProfile?.version ?? null, count },
       });
     }
     setApproving(false);
     await loadTree();
     await loadAllPending();
+  }
+
+  const [versionEditOpen, setVersionEditOpen] = useState(false);
+  const [versionDraft, setVersionDraft] = useState("");
+  const [savingVersion, setSavingVersion] = useState(false);
+  const canEditVersion = role === "company_admin" && !workspaceFrozen;
+
+  // Switching the active fleet profile means the version editor now refers
+  // to a different profile — close any in-progress edit for the old one.
+  useEffect(() => {
+    setVersionEditOpen(false);
+  }, [activeProfileId]);
+
+  // Editing the version always applies to whichever SMS Fleet Profile is
+  // currently selected in the scope bar — switching profiles switches which
+  // version is shown/edited here.
+  async function saveVersion() {
+    if (!tenant || !activeProfile) return;
+    const next = versionDraft.trim();
+    if (!/^\d+\.\d+\.\d+$/.test(next)) {
+      showToast("Version must be in the form x.y.z (e.g. 1.2.0).", false);
+      return;
+    }
+    setSavingVersion(true);
+    try {
+      const oldVersion = activeProfile.version;
+      const updated = await apiUpdateSmsProfile<SmsProfileWithVessels>(
+        tenant.id,
+        activeProfile.id,
+        { version: next },
+      );
+      setProfiles((prev) =>
+        prev.map((p) => (p.id === activeProfile.id ? { ...p, version: updated.version } : p)),
+      );
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Company Admin set SMS version for fleet "${activeProfile.name}": v${oldVersion} → v${next}`,
+        target: activeProfile.id,
+        location: tenant.company,
+        severity: "warning",
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "profile_version_set", profileId: activeProfile.id, version: next },
+      });
+      setVersionEditOpen(false);
+      showToast(`SMS version for "${activeProfile.name}" set to v${next}.`, true);
+    } catch (err) {
+      showToast((err as Error).message || "Failed to update SMS version.", false);
+    } finally {
+      setSavingVersion(false);
+    }
   }
 
   async function addCustomTab(label: string) {
@@ -1117,6 +1166,57 @@ export function SmsDpaView() {
             Fully editable template — create custom tabs, folders, and documents
             before fleet release.
           </p>
+          <div className="mt-2 flex items-center gap-2">
+            <span className="text-xs font-semibold text-ink-500 dark:text-ink-400">
+              {activeProfile ? `${activeProfile.name} Version:` : "Fleet SMS Version:"}
+            </span>
+            {versionEditOpen && activeProfile ? (
+              <>
+                <input
+                  autoFocus
+                  value={versionDraft}
+                  onChange={(e) => setVersionDraft(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") saveVersion();
+                    if (e.key === "Escape") setVersionEditOpen(false);
+                  }}
+                  placeholder="1.2.0"
+                  className="w-24 rounded-md border border-ink-200 bg-white px-2 py-0.5 text-xs font-mono dark:border-ink-700 dark:bg-ink-800 dark:text-white"
+                />
+                <button
+                  onClick={saveVersion}
+                  disabled={savingVersion}
+                  className="rounded-md bg-primary-600 px-2 py-0.5 text-xs font-semibold text-white hover:bg-primary-700 disabled:opacity-50"
+                >
+                  {savingVersion ? "Saving…" : "Save"}
+                </button>
+                <button
+                  onClick={() => setVersionEditOpen(false)}
+                  className="rounded-md px-2 py-0.5 text-xs font-semibold text-ink-500 hover:bg-ink-100 dark:hover:bg-ink-800"
+                >
+                  Cancel
+                </button>
+              </>
+            ) : (
+              <>
+                <span className="rounded-full bg-ink-100 px-2 py-0.5 text-xs font-mono font-semibold text-ink-700 dark:bg-ink-800 dark:text-ink-200">
+                  v{activeProfile?.version ?? tenant?.sms_version ?? "—"}
+                </span>
+                {canEditVersion && activeProfile && (
+                  <button
+                    onClick={() => {
+                      setVersionDraft(activeProfile.version);
+                      setVersionEditOpen(true);
+                    }}
+                    className="rounded p-1 text-ink-400 transition-colors hover:bg-primary-100 hover:text-primary-600 dark:hover:bg-primary-900/40"
+                    title={`Edit SMS version for ${activeProfile.name}`}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </>
+            )}
+          </div>
         </div>
         <div className="flex items-center gap-2">
           {pendingCount > 0 && canEdit && (
@@ -1165,7 +1265,8 @@ export function SmsDpaView() {
         <div className="flex items-center gap-2 rounded-xl border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-300">
           <Clock className="h-4 w-4 shrink-0" />
           {pendingCount} document(s) pending DPA approval. Fleet cannot see them
-          until approved. Current SMS version: v{tenant?.sms_version ?? "—"}.
+          until approved.
+          {activeProfile && ` Current ${activeProfile.name} version: v${activeProfile.version}.`}
         </div>
       )}
       {pendingDocs.length > 0 && canEdit && (

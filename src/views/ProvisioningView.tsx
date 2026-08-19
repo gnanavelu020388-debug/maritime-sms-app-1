@@ -154,7 +154,7 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
                     </div>
                     <div>
                       <p className="font-bold text-ink-900 dark:text-white">{t.company}</p>
-                      <p className="text-xs text-ink-400">{t.contact_email} · {t.plan} · {t.region} · SMS v{t.sms_version}</p>
+                      <p className="text-xs text-ink-400">{t.contact_email} · {t.plan} · {t.region}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -172,15 +172,23 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
                     <p className="text-sm text-ink-400">No users provisioned yet.</p>
                   ) : (
                     <div className="overflow-x-auto">
-                      <table className="w-full text-left text-sm">
+                      <table className="w-full table-fixed text-left text-sm">
+                        <colgroup>
+                          <col className="w-[18%]" />
+                          <col className="w-[26%]" />
+                          <col className="w-[14%]" />
+                          <col className="w-[22%]" />
+                          <col className="w-[16%]" />
+                          <col className="w-[64px]" />
+                        </colgroup>
                         <thead className="text-xs uppercase text-ink-400">
                           <tr>
-                            <th className="min-w-[140px] px-4 py-3 font-semibold">Name</th>
-                            <th className="min-w-[200px] px-4 py-3 font-semibold">Email (sign-in)</th>
-                            <th className="min-w-[120px] px-4 py-3 font-semibold">Role</th>
-                            <th className="min-w-[180px] px-4 py-3 font-semibold">Window</th>
-                            <th className="min-w-[140px] px-4 py-3 font-semibold">Account</th>
-                            <th className="w-16 px-4 py-3 font-semibold"></th>
+                            <th className="px-4 py-3 font-semibold">Name</th>
+                            <th className="px-4 py-3 font-semibold">Email (sign-in)</th>
+                            <th className="px-4 py-3 font-semibold">Role</th>
+                            <th className="px-4 py-3 font-semibold">Window</th>
+                            <th className="px-4 py-3 font-semibold">Account</th>
+                            <th className="px-4 py-3 font-semibold"></th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
@@ -189,12 +197,12 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
                               u.role === 'dpa' ? 'DPA Workspace' : 'Vessel Portal (read-only)';
                             return (
                               <tr key={u.id} className="hover:bg-ink-50/40 dark:hover:bg-ink-800/40">
-                                <td className="px-4 py-3 font-medium text-ink-800 dark:text-white">{u.name}</td>
-                                <td className="px-4 py-3 font-mono text-xs text-ink-600 dark:text-ink-300">{u.email}</td>
+                                <td className="truncate px-4 py-3 font-medium text-ink-800 dark:text-white" title={u.name}>{u.name}</td>
+                                <td className="truncate px-4 py-3 font-mono text-xs text-ink-600 dark:text-ink-300" title={u.email}>{u.email}</td>
                                 <td className="px-4 py-3">
                                   <Badge tone={u.role === 'company_admin' ? 'info' : u.role === 'dpa' ? 'accent' : 'neutral'} className="!text-[10px]">{u.role}</Badge>
                                 </td>
-                                <td className="px-4 py-3 text-xs text-ink-500">{window}</td>
+                                <td className="truncate px-4 py-3 text-xs text-ink-500" title={window}>{window}</td>
                                 <td className="px-4 py-3">
                                   {u.auth_uid ? <Badge tone="success" dot className="!text-[10px]">Linked</Badge> : <Badge tone="warning" dot className="!text-[10px]">Awaiting signup</Badge>}
                                 </td>

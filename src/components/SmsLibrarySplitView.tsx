@@ -38,7 +38,6 @@ import {
 } from "../lib/rankPermissions";
 import {
   getEffectiveDemoSmsDocs,
-  getDemoTenant,
   getDemoCustomTabs,
   createDemoCustomTab,
   renameDemoCustomTab,
@@ -1133,7 +1132,6 @@ export function SmsLibrarySplitView({
     );
   }
 
-  const smsVersion = getDemoTenant(tenantId)?.sms_version ?? "—";
   const activeTab = tabs.find((t) => t.key === activeTabKey);
 
   return (
@@ -1383,9 +1381,11 @@ export function SmsLibrarySplitView({
                   {activeTab?.subtitle}
                 </span>
               </div>
-              <Badge tone="neutral" className="ml-2 !text-[9px]">
-                v{smsVersion}
-              </Badge>
+              {activeProfileObj && (
+                <Badge tone="neutral" className="ml-2 !text-[9px]">
+                  v{activeProfileObj.version}
+                </Badge>
+              )}
             </div>
             <div className="flex items-center gap-2">
               {canCreate && (

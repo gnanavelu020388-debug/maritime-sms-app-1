@@ -33,7 +33,12 @@ export function VesselsView() {
   const [editForProfileId, setEditForProfileId] = useState<string | null>(null);
   const [profiles, setProfiles] = useState<SmsProfileWithVessels[]>([]);
   const [scopeFilter, setScopeFilter] = useState<string>('all');
-  const [syncFeedback, setSyncFeedback] = useState<{ vesselId: string; msg: string; ok: boolean } | null>(null);
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+
+  function showToast(msg: string, ok: boolean) {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 5000);
+  }
 
   const atLimit = tenant ? rows.length >= tenant.vessels_max : false;
 
@@ -73,7 +78,6 @@ export function VesselsView() {
 
   async function doSync(r: FleetRow) {
     setSyncing(r.id);
-    setSyncFeedback(null);
     try {
       const profileVersion = r.profileVersion ?? tenant!.sms_version;
       // Check for new DPA-approved circulars/amendments under this vessel's profile
@@ -85,13 +89,12 @@ export function VesselsView() {
         target: r.imo_number, location: r.name, severity: newDocCount > 0 ? 'warning' : 'info',
       });
       postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_sync', vessel: r.name, version: profileVersion, newDocs: newDocCount } });
-      setSyncFeedback({ vesselId: r.id, msg: newDocCount > 0 ? `${newDocCount} new approved document(s) synced` : 'No new documents found — already up to date', ok: true });
+      showToast(newDocCount > 0 ? `${r.name}: ${newDocCount} new approved document(s) synced` : `${r.name}: No new documents found — already up to date`, true);
       await load();
     } catch {
-      setSyncFeedback({ vesselId: r.id, msg: 'Sync failed — please try again', ok: false });
+      showToast(`${r.name}: Sync failed — please try again`, false);
     }
     setSyncing(null);
-    setTimeout(() => setSyncFeedback(null), 5000);
   }
 
   async function confirmDelete(v: VesselRow) {
@@ -138,14 +141,14 @@ export function VesselsView() {
     {
       key: 'type',
       header: 'Type',
-      width: 'w-[10%]',
+      width: 'w-[9%]',
       sortValue: (r) => r.vessel_type ?? '',
       render: (r) => <span className="text-[12px] font-medium text-ink-700 dark:text-ink-200">{r.vessel_type ?? '—'}</span>,
     },
     {
       key: 'gt',
       header: 'GT',
-      width: 'w-[8%]',
+      width: 'w-[7%]',
       sortValue: (r) => r.gross_tonnage ?? 0,
       render: (r) => <span className="text-[12px] font-semibold text-ink-700 dark:text-ink-200">{r.gross_tonnage != null ? r.gross_tonnage.toLocaleString() : '—'}</span>,
     },
@@ -166,16 +169,16 @@ export function VesselsView() {
     {
       key: 'scope',
       header: 'SMS Scope',
-      width: 'w-[12%]',
+      width: 'w-[11%]',
       sortValue: (r) => r.profileName ?? 'zzz',
       render: (r) =>
         r.profileName ? (
-          <span className="inline-flex items-center gap-1 rounded-md bg-accent-50 px-2 py-0.5 text-[10px] font-bold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300" title="SMS Fleet Profile">
-            <Layers className="h-3 w-3" />
+          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-accent-50 px-2 py-0.5 text-[10px] font-bold text-accent-700 dark:bg-accent-900/30 dark:text-accent-300" title="SMS Fleet Profile">
+            <Layers className="h-3 w-3 shrink-0" />
             {r.profileName}
           </span>
         ) : (
-          <span className="inline-flex items-center gap-1 rounded-md bg-ink-100 px-2 py-0.5 text-[10px] font-medium text-ink-400 dark:bg-ink-800 dark:text-ink-500">No Profile</span>
+          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md bg-ink-100 px-2 py-0.5 text-[10px] font-medium text-ink-400 dark:bg-ink-800 dark:text-ink-500">No Profile</span>
         ),
     },
     {
@@ -187,16 +190,16 @@ export function VesselsView() {
         r.crewOnboard > 0 ? (
           <button
             onClick={() => setManningFor(r)}
-            className="inline-flex items-center gap-1 rounded-full bg-success-100 px-2 py-0.5 text-[10px] font-bold text-success-700 transition hover:bg-success-200 dark:bg-success-900/30 dark:text-success-300 dark:hover:bg-success-900/50"
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-success-100 px-2 py-0.5 text-[10px] font-bold text-success-700 transition hover:bg-success-200 dark:bg-success-900/30 dark:text-success-300 dark:hover:bg-success-900/50"
             title="Click to open Vessel Manning drawer"
           >
-            <span className="inline-block h-1.5 w-1.5 rounded-full bg-success-500" />
+            <span className="inline-block h-1.5 w-1.5 shrink-0 rounded-full bg-success-500" />
             {r.crewOnboard} on board
           </button>
         ) : (
           <button
             onClick={() => setManningFor(r)}
-            className="inline-flex items-center gap-1 rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-bold text-ink-500 transition hover:bg-ink-200 dark:bg-ink-800 dark:text-ink-400 dark:hover:bg-ink-700"
+            className="inline-flex items-center gap-1 whitespace-nowrap rounded-full bg-ink-100 px-2 py-0.5 text-[10px] font-bold text-ink-500 transition hover:bg-ink-200 dark:bg-ink-800 dark:text-ink-400 dark:hover:bg-ink-700"
             title="Click to manage manning"
           >
             No Active Crew
@@ -206,7 +209,7 @@ export function VesselsView() {
     {
       key: 'sms',
       header: 'SMS Version',
-      width: 'w-[8%]',
+      width: 'w-[6%]',
       sortValue: (r) => r.profileVersion ?? r.sms_active_version,
       render: (r) => {
         const version = r.profileVersion ?? r.sms_active_version;
@@ -230,17 +233,18 @@ export function VesselsView() {
     {
       key: 'actions',
       header: 'Actions',
-      width: 'w-[17%]',
+      width: 'w-[9%]',
+      className: 'text-right',
       render: (r) => (
-        <div className="flex items-center justify-end gap-1.5">
-          <button onClick={() => doSync(r)} disabled={syncing === r.id} className="btn-secondary !px-2 !py-1 !text-[11px]" title={r.last_sync_at ? `Last sync: ${new Date(r.last_sync_at).toLocaleString()}` : 'Never synced'}>
-            <RefreshCw className={`h-3 w-3 ${syncing === r.id ? 'animate-spin' : ''}`} /> Sync
+        <div className="flex items-center justify-end gap-1">
+          <button
+            onClick={() => doSync(r)}
+            disabled={syncing === r.id}
+            className="rounded-md p-1.5 text-ink-500 transition hover:bg-primary-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-ink-400 dark:hover:bg-primary-900/30"
+            title={r.last_sync_at ? `Sync — last sync: ${new Date(r.last_sync_at).toLocaleString()}` : 'Sync — never synced'}
+          >
+            <RefreshCw className={`h-3.5 w-3.5 ${syncing === r.id ? 'animate-spin' : ''}`} />
           </button>
-          {syncFeedback && syncFeedback.vesselId === r.id && (
-            <span className={`text-[10px] font-semibold ${syncFeedback.ok ? 'text-success-600 dark:text-success-400' : 'text-danger-600 dark:text-danger-400'}`}>
-              {syncFeedback.msg}
-            </span>
-          )}
           <button
             onClick={async () => {
               setEditFor(r);
@@ -249,18 +253,18 @@ export function VesselsView() {
                 setEditForProfileId(map[r.id] ?? null);
               }
             }}
-            className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold text-primary-600 transition hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/30"
+            className="rounded-md p-1.5 text-primary-600 transition hover:bg-primary-50 dark:text-primary-400 dark:hover:bg-primary-900/30"
             title="Edit vessel profile"
           >
-            <Pencil className="h-3 w-3" /> Edit
+            <Pencil className="h-3.5 w-3.5" />
           </button>
           <button
             onClick={() => setDeleteFor(r)}
             disabled={r.crewOnboard > 0}
             title={r.crewOnboard > 0 ? 'Cannot delete a vessel with active crew on board' : 'Delete vessel profile'}
-            className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold ${r.crewOnboard > 0 ? 'cursor-not-allowed bg-ink-100 text-ink-300 dark:bg-ink-800 dark:text-ink-600' : 'bg-danger-50 text-danger-600 hover:bg-danger-100 dark:bg-danger-900/30 dark:text-danger-300'}`}
+            className={`rounded-md p-1.5 ${r.crewOnboard > 0 ? 'cursor-not-allowed text-ink-300 dark:text-ink-600' : 'text-danger-600 hover:bg-danger-50 dark:text-danger-300 dark:hover:bg-danger-900/30'}`}
           >
-            <Trash2 className="h-3 w-3" /> Delete
+            <Trash2 className="h-3.5 w-3.5" />
           </button>
         </div>
       ),
@@ -334,9 +338,8 @@ export function VesselsView() {
         <DataTable
           columns={columns}
           rows={filteredRows}
-          pageSize={50}
+          pageSize={8}
           compact
-          fullWidth
           searchable
           searchPlaceholder="Search fleet by name, IMO, flag…"
           searchFn={(r, q) =>
@@ -349,6 +352,19 @@ export function VesselsView() {
           }
           emptyMessage="No vessels match your search."
         />
+      )}
+
+      {toast && (
+        <div
+          className={`fixed right-6 top-20 z-50 flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold shadow-lg ${toast.ok ? 'bg-success-500 text-white' : 'bg-danger-500 text-white'}`}
+        >
+          {toast.ok ? (
+            <CheckCircle2 className="h-4 w-4" />
+          ) : (
+            <AlertTriangle className="h-4 w-4" />
+          )}
+          {toast.msg}
+        </div>
       )}
 
       {showForm && tenant && (
@@ -767,10 +783,9 @@ function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing, onSaveVersion
                 type="text"
                 className="w-28 rounded border border-ink-200 px-2 py-1 text-sm font-bold text-primary-700 dark:border-ink-600 dark:bg-ink-900 dark:text-primary-300"
                 value={versionInput}
-                onChange={(e) => setVersionInput(e.target.value)}
                 placeholder="v1.0.0, Rev 4.0, E-1.0…"
               />
-              <button
+              {/* <button
                 disabled={saving || !versionInput.trim()}
                 onClick={async () => {
                   setSaving(true);
@@ -780,7 +795,7 @@ function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing, onSaveVersion
                 className="rounded bg-primary-600 px-2 py-1 text-[11px] font-bold text-white hover:bg-primary-700 disabled:opacity-50"
               >
                 {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : 'Save Version'}
-              </button>
+              </button> */}
             </div>
           </div>
           <div className="rounded-lg border border-ink-200 bg-white p-3 dark:border-ink-800 dark:bg-ink-900">

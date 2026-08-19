@@ -1,31 +1,58 @@
-import { Fragment, useMemo, useState, type ReactNode } from 'react';
-import { ShieldCheck, Filter, Eye, Lock, AlertOctagon, ScrollText, Download, ShieldAlert, ChevronRight, ChevronDown, ChevronLeft, User, Mail, Globe, Target, Clock, GitCompare } from 'lucide-react';
-import { Card } from '../components/Card';
-import { Badge } from '../components/Badge';
-import { useStore } from '../store';
-import { useAuth } from '../lib/auth';
-import { relativeTime, formatUtc } from '../constants';
-import type { AuditEvent, AuditCategory, InternalUser } from '../types';
-import type { Capabilities } from '../lib/permissions';
+import { Fragment, useMemo, useState, type ReactNode } from "react";
+import {
+  Check,
+  Copy,
+  Bug,
+  Terminal,
+  ShieldCheck,
+  Filter,
+  Eye,
+  Lock,
+  AlertOctagon,
+  ScrollText,
+  Download,
+  ShieldAlert,
+  ChevronRight,
+  ChevronDown,
+  ChevronLeft,
+  User,
+  Mail,
+  Globe,
+  Target,
+  Clock,
+  GitCompare,
+} from "lucide-react";
+import { Card } from "../components/Card";
+import { Badge } from "../components/Badge";
+import { useStore } from "../store";
+import { useAuth } from "../lib/auth";
+import { relativeTime, formatUtc } from "../constants";
+import type { AuditEvent, AuditCategory, InternalUser } from "../types";
+import type { Capabilities } from "../lib/permissions";
+import { DataTable, type Column } from "../components/DataTable";
+import type { ErrorLog } from "../types";
 
-const CATEGORY_TONE: Record<AuditCategory, 'info' | 'warning' | 'danger' | 'success' | 'accent' | 'neutral'> = {
-  auth: 'info',
-  impersonation: 'danger',
-  tenant: 'info',
-  sms: 'accent',
-  billing: 'success',
-  backup: 'warning',
-  security: 'warning',
-  system: 'neutral',
+const CATEGORY_TONE: Record<
+  AuditCategory,
+  "info" | "warning" | "danger" | "success" | "accent" | "neutral"
+> = {
+  auth: "info",
+  impersonation: "danger",
+  tenant: "info",
+  sms: "accent",
+  billing: "success",
+  backup: "warning",
+  security: "warning",
+  system: "neutral",
 };
 
 const SEVERITY_STYLE: Record<string, string> = {
-  info: 'bg-primary-500',
-  warning: 'bg-warning-500',
-  critical: 'bg-danger-500',
+  info: "bg-primary-500",
+  warning: "bg-warning-500",
+  critical: "bg-danger-500",
 };
 
-type AdminRole = 'Super-Admin' | 'Platform Auditor' | 'Global Support Staff';
+type AdminRole = "Super-Admin" | "Platform Auditor" | "Global Support Staff";
 
 // Audit events store the actor's email (see logAudit's actorEmail param),
 // not their internal_user id — key the lookup map the same way so it
@@ -38,20 +65,48 @@ function buildActorMap(users: InternalUser[]): Record<string, InternalUser> {
   return map;
 }
 
-function actorRole(actorEmail: string, actorMap: Record<string, InternalUser>, ownerEmail: string | null): AdminRole | null {
+function actorRole(
+  actorEmail: string,
+  actorMap: Record<string, InternalUser>,
+  ownerEmail: string | null,
+): AdminRole | null {
   const matched = actorMap[actorEmail]?.role ?? null;
   if (matched) return matched;
-  if (ownerEmail && actorEmail === ownerEmail) return 'Super-Admin';
+  if (ownerEmail && actorEmail === ownerEmail) return "Super-Admin";
   return null;
 }
 
 // Classify an audit action into the role-specific tracking bucket
-function roleActionBucket(e: AuditEvent): 'support' | 'auditor' | 'superadmin' | 'general' {
+function roleActionBucket(
+  e: AuditEvent,
+): "support" | "auditor" | "superadmin" | "general" {
   const a = e.action.toLowerCase();
-  if (e.impersonation || a.includes('password reset') || a.includes('contact edit') || a.includes('account locked')) return 'support';
-  if (a.includes('security log') || a.includes('compliance export') || a.includes('restricted') || a.includes('mfa challenge') || a.includes('mfa enforcement')) return 'auditor';
-  if (a.includes('tier') || a.includes('pricing') || a.includes('suspend') || a.includes('archiv') || a.includes('restore') || a.includes('backup') || a.includes('plan tier')) return 'superadmin';
-  return 'general';
+  if (
+    e.impersonation ||
+    a.includes("password reset") ||
+    a.includes("contact edit") ||
+    a.includes("account locked")
+  )
+    return "support";
+  if (
+    a.includes("security log") ||
+    a.includes("compliance export") ||
+    a.includes("restricted") ||
+    a.includes("mfa challenge") ||
+    a.includes("mfa enforcement")
+  )
+    return "auditor";
+  if (
+    a.includes("tier") ||
+    a.includes("pricing") ||
+    a.includes("suspend") ||
+    a.includes("archiv") ||
+    a.includes("restore") ||
+    a.includes("backup") ||
+    a.includes("plan tier")
+  )
+    return "superadmin";
+  return "general";
 }
 
 // Real field-level delta from the event's captured before/after state (see
@@ -59,15 +114,22 @@ function roleActionBucket(e: AuditEvent): 'support' | 'auditor' | 'superadmin' |
 // site that logged this event didn't capture before/after data (e.g. a
 // create, a login, or an action with no natural before/after state).
 function formatDeltaValue(v: unknown): string {
-  if (v === undefined) return '—';
-  if (v === null) return 'null';
-  if (typeof v === 'object') return JSON.stringify(v);
+  if (v === undefined) return "—";
+  if (v === null) return "null";
+  if (typeof v === "object") return JSON.stringify(v);
   return String(v);
 }
 
-function auditDelta(e: AuditEvent): { field: string; before: string; after: string }[] | null {
+function auditDelta(
+  e: AuditEvent,
+): { field: string; before: string; after: string }[] | null {
   if (!e.beforeData && !e.afterData) return null;
-  const keys = Array.from(new Set([...Object.keys(e.beforeData ?? {}), ...Object.keys(e.afterData ?? {})]));
+  const keys = Array.from(
+    new Set([
+      ...Object.keys(e.beforeData ?? {}),
+      ...Object.keys(e.afterData ?? {}),
+    ]),
+  );
   if (keys.length === 0) return null;
   return keys.map((field) => ({
     field,
@@ -84,14 +146,32 @@ function csvEscape(v: string): string {
 // (post-filter) — no server round trip needed since `audit` is already
 // fully hydrated from the real audit_logs table.
 function exportLedgerCsv(events: AuditEvent[]): void {
-  const header = ['Timestamp (UTC)', 'Actor', 'Category', 'Action', 'Target', 'Severity', 'Company ID', 'Impersonation'];
+  const header = [
+    "Timestamp (UTC)",
+    "Actor",
+    "Category",
+    "Action",
+    "Target",
+    "Severity",
+    "Company ID",
+    "Impersonation",
+  ];
   const rows = events.map((e) => [
-    formatUtc(e.ts), e.actor, e.category, e.action, e.target, e.severity, e.companyId ?? '', e.impersonation ? 'yes' : 'no',
+    formatUtc(e.ts),
+    e.actor,
+    e.category,
+    e.action,
+    e.target,
+    e.severity,
+    e.companyId ?? "",
+    e.impersonation ? "yes" : "no",
   ]);
-  const csv = [header, ...rows].map((r) => r.map((c) => csvEscape(String(c))).join(',')).join('\n');
-  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const csv = [header, ...rows]
+    .map((r) => r.map((c) => csvEscape(String(c))).join(","))
+    .join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
   const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
+  const a = document.createElement("a");
   a.href = url;
   a.download = `audit-ledger-${new Date().toISOString().slice(0, 10)}.csv`;
   document.body.appendChild(a);
@@ -101,59 +181,183 @@ function exportLedgerCsv(events: AuditEvent[]): void {
 }
 
 export function SecurityView({ caps }: { caps: Capabilities }) {
-  const { audit, internalUsers } = useStore();
+  const { audit, internalUsers, errorLogs, toast } = useStore();
   const { user: currentUser } = useAuth();
   const ownerEmail = currentUser?.email ?? null;
   const [impersonationOnly, setImpersonationOnly] = useState(false);
-  const [category, setCategory] = useState<AuditCategory | 'all'>('all');
-  const [roleFilter, setRoleFilter] = useState<'all' | AdminRole>('all');
-  const [actorQuery, setActorQuery] = useState('');
+  const [category, setCategory] = useState<AuditCategory | "all">("all");
+  const [roleFilter, setRoleFilter] = useState<"all" | AdminRole>("all");
+  const [actorQuery, setActorQuery] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [page, setPage] = useState(0);
+  const [copied, setCopied] = useState<string | null>(null);
   const pageSize = 10;
 
   const actorMap = useMemo(() => buildActorMap(internalUsers), [internalUsers]);
 
-  const filtered = useMemo(() => audit.filter((e) => {
-    if (impersonationOnly && !e.impersonation) return false;
-    if (category !== 'all' && e.category !== category) return false;
-    if (roleFilter !== 'all') {
-      const role = actorRole(e.actor, actorMap, ownerEmail);
-      if (role !== roleFilter) return false;
-    }
-    if (actorQuery) {
-      const q = actorQuery.toLowerCase();
-      const user = actorMap[e.actor];
-      const email = user?.email ?? '';
-      const name = user?.name ?? '';
-      if (!e.actor.toLowerCase().includes(q) && !email.toLowerCase().includes(q) && !name.toLowerCase().includes(q)) return false;
-    }
-    return true;
-  }), [audit, impersonationOnly, category, roleFilter, actorQuery, actorMap]);
+  const filtered = useMemo(
+    () =>
+      audit.filter((e) => {
+        if (impersonationOnly && !e.impersonation) return false;
+        if (category !== "all" && e.category !== category) return false;
+        if (roleFilter !== "all") {
+          const role = actorRole(e.actor, actorMap, ownerEmail);
+          if (role !== roleFilter) return false;
+        }
+        if (actorQuery) {
+          const q = actorQuery.toLowerCase();
+          const user = actorMap[e.actor];
+          const email = user?.email ?? "";
+          const name = user?.name ?? "";
+          if (
+            !e.actor.toLowerCase().includes(q) &&
+            !email.toLowerCase().includes(q) &&
+            !name.toLowerCase().includes(q)
+          )
+            return false;
+        }
+        return true;
+      }),
+    [audit, impersonationOnly, category, roleFilter, actorQuery, actorMap],
+  );
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
   const currentPage = Math.min(page, totalPages - 1);
-  const pageRows = filtered.slice(currentPage * pageSize, currentPage * pageSize + pageSize);
+  const pageRows = filtered.slice(
+    currentPage * pageSize,
+    currentPage * pageSize + pageSize,
+  );
 
   const stats = {
     total: audit.length,
-    critical: audit.filter((e) => e.severity === 'critical').length,
+    critical: audit.filter((e) => e.severity === "critical").length,
     impersonation: audit.filter((e) => e.impersonation).length,
-    security: audit.filter((e) => e.category === 'security').length,
+    security: audit.filter((e) => e.category === "security").length,
   };
+
+  const errColumns: Column<ErrorLog>[] = [
+    {
+      key: "ts",
+      header: "Timestamp",
+      sortValue: (e) => e.ts,
+      render: (e) => (
+        <span className="font-mono text-xs text-ink-600 dark:text-ink-300">
+          {new Date(e.ts).toLocaleString("en-GB", { hour12: false })}
+        </span>
+      ),
+    },
+    {
+      key: "level",
+      header: "Level",
+      sortValue: (e) => e.level,
+      render: (e) => (
+        <Badge
+          tone={
+            e.level === "critical"
+              ? "danger"
+              : e.level === "error"
+                ? "warning"
+                : "info"
+          }
+        >
+          {e.level}
+        </Badge>
+      ),
+    },
+    {
+      key: "source",
+      header: "Source",
+      sortValue: (e) => e.source,
+      render: (e) => (
+        <span className="font-mono text-xs text-ink-700 dark:text-ink-200">
+          {e.source}
+        </span>
+      ),
+    },
+    {
+      key: "message",
+      header: "Message",
+      render: (e) => (
+        <span className="text-sm text-ink-800 dark:text-ink-100">
+          {e.message}
+        </span>
+      ),
+    },
+    {
+      key: "tenant",
+      header: "Tenant",
+      render: (e) =>
+        e.tenantId ? (
+          <span className="font-mono text-xs text-ink-500">{e.tenantId}</span>
+        ) : (
+          <span className="text-xs text-ink-400">platform</span>
+        ),
+    },
+    {
+      key: "actions",
+      header: "Payload",
+      render: (e) => (
+        <button
+          onClick={() => {
+            navigator.clipboard?.writeText(e.payload);
+            setCopied(e.id);
+            setTimeout(() => setCopied(null), 1500);
+            toast({
+              tone: "success",
+              title: "Payload copied",
+              message: "Error payload copied to developer clipboard.",
+            });
+          }}
+          className="btn-ghost rounded-md p-1.5"
+          title="Copy payload to developer clipboard"
+        >
+          {copied === e.id ? (
+            <Check className="h-4 w-4 text-success-500" />
+          ) : (
+            <Copy className="h-4 w-4" />
+          )}
+        </button>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-xl font-bold text-ink-900 dark:text-white">Platform Security & Audit Trail</h1>
-        <p className="text-sm text-ink-500 dark:text-ink-400">Immutable ledger of every administrative state change across the platform.</p>
+        <h1 className="text-xl font-bold text-ink-900 dark:text-white">
+          Platform Security & Audit Trail
+        </h1>
+        <p className="text-sm text-ink-500 dark:text-ink-400">
+          Immutable ledger of every administrative state change across the
+          platform.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
-        <StatTile icon={<ScrollText className="h-4 w-4" />} label="Total events" value={stats.total} tone="primary" />
-        <StatTile icon={<AlertOctagon className="h-4 w-4" />} label="Critical severity" value={stats.critical} tone="danger" />
-        <StatTile icon={<Eye className="h-4 w-4" />} label="Impersonation events" value={stats.impersonation} tone="warning" />
-        <StatTile icon={<Lock className="h-4 w-4" />} label="Security actions" value={stats.security} tone="accent" />
+        <StatTile
+          icon={<ScrollText className="h-4 w-4" />}
+          label="Total events"
+          value={stats.total}
+          tone="primary"
+        />
+        <StatTile
+          icon={<AlertOctagon className="h-4 w-4" />}
+          label="Critical severity"
+          value={stats.critical}
+          tone="danger"
+        />
+        <StatTile
+          icon={<Eye className="h-4 w-4" />}
+          label="Impersonation events"
+          value={stats.impersonation}
+          tone="warning"
+        />
+        <StatTile
+          icon={<Lock className="h-4 w-4" />}
+          label="Security actions"
+          value={stats.security}
+          tone="accent"
+        />
       </div>
 
       <Card
@@ -161,7 +365,13 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
         subtitle="Append-only · expand any row for full event inspection · all times UTC / GMT"
         icon={<ShieldCheck className="h-4 w-4" />}
         actions={
-          <button onClick={() => exportLedgerCsv(filtered)} disabled={!caps.securityEdit || filtered.length === 0} className="btn-secondary shrink-0 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"><Download className="h-4 w-4" /> Export ledger</button>
+          <button
+            onClick={() => exportLedgerCsv(filtered)}
+            disabled={!caps.securityEdit || filtered.length === 0}
+            className="btn-secondary shrink-0 whitespace-nowrap disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <Download className="h-4 w-4" /> Export ledger
+          </button>
         }
       >
         {/* Filters */}
@@ -169,17 +379,38 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
           <div className="flex flex-wrap items-center gap-2">
             <Filter className="h-4 w-4 text-ink-400" />
             <button
-              onClick={() => { setImpersonationOnly((v) => !v); setPage(0); }}
-              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${impersonationOnly ? 'border-danger-300 bg-danger-50 text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-300' : 'border-ink-200 text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800'}`}
+              onClick={() => {
+                setImpersonationOnly((v) => !v);
+                setPage(0);
+              }}
+              className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-semibold transition ${impersonationOnly ? "border-danger-300 bg-danger-50 text-danger-700 dark:border-danger-800 dark:bg-danger-900/30 dark:text-danger-300" : "border-ink-200 text-ink-600 hover:bg-ink-50 dark:border-ink-700 dark:text-ink-300 dark:hover:bg-ink-800"}`}
             >
               <Eye className="h-3.5 w-3.5" /> Impersonation only
             </button>
-            <select value={category} onChange={(e) => { setCategory(e.target.value as AuditCategory | 'all'); setPage(0); }} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200">
+            <select
+              value={category}
+              onChange={(e) => {
+                setCategory(e.target.value as AuditCategory | "all");
+                setPage(0);
+              }}
+              className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200"
+            >
               <option value="all">All categories</option>
-              {(Object.keys(CATEGORY_TONE) as AuditCategory[]).map((c) => <option key={c} value={c}>{c}</option>)}
+              {(Object.keys(CATEGORY_TONE) as AuditCategory[]).map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
             </select>
             {/* Role filter */}
-            <select value={roleFilter} onChange={(e) => { setRoleFilter(e.target.value as 'all' | AdminRole); setPage(0); }} className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200">
+            <select
+              value={roleFilter}
+              onChange={(e) => {
+                setRoleFilter(e.target.value as "all" | AdminRole);
+                setPage(0);
+              }}
+              className="rounded-lg border border-ink-200 bg-white px-3 py-1.5 text-xs font-semibold text-ink-700 dark:border-ink-700 dark:bg-ink-800 dark:text-ink-200"
+            >
               <option value="all">All Roles</option>
               <option value="Super-Admin">Super-Admin</option>
               <option value="Platform Auditor">Platform Auditor</option>
@@ -192,7 +423,10 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
             <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
             <input
               value={actorQuery}
-              onChange={(e) => { setActorQuery(e.target.value); setPage(0); }}
+              onChange={(e) => {
+                setActorQuery(e.target.value);
+                setPage(0);
+              }}
               placeholder="Search actor email or Admin ID…"
               className="input pl-9 py-1.5 text-xs"
             />
@@ -205,68 +439,120 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
             <thead className="bg-ink-50/80 text-xs uppercase tracking-wide text-ink-500 dark:bg-ink-950/50 dark:text-ink-400">
               <tr>
                 <th className="w-10 px-3 py-3" />
-                <th className="min-w-[180px] px-4 py-3 font-semibold">Timestamp (UTC)</th>
-                <th className="min-w-[140px] px-4 py-3 font-semibold">Actor (Admin ID)</th>
+                <th className="min-w-[180px] px-4 py-3 font-semibold">
+                  Timestamp (UTC)
+                </th>
+                <th className="min-w-[140px] px-4 py-3 font-semibold">
+                  Actor (Admin ID)
+                </th>
                 <th className="w-36 px-4 py-3 font-semibold">Role</th>
                 <th className="w-32 px-4 py-3 font-semibold">Category</th>
-                <th className="min-w-[260px] px-4 py-3 font-semibold">Action</th>
-                <th className="min-w-[160px] px-4 py-3 font-semibold">Target</th>
+                <th className="min-w-[260px] px-4 py-3 font-semibold">
+                  Action
+                </th>
+                <th className="min-w-[160px] px-4 py-3 font-semibold">
+                  Target
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
               {filtered.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-10 text-center text-ink-400">No audit events match the current filters.</td></tr>
+                <tr>
+                  <td
+                    colSpan={7}
+                    className="px-4 py-10 text-center text-ink-400"
+                  >
+                    No audit events match the current filters.
+                  </td>
+                </tr>
               ) : (
                 pageRows.map((e) => {
                   const isExpanded = expandedId === e.id;
                   const user = actorMap[e.actor];
-                  const role = actorRole(e.actor, actorMap, ownerEmail) ?? 'Unknown';
+                  const role =
+                    actorRole(e.actor, actorMap, ownerEmail) ?? "Unknown";
                   const bucket = roleActionBucket(e);
                   return (
                     <Fragment key={e.id}>
                       <tr
-                        className={`cursor-pointer bg-white transition-colors hover:bg-primary-50/40 dark:bg-ink-900 dark:hover:bg-ink-800/50 ${isExpanded ? 'bg-primary-50/60 dark:bg-ink-800/60' : ''} ${e.impersonation ? 'ring-1 ring-inset ring-danger-200 dark:ring-danger-900/50' : ''}`}
+                        className={`cursor-pointer bg-white transition-colors hover:bg-primary-50/40 dark:bg-ink-900 dark:hover:bg-ink-800/50 ${isExpanded ? "bg-primary-50/60 dark:bg-ink-800/60" : ""} ${e.impersonation ? "ring-1 ring-inset ring-danger-200 dark:ring-danger-900/50" : ""}`}
                         onClick={() => setExpandedId(isExpanded ? null : e.id)}
                       >
                         <td className="px-3 py-3 text-center">
-                          {isExpanded
-                            ? <ChevronDown className="mx-auto h-4 w-4 text-primary-600 dark:text-primary-400" />
-                            : <ChevronRight className="mx-auto h-4 w-4 text-ink-400" />}
+                          {isExpanded ? (
+                            <ChevronDown className="mx-auto h-4 w-4 text-primary-600 dark:text-primary-400" />
+                          ) : (
+                            <ChevronRight className="mx-auto h-4 w-4 text-ink-400" />
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           <div className="flex items-center gap-2">
-                            <span className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_STYLE[e.severity]}`} />
+                            <span
+                              className={`h-2 w-2 shrink-0 rounded-full ${SEVERITY_STYLE[e.severity]}`}
+                            />
                             <div>
-                              <p className="font-mono text-xs font-semibold text-ink-800 dark:text-ink-100">{formatUtc(e.ts)}</p>
-                              <p className="text-[11px] text-ink-400">{relativeTime(e.ts)}</p>
+                              <p className="font-mono text-xs font-semibold text-ink-800 dark:text-ink-100">
+                                {formatUtc(e.ts)}
+                              </p>
+                              <p className="text-[11px] text-ink-400">
+                                {relativeTime(e.ts)}
+                              </p>
                             </div>
                           </div>
                         </td>
                         <td className="px-4 py-3">
                           <div className="min-w-0">
-                            <p className="truncate font-mono text-xs font-semibold text-ink-700 dark:text-ink-200" title={e.actor}>{e.actor}</p>
-                            <p className="truncate text-[11px] text-ink-400">{user?.name ?? 'System'}</p>
+                            <p
+                              className="truncate font-mono text-xs font-semibold text-ink-700 dark:text-ink-200"
+                              title={e.actor}
+                            >
+                              {e.actor}
+                            </p>
+                            <p className="truncate text-[11px] text-ink-400">
+                              {user?.name ?? "System"}
+                            </p>
                           </div>
                         </td>
                         <td className="px-4 py-3">
-                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                            bucket === 'support' ? 'bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300'
-                            : bucket === 'auditor' ? 'bg-accent-100 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300'
-                            : bucket === 'superadmin' ? 'bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300'
-                            : 'bg-ink-100 text-ink-600 dark:bg-ink-800 dark:text-ink-300'
-                          }`}>
+                          <span
+                            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                              bucket === "support"
+                                ? "bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300"
+                                : bucket === "auditor"
+                                  ? "bg-accent-100 text-accent-700 dark:bg-accent-900/40 dark:text-accent-300"
+                                  : bucket === "superadmin"
+                                    ? "bg-primary-100 text-primary-700 dark:bg-primary-900/40 dark:text-primary-300"
+                                    : "bg-ink-100 text-ink-600 dark:bg-ink-800 dark:text-ink-300"
+                            }`}
+                          >
                             {role}
                           </span>
                         </td>
-                        <td className="px-4 py-3"><Badge tone={CATEGORY_TONE[e.category]}>{e.category}</Badge></td>
+                        <td className="px-4 py-3">
+                          <Badge tone={CATEGORY_TONE[e.category]}>
+                            {e.category}
+                          </Badge>
+                        </td>
                         <td className="px-4 py-3">
                           <div className="flex flex-wrap items-center gap-2">
-                            <span className="text-sm text-ink-800 dark:text-ink-100">{e.action}</span>
-                            {e.impersonation && <Badge tone="danger" dot pulse><ShieldAlert className="h-3 w-3" /> Impersonation</Badge>}
+                            <span className="text-sm text-ink-800 dark:text-ink-100">
+                              {e.action}
+                            </span>
+                            {e.impersonation && (
+                              <Badge tone="danger" dot pulse>
+                                <ShieldAlert className="h-3 w-3" />{" "}
+                                Impersonation
+                              </Badge>
+                            )}
                           </div>
                         </td>
                         <td className="px-4 py-3 max-w-xs">
-                          <span className="block truncate text-xs text-ink-600 dark:text-ink-300" title={e.target}>{e.target}</span>
+                          <span
+                            className="block truncate text-xs text-ink-600 dark:text-ink-300"
+                            title={e.target}
+                          >
+                            {e.target}
+                          </span>
                         </td>
                       </tr>
 
@@ -289,17 +575,37 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
         {filtered.length > 0 && (
           <div className="mt-3 flex items-center justify-between text-xs text-ink-500 dark:text-ink-400">
             <span>
-              Showing <span className="font-semibold text-ink-700 dark:text-ink-200">{currentPage * pageSize + 1}</span>–
-              <span className="font-semibold text-ink-700 dark:text-ink-200">{Math.min(filtered.length, currentPage * pageSize + pageSize)}</span> of{' '}
-              <span className="font-semibold text-ink-700 dark:text-ink-200">{filtered.length}</span> records
+              Showing{" "}
+              <span className="font-semibold text-ink-700 dark:text-ink-200">
+                {currentPage * pageSize + 1}
+              </span>
+              –
+              <span className="font-semibold text-ink-700 dark:text-ink-200">
+                {Math.min(filtered.length, currentPage * pageSize + pageSize)}
+              </span>{" "}
+              of{" "}
+              <span className="font-semibold text-ink-700 dark:text-ink-200">
+                {filtered.length}
+              </span>{" "}
+              records
             </span>
             {totalPages > 1 && (
               <div className="flex items-center gap-1">
-                <button disabled={currentPage === 0} onClick={() => setPage((p) => p - 1)} className="btn-ghost rounded-md p-1.5 disabled:opacity-40">
+                <button
+                  disabled={currentPage === 0}
+                  onClick={() => setPage((p) => p - 1)}
+                  className="btn-ghost rounded-md p-1.5 disabled:opacity-40"
+                >
                   <ChevronLeft className="h-4 w-4" />
                 </button>
-                <span className="px-2 font-medium">{currentPage + 1} / {totalPages}</span>
-                <button disabled={currentPage >= totalPages - 1} onClick={() => setPage((p) => p + 1)} className="btn-ghost rounded-md p-1.5 disabled:opacity-40">
+                <span className="px-2 font-medium">
+                  {currentPage + 1} / {totalPages}
+                </span>
+                <button
+                  disabled={currentPage >= totalPages - 1}
+                  onClick={() => setPage((p) => p + 1)}
+                  className="btn-ghost rounded-md p-1.5 disabled:opacity-40"
+                >
                   <ChevronRight className="h-4 w-4" />
                 </button>
               </div>
@@ -308,90 +614,165 @@ export function SecurityView({ caps }: { caps: Capabilities }) {
         )}
       </Card>
 
-      <Card title="Impersonation Log Isolation View" subtitle="All read/write activity during administrative override sessions" icon={<Eye className="h-4 w-4" />}>
+      <Card
+        title="Impersonation Log Isolation View"
+        subtitle="All read/write activity during administrative override sessions"
+        icon={<Eye className="h-4 w-4" />}
+      >
         <div className="space-y-2">
-          {audit.filter((e) => e.impersonation).slice(0, 6).map((e) => (
-            <div key={e.id} className="flex items-center gap-3 rounded-lg border border-danger-200 bg-danger-50/40 p-3 dark:border-danger-900/50 dark:bg-danger-900/10">
-              <ShieldAlert className="h-5 w-5 shrink-0 text-danger-600 dark:text-danger-400" />
-              <div className="min-w-0 flex-1">
-                <p className="text-sm font-semibold text-ink-900 dark:text-white">{e.action}</p>
-                <p className="text-xs text-ink-500">{e.actor} · {e.target} · {e.ip} · {relativeTime(e.ts)}</p>
+          {audit
+            .filter((e) => e.impersonation)
+            .slice(0, 6)
+            .map((e) => (
+              <div
+                key={e.id}
+                className="flex items-center gap-3 rounded-lg border border-danger-200 bg-danger-50/40 p-3 dark:border-danger-900/50 dark:bg-danger-900/10"
+              >
+                <ShieldAlert className="h-5 w-5 shrink-0 text-danger-600 dark:text-danger-400" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-ink-900 dark:text-white">
+                    {e.action}
+                  </p>
+                  <p className="text-xs text-ink-500">
+                    {e.actor} · {e.target} · {e.ip} · {relativeTime(e.ts)}
+                  </p>
+                </div>
+                <Badge tone="danger">{e.severity}</Badge>
               </div>
-              <Badge tone="danger">{e.severity}</Badge>
-            </div>
-          ))}
+            ))}
           {audit.filter((e) => e.impersonation).length === 0 && (
-            <p className="py-6 text-center text-sm text-ink-400">No impersonation events recorded.</p>
+            <p className="py-6 text-center text-sm text-ink-400">
+              No impersonation events recorded.
+            </p>
           )}
+        </div>
+      </Card>
+
+      <Card
+        title="Platform Technical Error Logs"
+        subtitle="System-level crashes, failed API handshakes & database exceptions"
+        icon={<Bug className="h-4 w-4" />}
+        actions={<Badge tone="neutral">{errorLogs.length} entries</Badge>}
+      >
+        <DataTable
+          columns={errColumns}
+          rows={errorLogs}
+          pageSize={6}
+          searchable={false}
+        />
+        <div className="mt-3 flex items-center gap-2 rounded-lg bg-ink-50 p-3 text-xs text-ink-500 dark:bg-ink-800/50">
+          <Terminal className="h-3.5 w-3.5" />
+          Copy payload utility copies the raw JSON stack to your clipboard for
+          forwarding to the platform engineering team.
         </div>
       </Card>
     </div>
   );
 }
 
-function EventDetailDrawer({ event, user }: { event: AuditEvent; user?: InternalUser }) {
+function EventDetailDrawer({
+  event,
+  user,
+}: {
+  event: AuditEvent;
+  user?: InternalUser;
+}) {
   const delta = auditDelta(event);
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
       {/* Actor Info */}
       <div className="rounded-xl border border-ink-200/70 bg-white p-4 dark:border-ink-800 dark:bg-ink-900">
-        <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-500"><User className="h-3.5 w-3.5" /> Actor Info</p>
+        <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-500">
+          <User className="h-3.5 w-3.5" /> Actor Info
+        </p>
         <dl className="space-y-2 text-xs">
           <div className="flex items-center justify-between">
             <dt className="text-ink-500">Full name</dt>
-            <dd className="font-semibold text-ink-800 dark:text-ink-100">{user?.name ?? 'System'}</dd>
+            <dd className="font-semibold text-ink-800 dark:text-ink-100">
+              {user?.name ?? "System"}
+            </dd>
           </div>
           <div className="flex items-center justify-between">
-            <dt className="flex items-center gap-1 text-ink-500"><Mail className="h-3 w-3" /> Email</dt>
-            <dd className="font-mono text-ink-700 dark:text-ink-200">{user?.email ?? 'system@platform'}</dd>
+            <dt className="flex items-center gap-1 text-ink-500">
+              <Mail className="h-3 w-3" /> Email
+            </dt>
+            <dd className="font-mono text-ink-700 dark:text-ink-200">
+              {user?.email ?? "system@platform"}
+            </dd>
           </div>
           <div className="flex items-center justify-between">
             <dt className="text-ink-500">Admin role</dt>
-            <dd><Badge tone="neutral">{user?.role ?? 'System'}</Badge></dd>
+            <dd>
+              <Badge tone="neutral">{user?.role ?? "System"}</Badge>
+            </dd>
           </div>
           <div className="flex items-center justify-between">
-            <dt className="flex items-center gap-1 text-ink-500"><Globe className="h-3 w-3" /> Source IP</dt>
-            <dd className="font-mono text-ink-700 dark:text-ink-200">{event.ip}</dd>
+            <dt className="flex items-center gap-1 text-ink-500">
+              <Globe className="h-3 w-3" /> Source IP
+            </dt>
+            <dd className="font-mono text-ink-700 dark:text-ink-200">
+              {event.ip}
+            </dd>
           </div>
           <div className="flex items-center justify-between">
             <dt className="text-ink-500">Admin ID</dt>
-            <dd className="font-mono text-ink-700 dark:text-ink-200">{event.actor}</dd>
+            <dd className="font-mono text-ink-700 dark:text-ink-200">
+              {event.actor}
+            </dd>
           </div>
         </dl>
       </div>
 
       {/* Timestamp + Target */}
       <div className="rounded-xl border border-ink-200/70 bg-white p-4 dark:border-ink-800 dark:bg-ink-900">
-        <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-500"><Clock className="h-3.5 w-3.5" /> Timestamp & Target</p>
+        <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-500">
+          <Clock className="h-3.5 w-3.5" /> Timestamp & Target
+        </p>
         <dl className="space-y-2 text-xs">
           <div>
             <dt className="text-ink-500">Date / time (UTC)</dt>
-            <dd className="mt-0.5 font-mono font-semibold text-ink-800 dark:text-ink-100">{formatUtc(event.ts)}</dd>
+            <dd className="mt-0.5 font-mono font-semibold text-ink-800 dark:text-ink-100">
+              {formatUtc(event.ts)}
+            </dd>
           </div>
           <div>
             <dt className="text-ink-500">Relative</dt>
-            <dd className="text-ink-600 dark:text-ink-300">{relativeTime(event.ts)}</dd>
+            <dd className="text-ink-600 dark:text-ink-300">
+              {relativeTime(event.ts)}
+            </dd>
           </div>
           <div className="border-t border-ink-100 pt-2 dark:border-ink-800">
-            <dt className="flex items-center gap-1 text-ink-500"><Target className="h-3 w-3" /> Target entity</dt>
-            <dd className="mt-0.5 font-semibold text-ink-800 dark:text-ink-100">{event.target}</dd>
+            <dt className="flex items-center gap-1 text-ink-500">
+              <Target className="h-3 w-3" /> Target entity
+            </dt>
+            <dd className="mt-0.5 font-semibold text-ink-800 dark:text-ink-100">
+              {event.target}
+            </dd>
           </div>
           <div>
             <dt className="text-ink-500">Tenant / Company ID</dt>
-            <dd className="font-mono text-ink-700 dark:text-ink-200">{event.companyId ?? '—'}</dd>
+            <dd className="font-mono text-ink-700 dark:text-ink-200">
+              {event.companyId ?? "—"}
+            </dd>
           </div>
           <div>
             <dt className="text-ink-500">Scope</dt>
-            <dd><Badge tone={CATEGORY_TONE[event.category]}>{event.scope}</Badge></dd>
+            <dd>
+              <Badge tone={CATEGORY_TONE[event.category]}>{event.scope}</Badge>
+            </dd>
           </div>
         </dl>
       </div>
 
       {/* Field-Level Audit Delta */}
       <div className="rounded-xl border border-ink-200/70 bg-white p-4 dark:border-ink-800 dark:bg-ink-900">
-        <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-500"><GitCompare className="h-3.5 w-3.5" /> Field-Level Audit Delta</p>
+        <p className="mb-3 flex items-center gap-1.5 text-xs font-bold uppercase tracking-wide text-ink-500">
+          <GitCompare className="h-3.5 w-3.5" /> Field-Level Audit Delta
+        </p>
         {delta === null ? (
-          <p className="rounded-lg bg-ink-50 p-3 text-xs text-ink-400 dark:bg-ink-800/50">No field-level before/after was recorded for this action.</p>
+          <p className="rounded-lg bg-ink-50 p-3 text-xs text-ink-400 dark:bg-ink-800/50">
+            No field-level before/after was recorded for this action.
+          </p>
         ) : (
           <div className="overflow-hidden rounded-lg border border-ink-200 dark:border-ink-700">
             <table className="w-full text-left text-xs">
@@ -405,9 +786,15 @@ function EventDetailDrawer({ event, user }: { event: AuditEvent; user?: Internal
               <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
                 {delta.map((d) => (
                   <tr key={d.field} className="bg-white dark:bg-ink-900">
-                    <td className="px-2.5 py-1.5 font-mono text-ink-600 dark:text-ink-300">{d.field}</td>
-                    <td className="px-2.5 py-1.5 text-ink-400 line-through">{d.before}</td>
-                    <td className="px-2.5 py-1.5 font-semibold text-success-600 dark:text-success-400">{d.after}</td>
+                    <td className="px-2.5 py-1.5 font-mono text-ink-600 dark:text-ink-300">
+                      {d.field}
+                    </td>
+                    <td className="px-2.5 py-1.5 text-ink-400 line-through">
+                      {d.before}
+                    </td>
+                    <td className="px-2.5 py-1.5 font-semibold text-success-600 dark:text-success-400">
+                      {d.after}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -416,7 +803,8 @@ function EventDetailDrawer({ event, user }: { event: AuditEvent; user?: Internal
         )}
         {event.impersonation && (
           <p className="mt-2 flex items-center gap-1 text-[10px] font-bold text-danger-600 dark:text-danger-400">
-            <ShieldAlert className="h-3 w-3" /> Executed during impersonation session
+            <ShieldAlert className="h-3 w-3" /> Executed during impersonation
+            session
           </p>
         )}
       </div>
@@ -424,20 +812,42 @@ function EventDetailDrawer({ event, user }: { event: AuditEvent; user?: Internal
   );
 }
 
-function StatTile({ icon, label, value, tone }: { icon: ReactNode; label: string; value: number; tone: 'primary' | 'danger' | 'warning' | 'accent' }) {
+function StatTile({
+  icon,
+  label,
+  value,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  value: number;
+  tone: "primary" | "danger" | "warning" | "accent";
+}) {
   const tones = {
-    primary: 'bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300',
-    danger: 'bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300',
-    warning: 'bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300',
-    accent: 'bg-accent-50 text-accent-700 dark:bg-accent-900/30 dark:text-accent-300',
+    primary:
+      "bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300",
+    danger:
+      "bg-danger-50 text-danger-700 dark:bg-danger-900/30 dark:text-danger-300",
+    warning:
+      "bg-warning-50 text-warning-700 dark:bg-warning-900/30 dark:text-warning-300",
+    accent:
+      "bg-accent-50 text-accent-700 dark:bg-accent-900/30 dark:text-accent-300",
   };
   return (
     <div className="card p-4">
       <div className="flex items-center justify-between">
-        <div className={`flex h-9 w-9 items-center justify-center rounded-lg ${tones[tone]}`}>{icon}</div>
-        <span className="text-2xl font-bold text-ink-900 dark:text-white">{value}</span>
+        <div
+          className={`flex h-9 w-9 items-center justify-center rounded-lg ${tones[tone]}`}
+        >
+          {icon}
+        </div>
+        <span className="text-2xl font-bold text-ink-900 dark:text-white">
+          {value}
+        </span>
       </div>
-      <p className="mt-2 text-xs font-medium text-ink-500 dark:text-ink-400">{label}</p>
+      <p className="mt-2 text-xs font-medium text-ink-500 dark:text-ink-400">
+        {label}
+      </p>
     </div>
   );
 }
