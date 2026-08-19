@@ -32,8 +32,13 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
     if (!canAccess(req, tid)) return res.status(403).json({ error: 'Access denied' });
     const { name, imo_number, call_sign, flag_state, port_of_registry, gross_tonnage, kw_power, vessel_type, class_society, satellite_provider } = req.body;
     const id = uuidv4();
-    const [tRows] = await pool.query('SELECT sms_version FROM tenants WHERE id = ?', [tid]);
-    const smsVer = tRows[0]?.sms_version || '1.0.0';
+    const [tRows] = await pool.query('SELECT sms_version, vessels_max FROM tenants WHERE id = ?', [tid]);
+    if (!tRows[0]) return res.status(404).json({ error: 'Tenant not found' });
+    const smsVer = tRows[0].sms_version || '1.0.0';
+    const [[{ count }]] = await pool.query('SELECT COUNT(*) AS count FROM vessels WHERE tenant_id = ?', [tid]);
+    if (count >= tRows[0].vessels_max) {
+      return res.status(403).json({ error: `Vessel license limit reached (${tRows[0].vessels_max}).`, code: 'VESSEL_LIMIT_REACHED' });
+    }
     await pool.query(
       'INSERT INTO vessels (id, tenant_id, name, imo_number, call_sign, flag_state, port_of_registry, gross_tonnage, kw_power, vessel_type, class_society, satellite_provider, sms_active_version) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
       [id, tid, name, imo_number, call_sign || null, flag_state || null, port_of_registry || null, gross_tonnage || null, kw_power || null, vessel_type || null, class_society || null, satellite_provider || null, smsVer],

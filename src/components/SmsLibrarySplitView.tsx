@@ -1644,7 +1644,7 @@ export function SmsLibrarySplitView({
 
       {/* EDIT / DRAFT REVISION / RESUBMIT MODAL */}
       {editingDoc && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => {
             setEditingDoc(null);
@@ -1804,7 +1804,7 @@ export function SmsLibrarySplitView({
 
       {/* ADD FOLDER MODAL */}
       {addFolderFor && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => {
             setAddFolderFor(null);
@@ -1862,7 +1862,7 @@ export function SmsLibrarySplitView({
 
       {/* ADD DOCUMENT MODAL (rich text + PDF) */}
       {addDocFor && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => {
             setAddDocFor(null);
@@ -1996,7 +1996,7 @@ export function SmsLibrarySplitView({
       )}
       {/* ADD TAB MODAL */}
       {addTabOpen && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => {
             setAddTabOpen(false);
@@ -2049,7 +2049,7 @@ export function SmsLibrarySplitView({
 
       {/* RENAME TAB MODAL */}
       {renameTabKey && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => {
             setRenameTabKey(null);
@@ -2094,7 +2094,7 @@ export function SmsLibrarySplitView({
 
       {/* DELETE TAB CONFIRMATION MODAL */}
       {deleteTabKey && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setDeleteTabKey(null)}
           title="Delete Tab"
@@ -2136,7 +2136,7 @@ export function SmsLibrarySplitView({
 
       {/* DELETE DRAFT CONFIRMATION MODAL */}
       {deleteTarget && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setDeleteTarget(null)}
           title="Delete Unapproved Draft"

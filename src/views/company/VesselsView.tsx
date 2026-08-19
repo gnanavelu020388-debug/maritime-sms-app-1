@@ -385,16 +385,20 @@ export function VesselsView() {
           profiles={profiles}
           onClose={() => setShowForm(false)}
           onSave={async (v, profileId) => {
-            const effectiveProfileId = profileId ?? null;
-            const profile = profiles.find((p) => p.id === effectiveProfileId);
-            const version = profile?.version ?? tenant.sms_version;
-            const newVesselId = await demoCreateVessel(tenant.id, v, version);
-            if (effectiveProfileId) await assignVesselToProfile(tenant.id, effectiveProfileId, newVesselId);
-            await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel profile created: ${v.name}`, target: v.imo_number, location: v.name });
-            postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_created', name: v.name } });
-            postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_created', name: v.name } });
-            setShowForm(false);
-            await load();
+            try {
+              const effectiveProfileId = profileId ?? null;
+              const profile = profiles.find((p) => p.id === effectiveProfileId);
+              const version = profile?.version ?? tenant.sms_version;
+              const newVesselId = await demoCreateVessel(tenant.id, v, version);
+              if (effectiveProfileId) await assignVesselToProfile(tenant.id, effectiveProfileId, newVesselId);
+              await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel profile created: ${v.name}`, target: v.imo_number, location: v.name });
+              postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_created', name: v.name } });
+              postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_created', name: v.name } });
+              setShowForm(false);
+              await load();
+            } catch (err) {
+              showToast((err as Error).message || 'Failed to create vessel', false);
+            }
           }}
         />
       )}
@@ -414,14 +418,18 @@ export function VesselsView() {
           currentProfileId={editForProfileId}
           onClose={() => { setEditFor(null); setEditForProfileId(null); }}
           onSave={async (v, profileId) => {
-            await demoUpdateVessel(tenant.id, editFor.id, v);
-            await assignVesselToProfile(tenant.id, profileId ?? '', editFor.id);
-            await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel profile updated: ${v.name}`, target: v.imo_number, location: v.name });
-            postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_edited', vesselId: editFor.id, profileId } });
-            postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_edited', vesselId: editFor.id, profileId } });
-            setEditFor(null);
-            setEditForProfileId(null);
-            await load();
+            try {
+              await demoUpdateVessel(tenant.id, editFor.id, v);
+              await assignVesselToProfile(tenant.id, profileId ?? '', editFor.id);
+              await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel profile updated: ${v.name}`, target: v.imo_number, location: v.name });
+              postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_edited', vesselId: editFor.id, profileId } });
+              postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_edited', vesselId: editFor.id, profileId } });
+              setEditFor(null);
+              setEditForProfileId(null);
+              await load();
+            } catch (err) {
+              showToast((err as Error).message || 'Failed to update vessel', false);
+            }
           }}
         />
       )}
@@ -462,7 +470,7 @@ function DeleteVesselModal({ vessel, onClose, onConfirm }: {
   }
 
   return (
-    <Modal open onClose={onClose} title="Delete Vessel Profile" subtitle={`${vessel.name} · IMO ${vessel.imo_number}`}
+    <Modal scrollable open onClose={onClose} title="Delete Vessel Profile" subtitle={`${vessel.name} · IMO ${vessel.imo_number}`}
       icon={<Trash2 className="h-5 w-5" />} size="md"
       footer={<><button onClick={onClose} className="btn-secondary" disabled={busy}>Cancel</button>
         <button disabled={!match || busy} onClick={handleConfirm} className="btn-primary !bg-danger-600 !text-white hover:!bg-danger-700">
@@ -508,7 +516,7 @@ function VesselForm({ profiles, editVessel, currentProfileId, onClose, onSave }:
   }, [currentProfileId]);
 
   return (
-    <Modal
+    <Modal scrollable
       open onClose={onClose} title={isEdit ? 'Edit Vessel Profile' : 'Create Vessel Profile'} subtitle={isEdit ? editVessel!.name : 'Core identifiers & technical specs'} icon={<Ship className="h-5 w-5" />} size="lg"
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button>
         <button disabled={!form.name || !form.imo_number} onClick={() => onSave({
@@ -749,7 +757,7 @@ function VesselSmsStatusDrawer({ vessel, onClose, syncing }: {
   const versionInput = String(activeVersion ?? '');
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title={`Vessel SMS Status — ${vessel.name}`}

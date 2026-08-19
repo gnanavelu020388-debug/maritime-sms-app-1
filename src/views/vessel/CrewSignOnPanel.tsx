@@ -312,7 +312,7 @@ export function CrewSignOnPanel({
       </div>
 
       {signOnFor && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setSignOnFor(null)}
           title="Confirm Crew Sign-On"

@@ -1,4 +1,4 @@
-import type { DocTreeKind, ModuleKey, PlanTier, SshRole, TierConfig } from './types';
+import type { DocTreeKind, ModuleKey, SshRole, TierConfig } from './types';
 
 export const PLATFORM_NAME = 'Maritime Platform Console';
 export const PLATFORM_SHORT = 'MPC';
@@ -14,17 +14,14 @@ export const MODULES: { key: ModuleKey; label: string; description: string }[] =
   { key: 'risk_assessment', label: 'Risk Assessment', description: 'Job hazard analysis & residual risk tracking' },
 ];
 
-export const PLAN_TIERS: PlanTier[] = ['Standard', 'Professional', 'Enterprise', 'Custom'];
-
-export const PLAN_DEFAULTS: Record<PlanTier, { vessels: number; seats: number; storageGb: number; monthly: number }> = {
-  Standard: { vessels: 5, seats: 25, storageGb: 50, monthly: 1200 },
-  Professional: { vessels: 20, seats: 100, storageGb: 250, monthly: 4200 },
-  Enterprise: { vessels: 80, seats: 500, storageGb: 1000, monthly: 14500 },
-  Custom: { vessels: 0, seats: 0, storageGb: 0, monthly: 0 },
-};
-
-// Editable tier configuration used by the Billing Tier Constructor.
-// Changes here cascade into the Tenant Ledger limits.
+// Editable tier configuration used by the Billing Tier Constructor — the
+// single source of truth for what each plan tier includes (including the
+// tier's own name — plan-tier dropdowns read live tier names from
+// `tierConfigs` in the store, not a fixed list, since names are editable).
+// Consumed as
+// `tierConfigs` from the store (hydrated from the `saas_tier_configs` DB
+// table) by anywhere that needs to look up a plan's default limits, e.g.
+// the Upgrade modal and tenant-creation forms.
 export const DEFAULT_TIER_CONFIGS: TierConfig[] = [
   { name: 'Standard', monthly: 1200, annual: 13200, vessels: 5, storageGb: 50, seats: 25 },
   { name: 'Professional', monthly: 4200, annual: 46200, vessels: 20, storageGb: 250, seats: 100 },

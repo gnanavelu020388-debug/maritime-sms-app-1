@@ -69,6 +69,13 @@ router.post('/:tenantId', authMiddleware, async (req, res) => {
     const id = uuidv4();
     const defaultPass = '$2a$10$/RceoxCFoo88Mt8kCf4akuGNGM/9VyiIygSpRuz17ZALoU26qqBRS'; // bcrypt hash of 'demo'
 
+    const [tRows] = await pool.query('SELECT seats_max FROM tenants WHERE id = ?', [tid]);
+    if (!tRows[0]) return res.status(404).json({ error: 'Tenant not found' });
+    const [[{ count }]] = await pool.query('SELECT COUNT(*) AS count FROM tenant_users WHERE tenant_id = ?', [tid]);
+    if (count >= tRows[0].seats_max) {
+      return res.status(403).json({ error: `Seat license limit reached (${tRows[0].seats_max}).`, code: 'SEAT_LIMIT_REACHED' });
+    }
+
     // If this email already self-registered (app_users), it'll be superseded by
     // the tenant_users row below — otherwise granting tenant access here would
     // leave a disconnected duplicate account with a different password.

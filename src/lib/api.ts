@@ -762,7 +762,7 @@ export async function apiGetTierConfigs(): Promise<TierConfigRow[]> {
   return request<TierConfigRow[]>('/platform/tiers');
 }
 
-export async function apiUpdateTierConfig(name: string, data: { monthly: number; annual: number; vessels: number; storage_gb: number; seats: number }): Promise<TierConfigRow> {
+export async function apiUpdateTierConfig(name: string, data: { monthly: number; annual: number; vessels: number; storage_gb: number; seats: number; new_name?: string }): Promise<TierConfigRow> {
   return request<TierConfigRow>(`/platform/tiers/${encodeURIComponent(name)}`, { method: 'PUT', body: JSON.stringify(data) });
 }
 

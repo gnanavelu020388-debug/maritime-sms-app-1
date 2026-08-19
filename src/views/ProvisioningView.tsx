@@ -5,10 +5,12 @@ import {
 } from 'lucide-react';
 import { type TenantRow, type TenantUserRow, type Rank } from '../lib/supabase';
 import { useAuth } from '../lib/auth';
+import { useStore } from '../store';
 import { logAudit } from '../lib/audit';
 import { Modal } from '../components/Modal';
 import { Badge } from '../components/Badge';
 import type { Capabilities } from '../lib/permissions';
+import type { TierConfig } from '../types';
 import {
   getEffectiveDemoTenants, getEffectiveDemoUsers,
   demoCreateTenant, demoDeleteTenant, demoCloneMasterSms,
@@ -28,6 +30,7 @@ const COMPANY_ADMIN_RANK = '__company_admin__';
 
 export function ProvisioningView({ caps }: { caps: Capabilities }) {
   const { user } = useAuth();
+  const { tierConfigs } = useStore();
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [usersByTenant, setUsersByTenant] = useState<Record<string, TenantUserRow[]>>({});
   const [loading, setLoading] = useState(true);
@@ -51,7 +54,7 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
 
   useEffect(() => { load(); }, []);
 
-  async function createTenant(data: { company: string; contact_email: string; plan: string; vessels_max: number; seats_max: number; region: string }) {
+  async function createTenant(data: { company: string; contact_email: string; plan: string; vessels_max: number; seats_max: number; storage_gb_max: number; monthly_revenue: number }) {
     setBusy(true);
     setFormError(null);
     try {
@@ -154,7 +157,7 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
                     </div>
                     <div>
                       <p className="font-bold text-ink-900 dark:text-white">{t.company}</p>
-                      <p className="text-xs text-ink-400">{t.contact_email} · {t.plan} · {t.region}</p>
+                      <p className="text-xs text-ink-400">{t.contact_email} · {t.plan}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -231,13 +234,13 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
       </div>
 
       {showTenant && (
-        <TenantFormModal busy={busy} error={formError} onClose={() => { setShowTenant(false); setFormError(null); }} onCreate={createTenant} />
+        <TenantFormModal tierConfigs={tierConfigs} busy={busy} error={formError} onClose={() => { setShowTenant(false); setFormError(null); }} onCreate={createTenant} />
       )}
       {showUser && (
         <UserFormModal tenant={showUser.tenant} busy={busy} error={formError} onClose={() => { setShowUser(null); setFormError(null); }} onCreate={(d) => provisionUser(showUser.tenant, d)} />
       )}
       {confirmDelete && (
-        <Modal open onClose={() => setConfirmDelete(null)} title="Delete Tenant" subtitle="This action is permanent and cannot be undone" icon={<Trash2 className="h-5 w-5 text-danger-500" />}
+        <Modal scrollable open onClose={() => setConfirmDelete(null)} title="Delete Tenant" subtitle="This action is permanent and cannot be undone" icon={<Trash2 className="h-5 w-5 text-danger-500" />}
           footer={
             <>
               <button onClick={() => setConfirmDelete(null)} className="btn-secondary">Cancel</button>
@@ -249,7 +252,7 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
           <div className="rounded-lg border border-danger-200 bg-danger-50 p-4 dark:border-danger-800 dark:bg-danger-900/20">
             <p className="text-sm font-semibold text-danger-800 dark:text-danger-300">You are about to delete:</p>
             <p className="mt-1 text-lg font-bold text-danger-900 dark:text-white">{confirmDelete.company}</p>
-            <p className="text-xs text-danger-600 dark:text-danger-400">{confirmDelete.contact_email} · {confirmDelete.plan} · {confirmDelete.region}</p>
+            <p className="text-xs text-danger-600 dark:text-danger-400">{confirmDelete.contact_email} · {confirmDelete.plan}</p>
             <p className="mt-3 text-xs text-danger-700 dark:text-danger-300">
               All vessels, crew assignments, SMS documents, audit logs, and provisioned users for this tenant will be <strong>permanently deleted</strong> (cascade).
             </p>
@@ -274,23 +277,27 @@ function WindowCard({ icon, title, desc, tone }: { icon: React.ReactNode; title:
   );
 }
 
-function TenantFormModal({ busy, error, onClose, onCreate }: {
+function TenantFormModal({ tierConfigs, busy, error, onClose, onCreate }: {
+  tierConfigs: TierConfig[];
   busy: boolean;
   error: string | null;
   onClose: () => void;
-  onCreate: (d: { company: string; contact_email: string; plan: string; vessels_max: number; seats_max: number; region: string }) => void;
+  onCreate: (d: { company: string; contact_email: string; plan: string; vessels_max: number; seats_max: number; storage_gb_max: number; monthly_revenue: number }) => void;
 }) {
-  const [f, setF] = useState({ company: '', contact_email: '', plan: 'Standard', vessels_max: 5, seats_max: 25, region: 'EMEA' });
+  function tierDefaults(plan: string) {
+    return tierConfigs.find((c) => c.name === plan) ?? { vessels: 0, seats: 0, storageGb: 0, monthly: 0 };
+  }
+  const standardDefaults = tierDefaults('Standard');
+  const [f, setF] = useState({ company: '', contact_email: '', plan: 'Standard', vessels_max: standardDefaults.vessels, seats_max: standardDefaults.seats, storage_gb_max: standardDefaults.storageGb, monthly_revenue: standardDefaults.monthly });
   return (
-    <Modal open onClose={onClose} title="Create Live Tenant" subtitle="Provisions a real company + clones the locked SMS template" icon={<Building2 className="h-5 w-5" />} size="lg"
+    <Modal scrollable open onClose={onClose} title="Create Live Tenant" subtitle="Provisions a real company + clones the locked SMS template" icon={<Building2 className="h-5 w-5" />} size="lg"
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button>
         <button disabled={busy || !f.company || !f.contact_email} onClick={() => onCreate(f)} className="btn-primary">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Rocket className="h-4 w-4" /> Provision</>}</button></>}>
       {error && <div className="mb-4 rounded-lg bg-danger-50 p-3 text-sm text-danger-700 dark:bg-danger-900/20 dark:text-danger-400">{error}</div>}
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <div className="sm:col-span-2"><label className="label">Company Name</label><input className="input" value={f.company} onChange={(e) => setF({ ...f, company: e.target.value })} /></div>
         <div className="sm:col-span-2"><label className="label">Contact Email</label><input className="input" type="email" value={f.contact_email} onChange={(e) => setF({ ...f, contact_email: e.target.value })} /></div>
-        <div><label className="label">Plan</label><select className="input" value={f.plan} onChange={(e) => setF({ ...f, plan: e.target.value })}><option>Standard</option><option>Professional</option><option>Enterprise</option><option>Custom</option></select></div>
-        <div><label className="label">Region</label><select className="input" value={f.region} onChange={(e) => setF({ ...f, region: e.target.value })}><option>EMEA</option><option>APAC</option><option>Americas</option></select></div>
+        <div><label className="label">Plan</label><select className="input" value={f.plan} onChange={(e) => { const plan = e.target.value; const d = tierDefaults(plan); setF({ ...f, plan, vessels_max: d.vessels, seats_max: d.seats, storage_gb_max: d.storageGb, monthly_revenue: d.monthly }); }}>{tierConfigs.map((c) => <option key={c.name} value={c.name}>{c.name}</option>)}</select></div>
         <div><label className="label">Vessel License Limit</label><input type="number" className="input" value={f.vessels_max} onChange={(e) => setF({ ...f, vessels_max: +e.target.value })} /></div>
         <div><label className="label">User License Limit</label><input type="number" className="input" value={f.seats_max} onChange={(e) => setF({ ...f, seats_max: +e.target.value })} /></div>
       </div>
@@ -310,7 +317,7 @@ function UserFormModal({ tenant, busy, error, onClose, onCreate }: {
 }) {
   const [f, setF] = useState({ name: '', email: '', roleChoice: COMPANY_ADMIN_RANK, nationality: '' });
   return (
-    <Modal open onClose={onClose} title={`Provision User — ${tenant.company}`} subtitle="User will sign up with this email; account auto-links on first login" icon={<Users className="h-5 w-5" />} size="lg"
+    <Modal scrollable open onClose={onClose} title={`Provision User — ${tenant.company}`} subtitle="User will sign up with this email; account auto-links on first login" icon={<Users className="h-5 w-5" />} size="lg"
       footer={<><button onClick={onClose} className="btn-secondary">Cancel</button>
         <button disabled={busy || !f.name || !f.email} onClick={() => onCreate(f)} className="btn-primary">{busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <><KeyRound className="h-4 w-4" /> Provision</>}</button></>}>
       {error && <div className="mb-4 rounded-lg bg-danger-50 p-3 text-sm text-danger-700 dark:bg-danger-900/20 dark:text-danger-400">{error}</div>}

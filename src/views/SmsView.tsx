@@ -435,7 +435,7 @@ function GovernanceSection({ selectedTenantId }: { selectedTenantId: string | nu
 
       {/* Freeze Confirmation Modal */}
       {freezeConfirm && selectedTenant && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setFreezeConfirm(false)}
           title="Freeze Workspace Editing?"
@@ -618,8 +618,7 @@ function TenantGovernanceTable({
 
   const filtered = tenants.filter((t) =>
     t.company.toLowerCase().includes(query.toLowerCase()) ||
-    t.id.toLowerCase().includes(query.toLowerCase()) ||
-    t.region.toLowerCase().includes(query.toLowerCase())
+    t.id.toLowerCase().includes(query.toLowerCase())
   );
 
   const planBadge = (plan: PlanTier) => {
@@ -680,7 +679,7 @@ function TenantGovernanceTable({
                       <Building2 className="h-3.5 w-3.5 shrink-0 text-ink-400" />
                       <div>
                         <div className="text-xs font-bold text-ink-800 dark:text-ink-200">{t.company}</div>
-                        <div className="text-[10px] text-ink-400">{t.region} · {t.id}</div>
+                        <div className="text-[10px] text-ink-400">{t.id}</div>
                       </div>
                     </div>
                   </td>

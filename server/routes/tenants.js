@@ -61,11 +61,11 @@ router.get('/:tenantId', authMiddleware, async (req, res) => {
 
 router.post('/', authMiddleware, requireSuperAdmin, async (req, res) => {
   try {
-    const { company, contact_email, plan, region, vessels_max, seats_max, storage_gb_max, monthly_revenue, mfa_enforced, modules, sms_version, status } = req.body;
+    const { company, contact_email, plan, vessels_max, seats_max, storage_gb_max, monthly_revenue, mfa_enforced, modules, sms_version, status } = req.body;
     const id = uuidv4();
     await pool.query(
-      'INSERT INTO tenants (id, company, contact_email, plan, region, vessels_max, seats_max, storage_gb_max, monthly_revenue, mfa_enforced, modules, sms_version, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-      [id, company, contact_email, plan || 'Standard', region || 'EMEA', vessels_max || 5, seats_max || 25, storage_gb_max || 50, monthly_revenue || 0, mfa_enforced ?? true, JSON.stringify(modules || []), sms_version || '1.0.0', status || 'active'],
+      'INSERT INTO tenants (id, company, contact_email, plan, vessels_max, seats_max, storage_gb_max, monthly_revenue, mfa_enforced, modules, sms_version, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [id, company, contact_email, plan || 'Standard', vessels_max || 5, seats_max || 25, storage_gb_max || 50, monthly_revenue || 0, mfa_enforced ?? true, JSON.stringify(modules || []), sms_version || '1.0.0', status || 'active'],
     );
     const [rows] = await pool.query('SELECT * FROM tenants WHERE id = ?', [id]);
     return res.status(201).json(parseTenant(rows[0]));
@@ -78,7 +78,7 @@ router.put('/:tenantId', authMiddleware, async (req, res) => {
       return res.status(403).json({ error: 'Access denied' });
     }
     const fields = [
-      'company', 'contact_email', 'plan', 'status', 'region', 'vessels_max', 'seats_max', 'storage_gb_max', 'monthly_revenue', 'mfa_enforced', 'sms_version',
+      'company', 'contact_email', 'plan', 'status', 'vessels_max', 'seats_max', 'storage_gb_max', 'monthly_revenue', 'mfa_enforced', 'sms_version',
       'workspace_frozen', 'max_subfolder_depth', 'max_upload_size_mb', 'auto_backup_interval_hours',
     ];
     const sets = [];

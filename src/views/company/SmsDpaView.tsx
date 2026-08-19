@@ -1747,7 +1747,7 @@ export function SmsDpaView() {
         />
       )}
       {deleteProfileTarget && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setDeleteProfileTarget(null)}
           title="Delete SMS Profile"
@@ -1833,7 +1833,7 @@ function DocumentPreview({
   }, [hasRealFile, node.content]);
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title={node.label}
@@ -1948,7 +1948,7 @@ function AddFolderModal({
 }) {
   const [label, setLabel] = useState("");
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Create Folder"
@@ -2061,7 +2061,7 @@ function AddDocumentModal({
     !busy;
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Add Document"
@@ -2195,7 +2195,7 @@ function DeleteNodeModal({
     setBusy(false);
   }
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title={`Request Deletion — ${node.node_kind === "folder" ? "Folder" : "Document"}`}
@@ -2264,7 +2264,7 @@ function AddTabModal({
     (e) => e.toLowerCase() === label.trim().toLowerCase(),
   );
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Add Document Tab"
@@ -2314,7 +2314,7 @@ function RenameTabModal({
 }) {
   const [label, setLabel] = useState(current);
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Rename Tab"
@@ -2366,7 +2366,7 @@ function DeleteTabModal({
     setBusy(false);
   }
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Delete Document Tab"
@@ -2521,7 +2521,7 @@ function ContentEditor({
         (pdfFile || isGcsPath(node.content))));
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title={`Edit: ${node.label}`}
@@ -2665,7 +2665,7 @@ function VersionHistoryModal({
   }, [tenantId, node.id]);
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Version History"
@@ -2938,7 +2938,7 @@ function CreateProfileModal({
   ];
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Create SMS Fleet Profile"

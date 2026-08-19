@@ -332,7 +332,7 @@ export function UsersView({ caps }: { caps: Capabilities }) {
       )}
 
       {searchOpen && (
-        <Modal open onClose={() => { setSearchOpen(false); setQuery(''); setAccountSearchResults([]); }} title="Account Search" subtitle="Search any client account across all tenants" icon={<Search className="h-5 w-5" />} size="md">
+        <Modal scrollable open onClose={() => { setSearchOpen(false); setQuery(''); setAccountSearchResults([]); }} title="Account Search" subtitle="Search any client account across all tenants" icon={<Search className="h-5 w-5" />} size="md">
           <div className="space-y-3">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-ink-400" />
@@ -412,7 +412,7 @@ function InviteModal({ onClose, onInvite }: { onClose: () => void; onInvite: (dr
     try { await onInvite({ name, email, role }); } finally { setSaving(false); }
   };
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Invite Internal Staff"
@@ -454,7 +454,7 @@ function EditStaffModal({ user, onClose, onSave }: { user: InternalUser; onClose
     try { await onSave(name.trim(), email.trim(), role); } finally { setSaving(false); }
   };
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Edit Staff Account"
@@ -535,7 +535,7 @@ function EmergencyTenantActionModal({
   };
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title={isReset ? 'Trigger Tenant Password Reset' : 'Emergency Account Lockdown'}
@@ -600,7 +600,7 @@ function MfaResetModal({
   };
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Reset User MFA"
@@ -634,7 +634,7 @@ function TempPasswordModal({ reveal, onClose }: { reveal: { email: string; passw
     } catch { /* clipboard access denied — value is still selectable on screen */ }
   };
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Temporary Password Issued"

@@ -45,7 +45,7 @@ export function DpaApp() {
       {active === 'security' && isEnabled('sms_documentation') && <CompanySecuritySettings />}
 
       {blockedSection && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setBlockedSection(null)}
           title="Module Not Enabled"

@@ -370,7 +370,7 @@ function ManualSnapshotModal({ tenants, onClose, onCreate }: { tenants: Tenant[]
   };
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="On-Demand Manual Snapshot"
@@ -424,7 +424,7 @@ function FrequencyModal({ tenant, onClose, onSave }: { tenant: Tenant; onClose: 
   };
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Configure Auto-Backup Frequency"
@@ -476,7 +476,7 @@ function RestoreWizard({ snapshot, onClose, onConfirm }: { snapshot: BackupSnaps
   const match = typed.trim() === snapshot.company;
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="High-Security Isolated Recovery"

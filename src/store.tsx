@@ -225,7 +225,7 @@ function reducer(state: State, action: Action): State {
           ...t,
           tenantNo: row.tenant_no,
           company: row.company, contactEmail: row.contact_email,
-          plan: row.plan as PlanTier, status: row.status as TenantStatus, region: row.region,
+          plan: row.plan as PlanTier, status: row.status as TenantStatus,
           mfaEnforced: row.mfa_enforced, modules: row.modules as ModuleKey[],
           monthlyRevenue: Number(row.monthly_revenue), createdAt: row.created_at, contractExpires: row.contract_expires,
           vessels: { used: row.vesselsUsed, max: row.vessels_max },
@@ -255,7 +255,7 @@ function reducer(state: State, action: Action): State {
         },
         modules: row.modules as ModuleKey[], mfaEnforced: row.mfa_enforced,
         createdAt: row.created_at, contractExpires: row.contract_expires,
-        monthlyRevenue: Number(row.monthly_revenue), region: row.region,
+        monthlyRevenue: Number(row.monthly_revenue),
         guardrails: { workspaceFrozen: !!row.workspace_frozen, maxSubfolderDepth: row.max_subfolder_depth, maxUploadSizeMb: row.max_upload_size_mb },
         autoBackupIntervalHours: row.auto_backup_interval_hours,
         lastAutoBackupAt: row.last_auto_backup_at,
@@ -294,7 +294,7 @@ function reducer(state: State, action: Action): State {
     // Fires on every keystroke while editing the tier constructor — logging
     // here would spam the ledger. The real logAudit() call happens once,
     // in BillingView's "Save tiers" handler, after the real API write.
-    case 'TIER_CONFIG_UPDATE': { const tierConfigs = state.tierConfigs.map((t, i) => (i === action.index ? { ...t, ...action.patch } : t)); const tenants = applyTierLimits(state.tenants, tierConfigs); return { ...state, tierConfigs, tenants }; }
+    case 'TIER_CONFIG_UPDATE': { const tierConfigs = state.tierConfigs.map((t, i) => (i === action.index ? { ...t, ...action.patch } : t)); return { ...state, tierConfigs }; }
     // Tenant Backup & Recovery tab keeps only the 2 most recent snapshots per
     // tenant, mirroring the server-side cap in server/lib/backupSnapshot.js.
     case 'BACKUP_ADD': {

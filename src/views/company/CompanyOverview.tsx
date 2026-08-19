@@ -136,7 +136,6 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
           <div className="space-y-2 text-sm">
             <Row label="MFA Enforced" value={tenant?.mfa_enforced ? 'Yes' : 'No'} />
             <Row label="Plan" value={tenant?.plan ?? '—'} />
-            <Row label="Region" value={tenant?.region ?? '—'} />
           </div>
         </div>
       </div>

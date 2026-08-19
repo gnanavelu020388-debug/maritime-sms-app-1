@@ -63,7 +63,6 @@ export function FeatureMatrixView({ caps }: { caps: Capabilities }) {
         seats_max: t.seats.max,
         storage_gb_max: t.storageGb.max,
         monthly_revenue: t.monthlyRevenue,
-        region: t.region,
         mfa_enforced: t.mfaEnforced,
         modules: t.modules,
         sms_version: 'v1.0.0',
@@ -277,7 +276,7 @@ export function FeatureMatrixView({ caps }: { caps: Capabilities }) {
                 <tr key={t.id} className="hover:bg-primary-50/30 dark:hover:bg-ink-800/40">
                   <td className="sticky left-0 z-10 bg-white px-4 py-3 dark:bg-ink-900">
                     <p className="truncate text-sm font-semibold text-ink-900 dark:text-white">{t.company}</p>
-                    <p className="text-xs text-ink-400">{t.plan} · {t.region}</p>
+                    <p className="text-xs text-ink-400">{t.plan}</p>
                   </td>
                   {TOGGLEABLE_MODULE_KEYS.map((k) => {
                     const enabled = tFlags[k] ?? false;

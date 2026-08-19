@@ -16,6 +16,7 @@ import type {
 } from './supabase';
 import * as api from './api';
 import * as dataCache from './dataCache';
+import type { HydratedTenantRow } from '../store';
 
 export type DemoTenantId = string;
 
@@ -33,7 +34,7 @@ export function isRealTenantId(id: string): boolean {
 
 export function getDemoTenant(id: string): TenantRow {
   return dataCache.getCachedTenants().find((t) => t.id === id) ?? {
-    id, company: 'Unknown', contact_email: '', plan: 'Standard', status: 'active', vessels_max: 0, seats_max: 0, storage_gb_max: 0, monthly_revenue: 0, region: '', mfa_enforced: false, modules: [], sms_version: '1.0.0', created_at: '', contract_expires: '', updated_at: '',
+    id, company: 'Unknown', contact_email: '', plan: 'Standard', status: 'active', vessels_max: 0, seats_max: 0, storage_gb_max: 0, monthly_revenue: 0, mfa_enforced: false, modules: [], sms_version: '1.0.0', created_at: '', contract_expires: '', updated_at: '',
     workspace_frozen: false, max_subfolder_depth: 4, max_upload_size_mb: 50, auto_backup_interval_hours: null, last_auto_backup_at: null,
   };
 }
@@ -42,8 +43,28 @@ export function getEffectiveDemoTenants(): TenantRow[] {
   return dataCache.getCachedTenants();
 }
 
+// Refetches every tenant from the backend and dispatches TENANTS_HYDRATE —
+// the full sequence needed to bring the store's tenant list back in sync
+// with the DB (e.g. after a plan-tier rename cascades to every tenant on
+// that plan). Shared by the initial app-shell hydration, the Tenant
+// Ledger's own refresh, and anywhere else that needs authoritative tenant
+// state rather than a manually patched local copy.
+export async function hydrateAllTenants(
+  dispatch: (action: { type: 'TENANTS_HYDRATE'; rows: HydratedTenantRow[] }) => void,
+): Promise<void> {
+  await dataCache.refreshAllTenants();
+  const rows = getEffectiveDemoTenants();
+  await Promise.all(rows.map((r) => dataCache.refreshTenantData(r.id)));
+  const hydrated: HydratedTenantRow[] = rows.map((r) => ({
+    ...r,
+    seatsUsed: getEffectiveDemoUsers(r.id).length,
+    vesselsUsed: getEffectiveDemoVessels(r.id).length,
+  }));
+  dispatch({ type: 'TENANTS_HYDRATE', rows: hydrated });
+}
+
 export async function demoCreateTenant(
-  data: { company: string; contact_email: string; plan: string; vessels_max: number; seats_max: number; region: string },
+  data: { company: string; contact_email: string; plan: string; vessels_max: number; seats_max: number; storage_gb_max?: number; monthly_revenue?: number },
 ): Promise<string> {
   const t = await api.apiCreateTenant<TenantRow>({
     company: data.company,
@@ -51,9 +72,8 @@ export async function demoCreateTenant(
     plan: data.plan,
     vessels_max: data.vessels_max,
     seats_max: data.seats_max,
-    region: data.region,
-    storage_gb_max: 50,
-    monthly_revenue: 0,
+    storage_gb_max: data.storage_gb_max ?? 50,
+    monthly_revenue: data.monthly_revenue ?? 0,
     mfa_enforced: false,
     modules: ['sms_documentation'],
     sms_version: '1.0.0',

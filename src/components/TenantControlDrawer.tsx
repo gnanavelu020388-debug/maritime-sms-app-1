@@ -227,7 +227,7 @@ export function TenantControlDrawer({ tenant, open, onClose }: {
 
       {/* Freeze Confirmation Modal */}
       {freezeConfirm && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setFreezeConfirm(false)}
           title="Freeze Workspace Editing?"

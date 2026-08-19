@@ -16,7 +16,10 @@
 // Domain model — multi-tenant maritime super admin platform
 // ============================================================
 
-export type PlanTier = 'Standard' | 'Professional' | 'Enterprise' | 'Custom';
+// Not a fixed enum — plan tiers are editable, DB-backed rows (see the SaaS
+// Tier Constructor in BillingView), so any string the Super Admin saves as
+// a tier name is a valid PlanTier.
+export type PlanTier = string;
 export type TenantStatus = 'active' | 'suspended' | 'trial' | 'provisioning' | 'archived';
 
 export type ModuleKey =
@@ -55,7 +58,6 @@ export interface Tenant {
   createdAt: string;
   contractExpires: string;
   monthlyRevenue: number;
-  region: string;
   // Inherited document trees cloned to this tenant's workspace via flexible template push
   guardrails?: TenantGuardrails;
   demoTenantId?: string | null;

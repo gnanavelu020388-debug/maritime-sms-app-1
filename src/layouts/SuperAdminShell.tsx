@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { StoreProvider, useStore, type HydratedTenantRow } from '../store';
+import { StoreProvider, useStore } from '../store';
 import { Sidebar } from '../components/Sidebar';
 import { Topbar } from '../components/Topbar';
 import { MaintenanceBanner } from '../components/MaintenanceBanner';
@@ -19,8 +19,7 @@ import type { SectionId } from '../types';
 import type { User, PlatformRole, InternalRole } from '../lib/supabase';
 import { INTERNAL_ROLE_LABEL, INTERNAL_ROLE_SUMMARY, canAccessSection, capabilitiesFor } from '../lib/permissions';
 import { LogOut, Lock } from 'lucide-react';
-import { refreshAllTenants, refreshTenantData } from '../lib/dataCache';
-import { getEffectiveDemoTenants, getEffectiveDemoUsers, getEffectiveDemoVessels } from '../lib/demoData';
+import { hydrateAllTenants } from '../lib/demoData';
 import * as api from '../lib/api';
 import type { AuditLogRow, InvoiceRow, BackupSnapshotRow, PlatformStaffRow, ErrorLogRow } from '../lib/supabase';
 
@@ -59,16 +58,7 @@ function SuperAdminShellInner({ user, internalRole, onSignOut }: { user: User; r
     let cancelled = false;
     (async () => {
       try {
-        await refreshAllTenants();
-        const rows = getEffectiveDemoTenants();
-        await Promise.all(rows.map((r) => refreshTenantData(r.id)));
-        if (cancelled) return;
-        const hydrated: HydratedTenantRow[] = rows.map((r) => ({
-          ...r,
-          seatsUsed: getEffectiveDemoUsers(r.id).length,
-          vesselsUsed: getEffectiveDemoVessels(r.id).length,
-        }));
-        dispatch({ type: 'TENANTS_HYDRATE', rows: hydrated });
+        await hydrateAllTenants(dispatch);
       } catch {
         // Best-effort — views still show local/demo tenants if this fails.
       }

@@ -876,7 +876,7 @@ export function PermissionsMatrixView() {
       )}
 
       {deletingRank && (
-        <Modal open onClose={() => setDeletingRank(null)} title="Delete Custom Rank" subtitle={deletingRank.rank} icon={<Trash2 className="h-5 w-5" />} size="md"
+        <Modal scrollable open onClose={() => setDeletingRank(null)} title="Delete Custom Rank" subtitle={deletingRank.rank} icon={<Trash2 className="h-5 w-5" />} size="md"
           footer={<><button onClick={() => setDeletingRank(null)} className="btn-secondary" disabled={rankBusy}>Cancel</button>
             <button disabled={rankBusy} onClick={() => handleDeleteRank(deletingRank.rank)} className="btn-primary !bg-danger-600 !text-white hover:!bg-danger-700">
               {rankBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Rank'}
@@ -1191,7 +1191,7 @@ export function PermissionsMatrixView() {
           )}
 
           {deletingShoreRole && (
-            <Modal open onClose={() => setDeletingShoreRole(null)} title="Delete Custom Shore Role" subtitle={deletingShoreRole.role} icon={<Trash2 className="h-5 w-5" />} size="md"
+            <Modal scrollable open onClose={() => setDeletingShoreRole(null)} title="Delete Custom Shore Role" subtitle={deletingShoreRole.role} icon={<Trash2 className="h-5 w-5" />} size="md"
               footer={<><button onClick={() => setDeletingShoreRole(null)} className="btn-secondary" disabled={shoreRoleBusy}>Cancel</button>
                 <button disabled={shoreRoleBusy} onClick={() => handleDeleteShoreRole(deletingShoreRole.role)} className="btn-primary !bg-danger-600 !text-white hover:!bg-danger-700">
                   {shoreRoleBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Delete Role'}
@@ -1236,7 +1236,7 @@ function AddCustomRankModal({ existingRanks, busy, onClose, onSave, initialName,
   }
 
   return (
-    <Modal open onClose={onClose} title={isEdit ? 'Edit Custom Rank' : 'Add Custom Rank'} icon={isEdit ? <Pencil className="h-5 w-5" /> : <Plus className="h-5 w-5" />} size="md"
+    <Modal scrollable open onClose={onClose} title={isEdit ? 'Edit Custom Rank' : 'Add Custom Rank'} icon={isEdit ? <Pencil className="h-5 w-5" /> : <Plus className="h-5 w-5" />} size="md"
       footer={<><button onClick={onClose} className="btn-secondary" disabled={busy}>Cancel</button>
         <button disabled={busy || !name.trim()} onClick={handleSave} className="btn-primary flex items-center gap-2">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
@@ -1295,7 +1295,7 @@ function AddCustomShoreRoleModal({ existingRoles, busy, onClose, onSave, initial
   }
 
   return (
-    <Modal open onClose={onClose} title={isEdit ? 'Edit Custom Shore Role' : 'Add Custom Shore Role'} icon={isEdit ? <Pencil className="h-5 w-5" /> : <Plus className="h-5 w-5" />} size="md"
+    <Modal scrollable open onClose={onClose} title={isEdit ? 'Edit Custom Shore Role' : 'Add Custom Shore Role'} icon={isEdit ? <Pencil className="h-5 w-5" /> : <Plus className="h-5 w-5" />} size="md"
       footer={<><button onClick={onClose} className="btn-secondary" disabled={busy}>Cancel</button>
         <button disabled={busy || !name.trim()} onClick={handleSave} className="btn-primary flex items-center gap-2">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}

@@ -91,7 +91,7 @@ export function CompanyApp() {
 
       {/* Unsaved Changes Navigation Guard */}
       {pendingNav && (
-        <Modal
+        <Modal scrollable
           open
           onClose={handleCancelNav}
           title="Unsaved Changes Alert"
@@ -121,7 +121,7 @@ export function CompanyApp() {
 
       {/* FEATURE-GATE: blocked route access modal */}
       {blockedSection && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setBlockedSection(null)}
           title="Module Not Enabled"

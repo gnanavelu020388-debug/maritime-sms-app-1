@@ -793,12 +793,17 @@ function RegisterCrewModal({ vessels, rankOptions, shoreRoleOptions, tenantId, o
     setSaving(true);
     setError(null);
 
-    await onRegister({ ...form, accountType });
-    setSaving(false);
+    try {
+      await onRegister({ ...form, accountType });
+    } catch (err) {
+      setError((err as Error).message || 'Failed to register crew member.');
+    } finally {
+      setSaving(false);
+    }
   }
 
   return (
-    <Modal open onClose={onClose} title="Register New Crew Member" icon={<UserPlus className="h-5 w-5" />} size="lg"
+    <Modal scrollable open onClose={onClose} title="Register New Crew Member" icon={<UserPlus className="h-5 w-5" />} size="lg"
       footer={<><button onClick={onClose} className="btn-secondary" disabled={saving}>Cancel</button>
         <button disabled={saving || !form.name || !form.email || !form.password} onClick={handleSubmit} className="btn-primary flex items-center gap-2">
           {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <UserPlus className="h-4 w-4" />}
@@ -1082,7 +1087,7 @@ function EditUserModal({ user, rankOptions, shoreRoleOptions, onClose, onSave, b
   ];
 
   return (
-    <Modal open onClose={onClose} title="Edit Crew Member" subtitle={`${user.name} · ${user.rank}`} icon={<Pencil className="h-5 w-5" />} size="lg"
+    <Modal scrollable open onClose={onClose} title="Edit Crew Member" subtitle={`${user.name} · ${user.rank}`} icon={<Pencil className="h-5 w-5" />} size="lg"
       footer={<><button onClick={onClose} className="btn-secondary" disabled={busy}>Cancel</button>
         <button disabled={busy || !form.name || !form.email} onClick={() => onSave({ ...form, employee_id: form.employee_id || null })} className="btn-primary flex items-center gap-2">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle2 className="h-4 w-4" />}
@@ -1129,7 +1134,7 @@ function DeactivateModal({ row, busy, onClose, onConfirm }: {
   onConfirm: () => void;
 }) {
   return (
-    <Modal open onClose={onClose} title="Deactivate & Archive Account" subtitle={`${row.user.name} · ${row.user.email}`} icon={<Ban className="h-5 w-5" />} size="md"
+    <Modal scrollable open onClose={onClose} title="Deactivate & Archive Account" subtitle={`${row.user.name} · ${row.user.email}`} icon={<Ban className="h-5 w-5" />} size="md"
       footer={<><button onClick={onClose} className="btn-secondary" disabled={busy}>Cancel</button>
         <button disabled={busy} onClick={onConfirm} className="btn-primary !bg-warning-600 !text-white hover:!bg-warning-700">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : 'Deactivate & Archive'}
@@ -1157,7 +1162,7 @@ function DeleteModal({ row, busy, onClose, onConfirm }: {
   const canConfirm = confirmText.trim().toUpperCase() === 'DELETE';
 
   return (
-    <Modal open onClose={onClose} title="Permanently Delete User" subtitle={`${row.user.name} · ${row.user.email}`} icon={<Trash className="h-5 w-5" />} size="md"
+    <Modal scrollable open onClose={onClose} title="Permanently Delete User" subtitle={`${row.user.name} · ${row.user.email}`} icon={<Trash className="h-5 w-5" />} size="md"
       footer={<><button onClick={onClose} className="btn-secondary" disabled={busy}>Cancel</button>
         <button disabled={busy || !canConfirm} onClick={onConfirm} className="btn-primary !bg-danger-600 !text-white hover:!bg-danger-700">
           {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}

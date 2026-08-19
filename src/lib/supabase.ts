@@ -46,7 +46,6 @@ export interface TenantRow {
   seats_max: number;
   storage_gb_max: number;
   monthly_revenue: number;
-  region: string;
   mfa_enforced: boolean;
   modules: string[];
   sms_version: string;

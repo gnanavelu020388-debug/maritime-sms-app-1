@@ -858,7 +858,7 @@ export function SmsApprovalsView() {
 
       {/* ── Approve Deletion Confirmation Modal ── */}
       {confirmDeleteDoc && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setConfirmDeleteDoc(null)}
           title="Approve Deletion"
@@ -901,7 +901,7 @@ export function SmsApprovalsView() {
 
       {/* ── Edit Section Modal ── */}
       {editingDoc && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setEditingDoc(null)}
           title="Edit SMS Section"
@@ -939,7 +939,7 @@ export function SmsApprovalsView() {
 
       {/* ── DPA Digital Signature Modal ── */}
       {showSignModal && selectedDoc && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => !deploying && setShowSignModal(false)}
           title="DPA Digital Signature — Approve & Deploy"
@@ -988,7 +988,7 @@ export function SmsApprovalsView() {
 
       {/* PURGE / DISCARD DRAFT CONFIRMATION MODAL */}
       {showPurgeModal && selectedDoc && (
-        <Modal
+        <Modal scrollable
           open
           onClose={() => setShowPurgeModal(false)}
           title="Purge / Discard Draft"
@@ -1113,7 +1113,7 @@ function UploadSmsModal({ tenantId, profiles, onClose, onUpload }: {
   }
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={onClose}
       title="Upload New SMS Document / Circular"

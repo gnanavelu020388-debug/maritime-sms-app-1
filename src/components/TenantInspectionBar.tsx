@@ -69,7 +69,6 @@ export function TenantInspectionBar({ selectedId, onSelectTenant }: {
                       >
                         <Building2 className="h-4 w-4 shrink-0 text-ink-400" />
                         <span className="flex-1 truncate">{t.company}</span>
-                        <span className="text-[10px] uppercase text-ink-400">{t.region}</span>
                         {t.guardrails?.workspaceFrozen && (
                           <Lock className="h-3.5 w-3.5 text-danger-500" />
                         )}
@@ -224,7 +223,7 @@ function TenantSmsMirror({ tenant, activeTree, onTreeChange }: {
           <div>
             <p className="text-sm font-bold text-ink-900 dark:text-white">{tenant.company}</p>
             <p className="text-xs text-ink-500 dark:text-ink-400">
-              {tenant.region} · {tenant.plan} plan · {tenant.vessels.used} vessels · {tenant.seats.used} seats
+              {tenant.plan} plan · {tenant.vessels.used} vessels · {tenant.seats.used} seats
             </p>
           </div>
         </div>

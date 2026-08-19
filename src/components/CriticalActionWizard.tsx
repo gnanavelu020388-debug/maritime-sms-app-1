@@ -71,7 +71,7 @@ export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }:
   };
 
   return (
-    <Modal
+    <Modal scrollable
       open
       onClose={() => { if (!executing) onClose(); }}
       title={`Critical Action — Delete ${target.kind}`}

@@ -6,8 +6,6 @@ import {
   TrendingUp,
   ArrowUpRight,
   Filter,
-  HardDrive,
-  Users as UsersIcon,
   Ship,
   Building2,
   FileText,
@@ -24,27 +22,25 @@ import { Card } from "../components/Card";
 import { Badge } from "../components/Badge";
 import { DataTable, type Column } from "../components/DataTable";
 import { Modal } from "../components/Modal";
+import { UpgradeModal } from "../components/UpgradeModal";
 import { useStore } from "../store";
 import { useAuth } from "../lib/auth";
-import { logAudit } from "../lib/audit";
 import {
   formatGb,
   formatBytes,
-  formatCurrency,
   relativeTime,
 } from "../constants";
-import { PLAN_TIERS, PLAN_DEFAULTS } from "../constants";
 import type { Tenant, PlanTier } from "../types";
 import type { Capabilities } from "../lib/permissions";
 import {
   getEffectiveDemoTenants,
   getEffectiveDemoVessels,
   getEffectiveDemoSmsDocs,
-  isRealTenantId,
 } from "../lib/demoData";
 import { LIVE_MODULES, getDisplayName, useModuleDefinitions } from "../lib/featureFlags";
 import { ScrollSelect } from "../components/ScrollSelect";
 import * as api from "../lib/api";
+import { nextPlanUp, upgradeTenantPlan } from "../lib/tenantUpgrade";
 
 
 type BreachType = "vessels" | "storage" | "seats";
@@ -58,7 +54,7 @@ function detectBreaches(t: Tenant): BreachType[] {
 }
 
 export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
-  const { tenants, dispatch, toast } = useStore();
+  const { tenants, tierConfigs, dispatch, toast } = useStore();
   const { user } = useAuth();
   const [upgradeFor, setUpgradeFor] = useState<Tenant | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<PlanTier>("Professional");
@@ -168,7 +164,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
         header: "Actions",
         width: "min-w-[180px]",
         render: (t) => {
-          const next = nextPlanUp(t.plan);
+          const next = nextPlanUp(t.plan, tierConfigs);
           return (
             <div className="flex items-center gap-1.5">
               <button
@@ -192,7 +188,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
         },
       },
     ],
-    [],
+    [tierConfigs],
   );
 
   return (
@@ -222,8 +218,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
           searchFn={(t, q) =>
             t.company.toLowerCase().includes(q) ||
             t.id.toLowerCase().includes(q) ||
-            t.plan.toLowerCase().includes(q) ||
-            t.region.toLowerCase().includes(q)
+            t.plan.toLowerCase().includes(q)
           }
           emptyMessage="No compliance breaches detected — all tenants within limits."
           toolbar={
@@ -250,31 +245,19 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
       {upgradeFor && (
         <UpgradeModal
           tenant={upgradeFor}
+          tierConfigs={tierConfigs}
           selectedPlan={selectedPlan}
           onSelectPlan={setSelectedPlan}
           onClose={() => setUpgradeFor(null)}
-          onConfirm={async (plan) => {
-            const d = PLAN_DEFAULTS[plan];
-            if (isRealTenantId(upgradeFor.id)) {
-              try {
-                await api.apiUpdateTenant(upgradeFor.id, {
-                  plan, vessels_max: d.vessels, seats_max: d.seats, storage_gb_max: d.storageGb, monthly_revenue: d.monthly,
-                });
-              } catch (err) {
-                toast({ tone: "danger", title: "Upgrade failed", message: (err as Error).message });
-                return;
-              }
-              await logAudit({
-                tenantId: upgradeFor.id,
-                actorEmail: user?.email ?? "super-admin",
-                category: "billing",
-                action: `Plan tier changed to ${plan}: ${upgradeFor.company}`,
-                target: upgradeFor.company,
-                before: { plan: upgradeFor.plan, vessels_max: upgradeFor.vessels.max, seats_max: upgradeFor.seats.max, storage_gb_max: upgradeFor.storageGb.max },
-                after: { plan, vessels_max: d.vessels, seats_max: d.seats, storage_gb_max: d.storageGb },
-              });
+          onConfirm={async (plan, contractExpires) => {
+            try {
+              await upgradeTenantPlan(upgradeFor, plan, contractExpires, tierConfigs, user?.email ?? "super-admin");
+            } catch (err) {
+              toast({ tone: "danger", title: "Upgrade failed", message: (err as Error).message });
+              return;
             }
             dispatch({ type: "TENANT_SET_PLAN", id: upgradeFor.id, plan });
+            dispatch({ type: "TENANT_UPDATE", id: upgradeFor.id, patch: { contractExpires } });
             toast({
               tone: "success",
               title: "Tier upgraded",
@@ -286,20 +269,6 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
       )}
     </div>
   );
-}
-
-const PLAN_ORDER: PlanTier[] = [
-  "Standard",
-  "Professional",
-  "Enterprise",
-  "Custom",
-];
-
-function nextPlanUp(current: PlanTier): PlanTier {
-  const idx = PLAN_ORDER.indexOf(current);
-  return idx >= 0 && idx < PLAN_ORDER.length - 1
-    ? PLAN_ORDER[idx + 1]
-    : "Enterprise";
 }
 
 function BreachPill({ type }: { type: BreachType }) {
@@ -323,176 +292,6 @@ function BreachPill({ type }: { type: BreachType }) {
   );
 }
 
-function UpgradeModal({
-  tenant,
-  selectedPlan,
-  onSelectPlan,
-  onClose,
-  onConfirm,
-}: {
-  tenant: Tenant;
-  selectedPlan: PlanTier;
-  onSelectPlan: (p: PlanTier) => void;
-  onClose: () => void;
-  onConfirm: (plan: PlanTier) => void | Promise<void>;
-}) {
-  const targetDefs = PLAN_DEFAULTS[selectedPlan];
-  const rows: {
-    label: string;
-    icon: ReactNode;
-    used: number;
-    currentMax: number;
-    targetMax: number;
-    fmt?: (n: number) => string;
-  }[] = [
-    {
-      label: "Vessels",
-      icon: <Ship className="h-4 w-4" />,
-      used: tenant.vessels.used,
-      currentMax: tenant.vessels.max,
-      targetMax: targetDefs.vessels,
-    },
-    {
-      label: "Storage",
-      icon: <HardDrive className="h-4 w-4" />,
-      used: tenant.storageGb.used,
-      currentMax: tenant.storageGb.max,
-      targetMax: targetDefs.storageGb,
-      fmt: formatGb,
-    },
-    {
-      label: "Users",
-      icon: <UsersIcon className="h-4 w-4" />,
-      used: tenant.seats.used,
-      currentMax: tenant.seats.max,
-      targetMax: targetDefs.seats,
-    },
-  ];
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      title="Upgrade Tenant Tier"
-      subtitle={`${tenant.company} · ${tenant.id}`}
-      icon={<TrendingUp className="h-5 w-5" />}
-      size="lg"
-      footer={
-        <>
-          <button onClick={onClose} className="btn-secondary">
-            Cancel
-          </button>
-          <button
-            onClick={() => onConfirm(selectedPlan)}
-            disabled={selectedPlan === tenant.plan}
-            className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            <TrendingUp className="h-4 w-4" /> Confirm & Upgrade Tier
-          </button>
-        </>
-      }
-    >
-      <div className="space-y-5">
-        <div className="flex items-center justify-between rounded-xl border border-ink-200 bg-ink-50 px-4 py-3 dark:border-ink-800 dark:bg-ink-800/50">
-          <div>
-            <p className="text-xs text-ink-500">Current plan</p>
-            <p className="text-lg font-bold text-ink-900 dark:text-white">
-              {tenant.plan}
-            </p>
-          </div>
-          <div className="text-ink-300">
-            <ArrowUpRight className="h-6 w-6" />
-          </div>
-          <div className="text-right">
-            <p className="text-xs text-ink-500">Target plan</p>
-            <p className="text-lg font-bold text-primary-600 dark:text-primary-400">
-              {selectedPlan}
-            </p>
-          </div>
-        </div>
-
-        <div className="overflow-hidden rounded-xl border border-ink-200 dark:border-ink-800">
-          <table className="w-full text-left text-sm">
-            <thead className="bg-ink-50/80 text-xs uppercase tracking-wide text-ink-500 dark:bg-ink-950/50 dark:text-ink-400">
-              <tr>
-                <th className="px-4 py-2.5 font-semibold">Resource</th>
-                <th className="px-4 py-2.5 font-semibold">Current Usage</th>
-                <th className="px-4 py-2.5 font-semibold">
-                  {tenant.plan} Limit
-                </th>
-                <th className="px-4 py-2.5 font-semibold">
-                  {selectedPlan} Limit
-                </th>
-                <th className="px-4 py-2.5 font-semibold">Status</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-ink-100 dark:divide-ink-800">
-              {rows.map((r) => {
-                const fmt = r.fmt ?? ((n: number) => String(n));
-                const over = r.used > r.currentMax;
-                const resolves = r.used <= r.targetMax;
-                return (
-                  <tr key={r.label} className="bg-white dark:bg-ink-900">
-                    <td className="px-4 py-2.5">
-                      <div className="flex items-center gap-2 text-ink-700 dark:text-ink-200">
-                        {r.icon}
-                        <span className="font-semibold">{r.label}</span>
-                      </div>
-                    </td>
-                    <td className="px-4 py-2.5 font-semibold text-ink-900 dark:text-white">
-                      {fmt(r.used)}
-                    </td>
-                    <td className="px-4 py-2.5 text-ink-500">
-                      {fmt(r.currentMax)}
-                    </td>
-                    <td className="px-4 py-2.5 font-bold text-primary-600 dark:text-primary-400">
-                      {fmt(r.targetMax)}
-                    </td>
-                    <td className="px-4 py-2.5">
-                      {over ? (
-                        resolves ? (
-                          <Badge tone="success" dot>
-                            Resolves breach
-                          </Badge>
-                        ) : (
-                          <Badge tone="warning" dot>
-                            Still over
-                          </Badge>
-                        )
-                      ) : (
-                        <Badge tone="neutral">Within limit</Badge>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        <div>
-          <label className="label">Select new plan</label>
-          <select
-            value={selectedPlan}
-            onChange={(e) => onSelectPlan(e.target.value as PlanTier)}
-            className="input"
-          >
-            {PLAN_TIERS.map((p) => (
-              <option key={p} value={p} disabled={p === tenant.plan}>
-                {p}
-                {p === tenant.plan ? " (current)" : ""}
-              </option>
-            ))}
-          </select>
-          <p className="mt-2 text-xs text-ink-500 dark:text-ink-400">
-            Monthly revenue will adjust to{" "}
-            {formatCurrency(PLAN_DEFAULTS[selectedPlan].monthly)}/mo based on
-            the {selectedPlan} tier.
-          </p>
-        </div>
-      </div>
-    </Modal>
-  );
-}
 
 // ── Company / Vessel connectivity & sync evidence log ────────────────────
 // Real data only: connectivity is derived from vessels.last_sync_at (the

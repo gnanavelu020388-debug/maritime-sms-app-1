@@ -122,9 +122,12 @@ router.put('/mfa-enforcement', authMiddleware, requireSuperAdmin, async (req, re
 
 // SaaS Tier Constructor (Billing view) — real persistence for the pricing/
 // limit config that used to be a client-only reducer with no backend at
-// all. Changing a tier here does NOT retroactively change any tenant
-// already on that plan (same behavior as today) — it only changes what
-// new plan assignments apply going forward.
+// all. Changing a tier's pricing/limits here does NOT retroactively change
+// any tenant already on that plan — it only changes what new plan
+// assignments apply going forward. Renaming a tier (new_name below) is a
+// different kind of edit: the name is the key every tenant's `plan` column
+// points at, so a rename cascades to every tenant currently on it in the
+// same transaction, keeping the two tables consistent.
 router.get('/tiers', authMiddleware, requireSuperAdmin, async (_req, res) => {
   try {
     const [rows] = await pool.query('SELECT * FROM saas_tier_configs ORDER BY monthly ASC');
@@ -133,17 +136,46 @@ router.get('/tiers', authMiddleware, requireSuperAdmin, async (_req, res) => {
 });
 
 router.put('/tiers/:name', authMiddleware, requireSuperAdmin, async (req, res) => {
+  const { monthly, annual, vessels, storage_gb, seats, new_name } = req.body;
+  const trimmedNewName = typeof new_name === 'string' ? new_name.trim() : undefined;
+  const renaming = trimmedNewName && trimmedNewName !== req.params.name;
+
+  if (!renaming) {
+    try {
+      await pool.query(
+        `INSERT INTO saas_tier_configs (name, monthly, annual, vessels, storage_gb, seats, updated_by)
+         VALUES (?, ?, ?, ?, ?, ?, ?)
+         ON DUPLICATE KEY UPDATE monthly = VALUES(monthly), annual = VALUES(annual), vessels = VALUES(vessels), storage_gb = VALUES(storage_gb), seats = VALUES(seats), updated_by = VALUES(updated_by)`,
+        [req.params.name, monthly || 0, annual || 0, vessels || 0, storage_gb || 0, seats || 0, req.user.email || null],
+      );
+      const [rows] = await pool.query('SELECT * FROM saas_tier_configs WHERE name = ?', [req.params.name]);
+      return res.json({ ...rows[0], monthly: Number(rows[0].monthly), annual: Number(rows[0].annual) });
+    } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+  }
+
+  if (!trimmedNewName) return res.status(400).json({ error: 'Tier name cannot be empty.' });
+  const conn = await pool.getConnection();
   try {
-    const { monthly, annual, vessels, storage_gb, seats } = req.body;
-    await pool.query(
-      `INSERT INTO saas_tier_configs (name, monthly, annual, vessels, storage_gb, seats, updated_by)
-       VALUES (?, ?, ?, ?, ?, ?, ?)
-       ON DUPLICATE KEY UPDATE monthly = VALUES(monthly), annual = VALUES(annual), vessels = VALUES(vessels), storage_gb = VALUES(storage_gb), seats = VALUES(seats), updated_by = VALUES(updated_by)`,
-      [req.params.name, monthly || 0, annual || 0, vessels || 0, storage_gb || 0, seats || 0, req.user.email || null],
+    const [[clash]] = await conn.query('SELECT name FROM saas_tier_configs WHERE name = ?', [trimmedNewName]);
+    if (clash) return res.status(409).json({ error: `A tier named "${trimmedNewName}" already exists.` });
+
+    await conn.beginTransaction();
+    await conn.query(
+      `UPDATE saas_tier_configs SET name = ?, monthly = ?, annual = ?, vessels = ?, storage_gb = ?, seats = ?, updated_by = ? WHERE name = ?`,
+      [trimmedNewName, monthly || 0, annual || 0, vessels || 0, storage_gb || 0, seats || 0, req.user.email || null, req.params.name],
     );
-    const [rows] = await pool.query('SELECT * FROM saas_tier_configs WHERE name = ?', [req.params.name]);
+    await conn.query('UPDATE tenants SET plan = ? WHERE plan = ?', [trimmedNewName, req.params.name]);
+    await conn.commit();
+
+    const [rows] = await conn.query('SELECT * FROM saas_tier_configs WHERE name = ?', [trimmedNewName]);
     return res.json({ ...rows[0], monthly: Number(rows[0].monthly), annual: Number(rows[0].annual) });
-  } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
+  } catch (err) {
+    await conn.rollback();
+    console.error('[platformSettings] tier rename failed:', err);
+    return res.status(500).json({ error: 'Tier rename failed — no changes were applied.' });
+  } finally {
+    conn.release();
+  }
 });
 
 export default router;

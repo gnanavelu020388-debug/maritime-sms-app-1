@@ -130,7 +130,7 @@ export function MaintenanceBanner() {
       </div>
 
       {/* Click-to-expand modal */}
-      <Modal
+      <Modal scrollable
         open={showModal}
         onClose={() => setShowModal(false)}
         title={maintenance.tenantId ? 'Company Notice' : 'Platform Notice'}
@@ -236,7 +236,7 @@ export function StandaloneBanner() {
         </button>
       </div>
 
-      <Modal
+      <Modal scrollable
         open={showModal}
         onClose={() => setShowModal(false)}
         title="Platform Notice"
