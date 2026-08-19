@@ -25,7 +25,7 @@ export function VesselsView() {
   const [rows, setRows] = useState<FleetRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [showForm, setShowForm] = useState(false);
-  const [syncing, setSyncing] = useState<string | null>(null);
+  const [syncingIds, setSyncingIds] = useState<Set<string>>(new Set());
   const [deleteFor, setDeleteFor] = useState<VesselRow | null>(null);
   const [manningFor, setManningFor] = useState<VesselRow | null>(null);
   const [smsStatusFor, setSmsStatusFor] = useState<FleetRow | null>(null);
@@ -61,23 +61,44 @@ export function VesselsView() {
       const prof = await getProfileForVessel(tenant.id, v.id);
       return { ...v, crewOnboard: counts[v.id] ?? 0, profileName: prof?.name ?? null, profileVersion: prof?.version ?? null, profileId: prof?.id ?? null };
     }));
-    setRows(fleetScope.filterVessels(enriched));
+    const scoped = fleetScope.filterVessels(enriched);
+    setRows(scoped);
     setLoading(false);
+    return scoped;
   }
 
-  useEffect(() => { load(); }, [tenant]);
+  useEffect(() => {
+    (async () => {
+      // One-time reconciliation: catch any vessel that fell behind its SMS
+      // profile while this tab was closed (event-driven auto-sync only
+      // reacts to SMS_UPDATED events that arrive while the tab is open).
+      const freshRows = await load();
+      const outOfDate = freshRows.filter((r) => r.profileId && r.sms_active_version !== r.profileVersion);
+      for (const r of outOfDate) await doSync(r);
+    })();
+  }, [tenant]);
 
   useEffect(() => {
     if (!tenant) return;
-    const off = onSyncEvent((evt) => {
+    const off = onSyncEvent(async (evt) => {
       if (evt.tenantId !== tenant.id) return;
-      if (evt.type === 'PROFILES_UPDATED' || evt.type === 'VESSELS_UPDATED' || evt.type === 'CREW_UPDATED') load();
+      if (evt.type === 'PROFILES_UPDATED' || evt.type === 'VESSELS_UPDATED' || evt.type === 'CREW_UPDATED') {
+        await load();
+      } else if (evt.type === 'SMS_UPDATED') {
+        // A DPA/company admin approved, rejected, or otherwise changed an SMS
+        // document elsewhere (possibly in another tab) — pull the latest
+        // profile versions and auto-sync any vessel that's now behind, with
+        // no manual "Sync Now" click required.
+        const freshRows = await load();
+        const outOfDate = freshRows.filter((r) => r.profileId && r.sms_active_version !== r.profileVersion);
+        for (const r of outOfDate) await doSync(r);
+      }
     });
     return off;
   }, [tenant]);
 
   async function doSync(r: FleetRow) {
-    setSyncing(r.id);
+    setSyncingIds((prev) => new Set(prev).add(r.id));
     try {
       const profileVersion = r.profileVersion ?? tenant!.sms_version;
       // Check for new DPA-approved circulars/amendments under this vessel's profile
@@ -85,16 +106,16 @@ export function VesselsView() {
       await demoUpdateVesselSync(tenant!.id, r.id, profileVersion);
       await logAudit({
         tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'sms',
-        action: `Manual SMS Synchronization Triggered: ${r.name}${newDocCount > 0 ? ` — ${newDocCount} new approved document(s) synced` : ' — no new documents'}`,
+        action: `Automatic SMS Synchronization: ${r.name}${newDocCount > 0 ? ` — ${newDocCount} new approved document(s) synced` : ' — no new documents'}`,
         target: r.imo_number, location: r.name, severity: newDocCount > 0 ? 'warning' : 'info',
       });
       postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_sync', vessel: r.name, version: profileVersion, newDocs: newDocCount } });
-      showToast(newDocCount > 0 ? `${r.name}: ${newDocCount} new approved document(s) synced` : `${r.name}: No new documents found — already up to date`, true);
+      if (newDocCount > 0) showToast(`${r.name}: ${newDocCount} new approved document(s) synced automatically`, true);
       await load();
     } catch {
-      showToast(`${r.name}: Sync failed — please try again`, false);
+      showToast(`${r.name}: Automatic sync failed — will retry on the next SMS update`, false);
     }
-    setSyncing(null);
+    setSyncingIds((prev) => { const next = new Set(prev); next.delete(r.id); return next; });
   }
 
   async function confirmDelete(v: VesselRow) {
@@ -237,14 +258,6 @@ export function VesselsView() {
       className: 'text-right',
       render: (r) => (
         <div className="flex items-center justify-end gap-1">
-          <button
-            onClick={() => doSync(r)}
-            disabled={syncing === r.id}
-            className="rounded-md p-1.5 text-ink-500 transition hover:bg-primary-50 hover:text-primary-600 disabled:cursor-not-allowed disabled:opacity-50 dark:text-ink-400 dark:hover:bg-primary-900/30"
-            title={r.last_sync_at ? `Sync — last sync: ${new Date(r.last_sync_at).toLocaleString()}` : 'Sync — never synced'}
-          >
-            <RefreshCw className={`h-3.5 w-3.5 ${syncing === r.id ? 'animate-spin' : ''}`} />
-          </button>
           <button
             onClick={async () => {
               setEditFor(r);
@@ -425,8 +438,7 @@ export function VesselsView() {
         <VesselSmsStatusDrawer
           vessel={smsStatusFor}
           onClose={() => setSmsStatusFor(null)}
-          onSync={() => { doSync(smsStatusFor); }}
-          syncing={syncing === smsStatusFor.id}
+          syncing={syncingIds.has(smsStatusFor.id)}
         />
       )}
     </div>
@@ -727,10 +739,9 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
   );
 }
 
-function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing }: {
+function VesselSmsStatusDrawer({ vessel, onClose, syncing }: {
   vessel: FleetRow;
   onClose: () => void;
-  onSync: () => void;
   syncing: boolean;
 }) {
   const activeVersion = vessel.profileVersion ?? vessel.sms_active_version;
@@ -745,15 +756,7 @@ function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing }: {
       subtitle={`IMO ${vessel.imo_number}`}
       icon={<FileText className="h-5 w-5" />}
       size="md"
-      footer={
-        <>
-          <button onClick={onClose} className="btn-secondary">Close</button>
-          <button onClick={onSync} disabled={syncing} className="btn-primary">
-            <RefreshCw className={`h-4 w-4 ${syncing ? 'animate-spin' : ''}`} />
-            {syncing ? 'Syncing…' : 'Sync Now'}
-          </button>
-        </>
-      }
+      footer={<button onClick={onClose} className="btn-secondary">Close</button>}
     >
       <div className="space-y-3">
         <div className="flex items-center gap-3 rounded-lg border border-ink-200 bg-ink-50 p-4 dark:border-ink-800 dark:bg-ink-900/50">
@@ -792,7 +795,9 @@ function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing }: {
           <div className="rounded-lg border border-ink-200 bg-white p-3 dark:border-ink-800 dark:bg-ink-900">
             <p className="text-[11px] font-bold uppercase tracking-wide text-ink-400">Sync Status</p>
             <div className="mt-1 flex items-center gap-1.5">
-              {isUpToDate ? (
+              {syncing ? (
+                <><RefreshCw className="h-4 w-4 animate-spin text-primary-500" /><span className="text-sm font-bold text-primary-600 dark:text-primary-400">Auto-Syncing…</span></>
+              ) : isUpToDate ? (
                 <><CheckCircle2 className="h-4 w-4 text-success-500" /><span className="text-sm font-bold text-success-600 dark:text-success-400">Up to Date</span></>
               ) : (
                 <><Clock className="h-4 w-4 text-warning-500" /><span className="text-sm font-bold text-warning-600 dark:text-warning-400">Pending Update</span></>
@@ -811,7 +816,7 @@ function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing }: {
         {!isUpToDate && (
           <div className="flex items-start gap-2 rounded-lg border border-warning-200 bg-warning-50 p-3 text-sm text-warning-700 dark:border-warning-800 dark:bg-warning-900/20 dark:text-warning-300">
             <Info className="mt-0.5 h-4 w-4 shrink-0" />
-            <p>This vessel's active SMS version (v{vessel.sms_active_version}) is behind the profile version (v{vessel.profileVersion}). Click <strong>Sync Now</strong> to pull the latest DPA-approved documents.</p>
+            <p>This vessel's active SMS version (v{vessel.sms_active_version}) is behind the profile version (v{vessel.profileVersion}). It will sync automatically as soon as the next DPA-approved document update is published.</p>
           </div>
         )}
       </div>
