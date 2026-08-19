@@ -427,13 +427,6 @@ export function VesselsView() {
           onClose={() => setSmsStatusFor(null)}
           onSync={() => { doSync(smsStatusFor); }}
           syncing={syncing === smsStatusFor.id}
-          onSaveVersion={async (version: string) => {
-            await demoUpdateVesselSync(tenant.id, smsStatusFor.id, version);
-            await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'sms', action: `Vessel SMS version set to v${version} for ${smsStatusFor.name}`, target: smsStatusFor.imo_number, location: smsStatusFor.name });
-            postSyncEvent({ type: 'SMS_UPDATED', tenantId: tenant.id, payload: { action: 'vessel_version_set', vesselId: smsStatusFor.id, version } });
-            setSmsStatusFor(null);
-            await load();
-          }}
         />
       )}
     </div>
@@ -734,17 +727,15 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
   );
 }
 
-function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing, onSaveVersion }: {
+function VesselSmsStatusDrawer({ vessel, onClose, onSync, syncing }: {
   vessel: FleetRow;
   onClose: () => void;
   onSync: () => void;
   syncing: boolean;
-  onSaveVersion: (version: string) => Promise<void>;
 }) {
   const activeVersion = vessel.profileVersion ?? vessel.sms_active_version;
   const isUpToDate = vessel.profileVersion ? vessel.sms_active_version === vessel.profileVersion : true;
-  const [versionInput, setVersionInput] = useState(String(activeVersion ?? ''));
-  const [saving, setSaving] = useState(false);
+  const versionInput = String(activeVersion ?? '');
 
   return (
     <Modal
