@@ -20,16 +20,6 @@ import type { HydratedTenantRow } from '../store';
 
 export type DemoTenantId = string;
 
-// Real (backend) tenants get a UUID id; the legacy in-memory demo seed
-// tenants used elsewhere in the UI use "T-####" — this distinguishes which
-// ones actually exist as a row in the `tenants` table (and so can be
-// targeted by anything with a real FK to it, e.g. a scoped banner) from
-// the local-only simulated ones.
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-export function isRealTenantId(id: string): boolean {
-  return UUID_RE.test(id);
-}
-
 // ── Tenant getters ──────────────────────────────────────────
 
 export function getDemoTenant(id: string): TenantRow {

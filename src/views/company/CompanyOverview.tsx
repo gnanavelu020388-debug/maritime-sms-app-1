@@ -10,6 +10,7 @@ import { useFeatureFlags, type ModuleKey } from '../../lib/featureFlags';
 import { onSyncEvent } from '../../lib/syncChannel';
 import { refreshTenantData } from '../../lib/dataCache';
 import { formatGb } from '../../constants';
+import { computeStorageStatus } from '../../lib/storageStatus';
 
 export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection) => void }) {
   const { tenant, tenantUser } = useAuth();
@@ -52,6 +53,15 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
     { label: 'Pending Approval', value: stats.pendingDocs, icon: <Clock className="h-5 w-5" />, section: 'sms_dpa' as CompanySection, tone: 'warning', feature: 'sms_documentation' as const },
     { label: 'Approved Docs', value: stats.approvedDocs, icon: <CheckCircle2 className="h-5 w-5" />, section: 'sms_dpa' as CompanySection, tone: 'success', feature: 'sms_documentation' as const },
   ].filter((c) => !('feature' in c && c.feature) || isEnabled(c.feature as ModuleKey));
+
+  // Computed live from used vs. the tenant's current plan limit rather than
+  // trusting tenant.storage_status — that field is a separately cached
+  // value that only gets recomputed by the periodic storage-refresh job, so
+  // it can still say OVER_LIMIT for a few minutes after a plan upgrade
+  // raised storage_gb_max. See src/lib/storageStatus.ts.
+  const storageUsedGb = (tenant?.storage_bytes_used ?? 0) / (1024 ** 3);
+  const storageMaxGb = tenant?.storage_gb_max ?? 0;
+  const liveStorageStatus = computeStorageStatus(storageUsedGb, storageMaxGb);
 
   return (
     <div className="space-y-5">
@@ -102,11 +112,11 @@ export function CompanyOverview({ onNavigate }: { onNavigate: (s: CompanySection
         ))}
       </div>
 
-      {tenant?.storage_status && tenant.storage_status !== 'NORMAL' && (
+      {tenant && liveStorageStatus !== 'NORMAL' && (
         <StorageStatusBanner
-          status={tenant.storage_status}
-          usedGb={(tenant.storage_bytes_used ?? 0) / (1024 ** 3)}
-          maxGb={tenant.storage_gb_max ?? 0}
+          status={liveStorageStatus}
+          usedGb={storageUsedGb}
+          maxGb={storageMaxGb}
         />
       )}
 

@@ -35,11 +35,11 @@ import {
   demoCloneMasterSms,
   getEffectiveDemoUsers,
   hydrateAllTenants,
-  isRealTenantId,
 } from "../lib/demoData";
 import * as api from "../lib/api";
 import { logAudit } from "../lib/audit";
 import { nextPlanUp, upgradeTenantPlan } from "../lib/tenantUpgrade";
+import { detectTenantBreaches } from "../lib/breachDetection";
 
 // Short, human-friendly display code (e.g. "T-0007") for real tenants —
 // the UUID in t.id remains the actual identifier used for every API call
@@ -66,8 +66,7 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
   const [upgradeFor, setUpgradeFor] = useState<Tenant | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<PlanTier>("Professional");
 
-  // Pull real tenants from the backend and merge them into the ledger
-  // alongside the local demo-seed tenants (see isRealTenantId above).
+  // Pull the full tenant ledger from the backend.
   async function hydrateTenants() {
     try {
       await hydrateAllTenants(dispatch);
@@ -84,56 +83,54 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
   async function saveTenant(tenant: Tenant) {
     setSaveError(null);
     if (editing) {
-      if (isRealTenantId(editing.id)) {
-        setSaveBusy(true);
-        try {
-          await api.apiUpdateTenant(editing.id, {
-            company: tenant.company,
-            contact_email: tenant.contactEmail,
-            plan: tenant.plan,
-            status: tenant.status,
-            vessels_max: tenant.vessels.max,
-            seats_max: tenant.seats.max,
-            storage_gb_max: tenant.storageGb.max,
-            monthly_revenue: tenant.monthlyRevenue,
-            mfa_enforced: tenant.mfaEnforced,
-          });
-        } catch (err) {
-          setSaveError((err as Error).message || "Failed to update tenant.");
-          setSaveBusy(false);
-          return;
-        }
-        setSaveBusy(false);
-        await logAudit({
-          tenantId: editing.id,
-          actorEmail: user?.email ?? "super-admin",
-          category: "tenant",
-          action: `Tenant edited: ${tenant.company}`,
-          target: tenant.company,
-          before: {
-            company: editing.company,
-            contact_email: editing.contactEmail,
-            plan: editing.plan,
-            status: editing.status,
-            vessels_max: editing.vessels.max,
-            seats_max: editing.seats.max,
-            storage_gb_max: editing.storageGb.max,
-            monthly_revenue: editing.monthlyRevenue,
-            mfa_enforced: editing.mfaEnforced,
-          },
-          after: {
-            company: tenant.company,
-            contact_email: tenant.contactEmail,
-            plan: tenant.plan,
-            status: tenant.status,
-            vessels_max: tenant.vessels.max,
-            seats_max: tenant.seats.max,
-            storage_gb_max: tenant.storageGb.max,
-            monthly_revenue: tenant.monthlyRevenue,
-            mfa_enforced: tenant.mfaEnforced,
-          },
+      setSaveBusy(true);
+      try {
+        await api.apiUpdateTenant(editing.id, {
+          company: tenant.company,
+          contact_email: tenant.contactEmail,
+          plan: tenant.plan,
+          status: tenant.status,
+          vessels_max: tenant.vessels.max,
+          seats_max: tenant.seats.max,
+          storage_gb_max: tenant.storageGb.max,
+          monthly_revenue: tenant.monthlyRevenue,
+          mfa_enforced: tenant.mfaEnforced,
         });
+      } catch (err) {
+        setSaveError((err as Error).message || "Failed to update tenant.");
+        setSaveBusy(false);
+        return;
       }
+      setSaveBusy(false);
+      await logAudit({
+        tenantId: editing.id,
+        actorEmail: user?.email ?? "super-admin",
+        category: "tenant",
+        action: `Tenant edited: ${tenant.company}`,
+        target: tenant.company,
+        before: {
+          company: editing.company,
+          contact_email: editing.contactEmail,
+          plan: editing.plan,
+          status: editing.status,
+          vessels_max: editing.vessels.max,
+          seats_max: editing.seats.max,
+          storage_gb_max: editing.storageGb.max,
+          monthly_revenue: editing.monthlyRevenue,
+          mfa_enforced: editing.mfaEnforced,
+        },
+        after: {
+          company: tenant.company,
+          contact_email: tenant.contactEmail,
+          plan: tenant.plan,
+          status: tenant.status,
+          vessels_max: tenant.vessels.max,
+          seats_max: tenant.seats.max,
+          storage_gb_max: tenant.storageGb.max,
+          monthly_revenue: tenant.monthlyRevenue,
+          mfa_enforced: tenant.mfaEnforced,
+        },
+      });
       dispatch({ type: "TENANT_UPDATE", id: editing.id, patch: tenant });
       toast({
         tone: "success",
@@ -215,29 +212,27 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
     t: Tenant,
     status: TenantStatus,
   ): Promise<boolean> {
-    if (isRealTenantId(t.id)) {
-      try {
-        await api.apiUpdateTenant(t.id, { status });
-      } catch (err) {
-        toast({
-          tone: "danger",
-          title: "Status update failed",
-          message: (err as Error).message,
-        });
-        return false;
-      }
-      await logAudit({
-        tenantId: t.id,
-        actorEmail: user?.email ?? "super-admin",
-        category: "tenant",
-        action: `Tenant ${status}: ${t.company}`,
-        target: t.company,
-        severity:
-          status === "suspended" || status === "archived" ? "critical" : "info",
-        before: { status: t.status },
-        after: { status },
+    try {
+      await api.apiUpdateTenant(t.id, { status });
+    } catch (err) {
+      toast({
+        tone: "danger",
+        title: "Status update failed",
+        message: (err as Error).message,
       });
+      return false;
     }
+    await logAudit({
+      tenantId: t.id,
+      actorEmail: user?.email ?? "super-admin",
+      category: "tenant",
+      action: `Tenant ${status}: ${t.company}`,
+      target: t.company,
+      severity:
+        status === "suspended" || status === "archived" ? "critical" : "info",
+      before: { status: t.status },
+      after: { status },
+    });
     dispatch({ type: "TENANT_SET_STATUS", id: t.id, status });
     return true;
   }
@@ -341,12 +336,10 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       header: "Assigned Limits",
       width: "min-w-[200px]",
       render: (t) => {
-        const overV = t.vessels.used > t.vessels.max;
-        const overS = t.seats.used > t.seats.max;
-        const overG = t.storageGb.status
-          ? t.storageGb.status === "OVER_LIMIT" ||
-            t.storageGb.status === "LIMIT_REACHED"
-          : t.storageGb.used > t.storageGb.max;
+        const breaches = detectTenantBreaches(t);
+        const overV = breaches.includes("vessels");
+        const overS = breaches.includes("seats");
+        const overG = breaches.includes("storage");
         return (
           <div className="grid grid-cols-3 gap-3 py-0.5">
             <MiniLimit
@@ -762,9 +755,7 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
             // Let a failed backend call throw — CriticalActionWizard catches it,
             // shows the error inline, and returns the wizard to a usable state
             // instead of us leaving it stuck on "Executing…".
-            if (isRealTenantId(deleteTarget.id)) {
-              await api.apiDeleteTenantPermanent(deleteTarget.id);
-            }
+            await api.apiDeleteTenantPermanent(deleteTarget.id);
             await logAudit({
               // No tenantId — the tenant (and its own audit_logs rows, via
               // ON DELETE CASCADE) is already gone by this point, so a

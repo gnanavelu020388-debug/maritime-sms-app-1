@@ -41,17 +41,7 @@ import { LIVE_MODULES, getDisplayName, useModuleDefinitions } from "../lib/featu
 import { ScrollSelect } from "../components/ScrollSelect";
 import * as api from "../lib/api";
 import { nextPlanUp, upgradeTenantPlan } from "../lib/tenantUpgrade";
-
-
-type BreachType = "vessels" | "storage" | "seats";
-
-function detectBreaches(t: Tenant): BreachType[] {
-  const out: BreachType[] = [];
-  if (t.vessels.used > t.vessels.max) out.push("vessels");
-  if (t.storageGb.status === "OVER_LIMIT" || t.storageGb.used > t.storageGb.max) out.push("storage");
-  if (t.seats.used / t.seats.max > 0.9) out.push("seats");
-  return out;
-}
+import { detectTenantBreaches, type BreachType } from "../lib/breachDetection";
 
 export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
   const { tenants, tierConfigs, dispatch, toast } = useStore();
@@ -63,7 +53,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
   const breaches = useMemo(
     () =>
       tenants.filter(
-        (t) => t.status !== "archived" && detectBreaches(t).length > 0,
+        (t) => t.status !== "archived" && detectTenantBreaches(t).length > 0,
       ),
     [tenants],
   );
@@ -72,7 +62,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
     () =>
       breachFilter === "all"
         ? breaches
-        : breaches.filter((t) => detectBreaches(t).includes(breachFilter)),
+        : breaches.filter((t) => detectTenantBreaches(t).includes(breachFilter)),
     [breaches, breachFilter],
   );
 
@@ -108,7 +98,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
         header: "Breaches",
         render: (t) => (
           <div className="flex flex-wrap gap-1">
-            {detectBreaches(t).map((b) => (
+            {detectTenantBreaches(t).map((b) => (
               <BreachPill key={b} type={b} />
             ))}
           </div>
@@ -147,14 +137,14 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
       {
         key: "seats",
         header: "Users",
-        sortValue: (t) => t.seats.used / t.seats.max,
+        sortValue: (t) => t.seats.used - t.seats.max,
         render: (t) => (
           <span
-            className={`text-xs font-bold ${t.seats.used / t.seats.max > 0.9 ? "text-warning-600 dark:text-warning-400" : "text-ink-600 dark:text-ink-300"}`}
+            className={`text-xs font-bold ${t.seats.used > t.seats.max ? "text-danger-600 dark:text-danger-400" : "text-ink-600 dark:text-ink-300"}`}
           >
             {t.seats.used} / {t.seats.max}
-            {t.seats.used / t.seats.max > 0.9 && (
-              <span className="ml-1 text-[10px]">NEAR</span>
+            {t.seats.used > t.seats.max && (
+              <span className="ml-1 text-[10px]">OVER</span>
             )}
           </span>
         ),
@@ -207,7 +197,7 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
 
       <Card
         title="License Compliance — Over-Limit Flagging"
-        subtitle="Tenants exceeding tier limits or approaching seat capacity"
+        subtitle="Tenants exceeding vessel, storage, or seat limits"
         icon={<FileWarning className="h-4 w-4" />}
       >
         <DataTable
@@ -271,23 +261,14 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
   );
 }
 
+// All three breach types mean the same thing now — the tenant is over its
+// assigned plan limit for that parameter — so every pill renders with the
+// same (danger) severity.
 function BreachPill({ type }: { type: BreachType }) {
-  const map: Record<BreachType, { label: string; tone: "danger" | "warning" }> =
-    {
-      vessels: { label: "Vessels", tone: "danger" },
-      storage: { label: "Storage", tone: "danger" },
-      seats: { label: "Users", tone: "warning" },
-    };
-  const { label, tone } = map[type];
+  const labels: Record<BreachType, string> = { vessels: "Vessels", storage: "Storage", seats: "Users" };
   return (
-    <span
-      className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold ${
-        tone === "danger"
-          ? "bg-danger-100 text-danger-700 dark:bg-danger-900/40 dark:text-danger-300"
-          : "bg-warning-100 text-warning-700 dark:bg-warning-900/40 dark:text-warning-300"
-      }`}
-    >
-      {label}
+    <span className="inline-flex items-center gap-1 rounded-full bg-danger-100 px-2 py-0.5 text-[10px] font-bold text-danger-700 dark:bg-danger-900/40 dark:text-danger-300">
+      {labels[type]}
     </span>
   );
 }

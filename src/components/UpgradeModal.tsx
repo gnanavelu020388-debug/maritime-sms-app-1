@@ -94,7 +94,7 @@ export function UpgradeModal({
       size="3xl"
       footer={
         <>
-          <button onClick={onClose} className="btn-secondary">
+          <button onClick={onClose} className="btn-secondary p-2 rounded-md">
             Cancel
           </button>
           <button
@@ -102,7 +102,7 @@ export function UpgradeModal({
               onConfirm(selectedPlan, new Date(contractExpires).toISOString())
             }
             disabled={isNoOp(targetDefs) || !contractExpires}
-            className="btn-primary disabled:cursor-not-allowed disabled:opacity-50"
+            className="btn-primary disabled:cursor-not-allowed disabled:opacity-50 rounded-md flex gap-2 p-2 items-center"
           >
             <TrendingUp className="h-4 w-4" /> Confirm & Upgrade Tier
           </button>

@@ -336,7 +336,7 @@ export function BillingView({ caps }: { caps: Capabilities }) {
                 <th className="px-3 py-1.5 font-semibold">Annual</th>
                 <th className="px-3 py-1.5 font-semibold">Vessels</th>
                 <th className="px-3 py-1.5 font-semibold">Storage (GB)</th>
-                <th className="px-3 py-1.5 font-semibold">Seats</th>
+                <th className="px-3 py-1.5 font-semibold">Users</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-ink-100 dark:divide-ink-800">

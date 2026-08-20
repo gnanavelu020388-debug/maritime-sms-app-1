@@ -2,6 +2,7 @@ import { Router } from 'express';
 import { v4 as uuidv4 } from 'uuid';
 import pool from '../db.js';
 import { authMiddleware, requireSuperAdmin } from '../middleware/auth.js';
+import { refreshTenantStorage } from '../jobs/refreshStorageUsage.js';
 
 const router = Router();
 
@@ -93,7 +94,15 @@ router.put('/:tenantId', authMiddleware, async (req, res) => {
     if (sets.length === 0) return res.json({ error: 'No fields to update' });
     vals.push(req.params.tenantId);
     await pool.query(`UPDATE tenants SET ${sets.join(', ')} WHERE id = ?`, vals);
-    const [rows] = await pool.query('SELECT * FROM tenants WHERE id = ?', [req.params.tenantId]);
+    // Changing the plan's storage limit makes the cached OVER_LIMIT/WARNING/
+    // NORMAL verdict in tenant_storage_cache stale — it was computed against
+    // the old limit and otherwise only gets recomputed by the periodic Cloud
+    // Scheduler job. Recompute it inline here so a plan upgrade/downgrade is
+    // reflected immediately instead of waiting for the next scheduled run.
+    if (req.body.storage_gb_max !== undefined) {
+      await refreshTenantStorage(req.params.tenantId);
+    }
+    const [rows] = await pool.query(`${TENANTS_WITH_STORAGE_SQL} WHERE t.id = ?`, [req.params.tenantId]);
     return res.json(parseTenant(rows[0]));
   } catch (err) { console.error(err); return res.status(500).json({ error: 'Database error' }); }
 });

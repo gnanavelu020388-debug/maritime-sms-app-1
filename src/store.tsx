@@ -20,6 +20,7 @@ import type {
 import { SUPER_ADMIN_ID, SUPER_ADMIN_NAME, uid, DEFAULT_TIER_CONFIGS, SYSTEM_ROLES } from './constants';
 import { onSyncEvent, type SyncEvent } from './lib/syncChannel';
 import { AUDIT_LOCAL_EVENT } from './lib/audit';
+import { computeStorageStatus } from './lib/storageStatus';
 import type {
   TenantRow,
   AuditLogRow,
@@ -191,11 +192,32 @@ const initialState: State = {
   theme: loadStoredTheme(),
 };
 
-function applyTierLimits(tenants: Tenant[], tierConfigs: TierConfig[], planFor?: { id: string; plan: PlanTier }): Tenant[] {
+// Applies a newly-selected plan's limits to ONE tenant only — the one being
+// upgraded (see TENANT_SET_PLAN below). Plan limits are a deliberate
+// snapshot copied onto a tenant's own row at upgrade time, not a live
+// pointer into the SaaS Tier Constructor (server/routes/platformSettings.js
+// documents the same rule server-side): editing a tier's template, or
+// upgrading one tenant, must never change what any *other* tenant is
+// currently displaying/entitled to. Every other tenant is returned
+// untouched, on purpose.
+function applyPlanUpgrade(tenants: Tenant[], tierConfigs: TierConfig[], target: { id: string; plan: PlanTier }): Tenant[] {
   return tenants.map((t) => {
-    const plan = planFor && planFor.id === t.id ? planFor.plan : t.plan;
-    const cfg = tierConfigs.find((c) => c.name === plan) ?? { name: plan, vessels: t.vessels.max, seats: t.seats.max, storageGb: t.storageGb.max, monthly: t.monthlyRevenue, annual: 0 };
-    return { ...t, plan, vessels: { ...t.vessels, max: cfg.vessels || t.vessels.max }, seats: { ...t.seats, max: cfg.seats || t.seats.max }, storageGb: { ...t.storageGb, max: cfg.storageGb || t.storageGb.max }, monthlyRevenue: cfg.monthly || t.monthlyRevenue };
+    if (t.id !== target.id) return t;
+    const cfg = tierConfigs.find((c) => c.name === target.plan) ?? { name: target.plan, vessels: t.vessels.max, seats: t.seats.max, storageGb: t.storageGb.max, monthly: t.monthlyRevenue, annual: 0 };
+    const storageMax = cfg.storageGb || t.storageGb.max;
+    const storageUsed = t.storageGb.used;
+    return {
+      ...t, plan: target.plan,
+      vessels: { ...t.vessels, max: cfg.vessels || t.vessels.max },
+      seats: { ...t.seats, max: cfg.seats || t.seats.max },
+      storageGb: {
+        ...t.storageGb, max: storageMax,
+        status: computeStorageStatus(storageUsed, storageMax),
+        remaining: Math.max(0, storageMax - storageUsed),
+        percentage: storageMax > 0 ? Math.round((storageUsed / storageMax) * 1000) / 10 : 0,
+      },
+      monthlyRevenue: cfg.monthly || t.monthlyRevenue,
+    };
   });
 }
 
@@ -264,12 +286,16 @@ function reducer(state: State, action: Action): State {
       return { ...state, tenants: [...merged, ...newOnes], isTenantsLoading: false };
     }
     case 'AUDIT_HYDRATE': return { ...state, audit: action.rows.map(mapAuditRow) };
+    // Deliberately does NOT touch state.tenants — a tenant's own limits are
+    // a snapshot taken at upgrade time (see applyPlanUpgrade above), so
+    // refreshing the Tier Constructor's template values here must never
+    // retroactively change what any tenant is currently showing.
     case 'TIER_CONFIGS_HYDRATE': {
       if (action.rows.length === 0) return state;
       const tierConfigs: TierConfig[] = action.rows.map((r) => ({
         name: r.name as PlanTier, monthly: r.monthly, annual: r.annual, vessels: r.vessels, storageGb: r.storage_gb, seats: r.seats,
       }));
-      return { ...state, tierConfigs, tenants: applyTierLimits(state.tenants, tierConfigs) };
+      return { ...state, tierConfigs };
     }
     case 'INVOICES_HYDRATE': return { ...state, invoices: action.rows.map(mapInvoiceRow) };
     case 'BACKUPS_HYDRATE': return { ...state, backups: action.rows.map(mapBackupRow) };
@@ -288,7 +314,7 @@ function reducer(state: State, action: Action): State {
     case 'TENANT_UPDATE': return { ...state, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, ...action.patch } : t)) };
     case 'TENANT_SET_STATUS': return { ...state, tenants: state.tenants.map((t) => (t.id === action.id ? { ...t, status: action.status } : t)) };
     case 'TENANT_DELETE': return { ...state, tenants: state.tenants.filter((x) => x.id !== action.id), backups: state.backups.filter((b) => b.tenantId !== action.id) };
-    case 'TENANT_SET_PLAN': return { ...state, tenants: applyTierLimits(state.tenants, state.tierConfigs, { id: action.id, plan: action.plan }) };
+    case 'TENANT_SET_PLAN': return { ...state, tenants: applyPlanUpgrade(state.tenants, state.tierConfigs, { id: action.id, plan: action.plan }) };
     case 'TENANT_TOGGLE_MODULE': { const tenant = state.tenants.find((t) => t.id === action.id); const has = tenant?.modules.includes(action.module); const next = pushAudit(state, { category: 'tenant', action: `Module ${has ? 'revoked' : 'granted'}: ${action.module}`, target: tenant?.company ?? action.id, companyId: action.id, ip: '10.42.1.8', scope: 'tenant', severity: 'info' }); return { ...next, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, modules: has ? t.modules.filter((m) => m !== action.module) : [...t.modules, action.module] } : t) }; }
     case 'TENANT_TOGGLE_MODULE_REMOTE': return { ...state, tenants: state.tenants.map((t) => t.id === action.id ? { ...t, modules: action.enabled ? t.modules.includes(action.module) ? t.modules : [...t.modules, action.module] : t.modules.filter((m) => m !== action.module) } : t) };
     // Fires on every keystroke while editing the tier constructor — logging

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   Building2, Ship, Wifi, WifiOff, HardDrive, DollarSign, TrendingUp, TrendingDown,
-  Megaphone, Radio, Gauge, ArrowUpRight, Server, Loader2, X, Pencil, Check,
+  Megaphone, Radio, Gauge, ArrowUpRight, Server, Loader2, X, Pencil, Check, ShieldAlert,
 } from 'lucide-react';
 import { Card } from '../components/Card';
 import { ProgressBar } from '../components/ProgressBar';
@@ -11,9 +11,10 @@ import { useAuth } from '../lib/auth';
 import { formatCurrency, formatGb, formatNumber, relativeTime } from '../constants';
 import type { Capabilities } from '../lib/permissions';
 import * as api from '../lib/api';
-import { isRealTenantId, getEffectiveDemoVessels } from '../lib/demoData';
+import { getEffectiveDemoVessels } from '../lib/demoData';
 import { mapBannerRow } from '../components/MaintenanceBanner';
 import { logAudit } from '../lib/audit';
+import { detectTenantBreaches } from '../lib/breachDetection';
 import type { MaintenanceBanner as BannerData } from '../types';
 
 interface VesselSyncStateRow {
@@ -71,8 +72,6 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
     return () => { cancelled = true; };
   }, [dateRange]);
 
-  const realTenants = useMemo(() => tenants.filter((t) => isRealTenantId(t.id)), [tenants]);
-
   async function loadActiveBanners() {
     setBannersLoading(true);
     try {
@@ -93,7 +92,7 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
     try {
       const tenantId = targetTenantId || null;
       await api.apiPublishBanner(bannerText.trim(), severity, tenantId);
-      const targetCompany = realTenants.find((t) => t.id === tenantId)?.company;
+      const targetCompany = tenants.find((t) => t.id === tenantId)?.company;
       await logAudit({
         tenantId: tenantId ?? undefined,
         actorEmail: user?.email ?? 'super-admin',
@@ -192,6 +191,18 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
     return { activeTenants, totalTenants: tenants.length, totalShips, totalUsers, totalStorageUsed, totalStorageMax, revenue, activePlanTiers, onlineShips, offlineShips };
   }, [tenants, platformStorage, vesselSyncStates]);
 
+  // Platform-wide breach summary for the Data Breach KPI card — any
+  // non-archived company breaching any parameter (vessels, storage, seats;
+  // see detectTenantBreaches for the shared per-parameter definitions).
+  const platformBreaches = useMemo(() => {
+    const breaching = tenants
+      .filter((t) => t.status !== 'archived')
+      .map((t) => detectTenantBreaches(t))
+      .filter((types) => types.length > 0);
+    const types = new Set(breaching.flat());
+    return { companies: breaching.length, types };
+  }, [tenants]);
+
   const rangeMs = { '24h': 24, '7d': 7 * 24, '30d': 30 * 24 }[dateRange] * 60 * 60 * 1000;
 
   const rangeAudit = useMemo(() => {
@@ -199,21 +210,17 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
     return audit.filter((e) => new Date(e.ts).getTime() >= cutoff);
   }, [audit, rangeMs]);
 
-  // New-activity counts for the KPI trend badges, scoped to the selected
-  // range. Built only from realTenants (genuine DB-backed rows, see
-  // isRealTenantId) — the local-only simulated tenants mixed into `tenants`
-  // for UI padding don't have meaningful creation activity to report, and
-  // counting them would fabricate growth that didn't happen.
+  // New-activity counts for the KPI trend badges, scoped to the selected range.
   const rangeGrowth = useMemo(() => {
     const cutoff = Date.now() - rangeMs;
-    const newTenants = realTenants.filter((t) => new Date(t.createdAt).getTime() >= cutoff);
-    const newVessels = realTenants.reduce(
+    const newTenants = tenants.filter((t) => new Date(t.createdAt).getTime() >= cutoff);
+    const newVessels = tenants.reduce(
       (sum, t) => sum + getEffectiveDemoVessels(t.id).filter((v) => new Date(v.created_at).getTime() >= cutoff).length,
       0,
     );
     const newMrr = newTenants.reduce((sum, t) => sum + t.monthlyRevenue, 0);
     return { newTenants: newTenants.length, newVessels, newMrr };
-  }, [realTenants, rangeMs]);
+  }, [tenants, rangeMs]);
 
   const rangeLabel = dateRange === '24h' ? '24 hours' : dateRange === '7d' ? '7 days' : '30 days';
 
@@ -282,13 +289,22 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
           tone="warning"
         />
         <KpiCard
+          icon={<ShieldAlert className="h-5 w-5" />}
+          label="Data Breach"
+          value={platformBreaches.companies > 0 ? `${platformBreaches.companies} ${platformBreaches.companies === 1 ? 'Company' : 'Companies'}` : 'All Clear'}
+          sub={platformBreaches.companies > 0
+            ? [...platformBreaches.types].map((t) => t[0].toUpperCase() + t.slice(1)).join(' · ')
+            : 'No compliance breaches platform-wide'}
+          tone={platformBreaches.companies > 0 ? 'danger' : 'success'}
+        />
+        {/* <KpiCard
           icon={<DollarSign className="h-5 w-5" />}
           label="Subscription Revenue"
           value={formatCurrency(kpis.revenue)}
           sub={`Monthly recurring · ${kpis.activePlanTiers} tier${kpis.activePlanTiers === 1 ? '' : 's'} active`}
           trend={{ dir: 'up', text: `+${formatCurrency(rangeGrowth.newMrr)} MRR in ${rangeLabel}` }}
           tone="success"
-        />
+        /> */}
       </div>
 
       <div className="grid grid-cols-1 gap-6">
@@ -345,7 +361,7 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
                     onChange={(e) => setTargetTenantId(e.target.value)}
                   >
                     <option value="">Platform-wide (all companies)</option>
-                    {realTenants.map((t) => (
+                    {tenants.map((t) => (
                       <option key={t.id} value={t.id}>{t.company}</option>
                     ))}
                   </select>
@@ -384,7 +400,7 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
                   className="btn-primary w-full flex justify-center items-center gap-2 px-3 py-2 rounded-lg disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {publishBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Megaphone className="h-4 w-4" />}
-                  {targetTenantId ? `Publish to ${realTenants.find((t) => t.id === targetTenantId)?.company ?? 'company'}` : 'Publish platform-wide'}
+                  {targetTenantId ? `Publish to ${tenants.find((t) => t.id === targetTenantId)?.company ?? 'company'}` : 'Publish platform-wide'}
                 </button>
               </div>
             ) : (
@@ -478,30 +494,25 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
           </div>
         </Card>
 
-        <Card title="License Compliance Snapshot" subtitle="Tenants near or over quota" icon={<TrendingUp className="h-4 w-4" />}>
+        <Card title="License Compliance Snapshot" subtitle="Tenants over quota" icon={<TrendingUp className="h-4 w-4" />}>
           <div className="space-y-3">
             {tenants.map((t) => {
-              const overVessels = t.vessels.used > t.vessels.max;
-              const overStorage = t.storageGb.status
-                ? t.storageGb.status === 'OVER_LIMIT' || t.storageGb.status === 'LIMIT_REACHED'
-                : t.storageGb.used > t.storageGb.max;
-              const nearSeats = t.seats.used / t.seats.max > 0.9;
-              if (!overVessels && !overStorage && !nearSeats) return null;
+              const breaches = detectTenantBreaches(t);
+              if (breaches.length === 0) return null;
+              const labels: Record<typeof breaches[number], string> = { vessels: 'Vessels over limit', storage: 'Storage breach', seats: 'Seats over limit' };
               return (
                 <div key={t.id} className="flex items-center justify-between rounded-lg border border-ink-200/70 p-3 dark:border-ink-800">
                   <div>
                     <p className="text-sm font-semibold text-ink-900 dark:text-white">{t.company}</p>
-                    <p className="text-xs text-ink-500">
-                      {overVessels && <span className="text-danger-600 dark:text-danger-400">Vessels over limit · </span>}
-                      {overStorage && <span className="text-danger-600 dark:text-danger-400">Storage breach · </span>}
-                      {nearSeats && <span className="text-warning-600 dark:text-warning-400">Seats near cap</span>}
+                    <p className="text-xs text-danger-600 dark:text-danger-400">
+                      {breaches.map((b) => labels[b]).join(' · ')}
                     </p>
                   </div>
-                  <Badge tone={overVessels || overStorage ? 'danger' : 'warning'}>Breach Warning</Badge>
+                  <Badge tone="danger">Breach Warning</Badge>
                 </div>
               );
             })}
-            {tenants.every((t) => t.vessels.used <= t.vessels.max && t.storageGb.used <= t.storageGb.max && t.seats.used / t.seats.max <= 0.9) && (
+            {tenants.every((t) => detectTenantBreaches(t).length === 0) && (
               <p className="py-6 text-center text-sm text-ink-400">All tenants within license limits.</p>
             )}
           </div>
