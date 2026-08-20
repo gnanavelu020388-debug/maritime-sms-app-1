@@ -6,7 +6,6 @@ import {
   Server, Lock, Building2, RotateCcw, ExternalLink, CircleDot, Building, UserCircle,
 } from 'lucide-react';
 import { ThemeToggle } from './ThemeToggle';
-import { NetworkStatusBadge } from './NetworkStatusBadge';
 import { SECTIONS } from '../constants';
 import { useStore } from '../store';
 import { relativeTime } from '../constants';
@@ -172,7 +171,6 @@ export function Topbar({
           />
         </div>
 
-        <NetworkStatusBadge />
         <ThemeToggle />
       </div>
     </header>
