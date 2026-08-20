@@ -119,12 +119,16 @@ export function VesselsView() {
   }
 
   async function confirmDelete(v: VesselRow) {
-    await demoDeleteVessel(tenant!.id, v.id);
-    await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel deleted: ${v.name} (IMO ${v.imo_number})`, target: v.imo_number, location: v.name, severity: 'critical' });
-    postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_deleted', vesselId: v.id } });
-    postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_deleted', vesselId: v.id } });
-    setDeleteFor(null);
-    await load();
+    try {
+      await demoDeleteVessel(tenant!.id, v.id);
+      await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Vessel deleted: ${v.name} (IMO ${v.imo_number})`, target: v.imo_number, location: v.name, severity: 'critical' });
+      postSyncEvent({ type: 'VESSELS_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_deleted', vesselId: v.id } });
+      postSyncEvent({ type: 'PROFILES_UPDATED', tenantId: tenant!.id, payload: { action: 'vessel_deleted', vesselId: v.id } });
+      setDeleteFor(null);
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to delete vessel', false);
+    }
   }
 
   const columns: Column<FleetRow>[] = [
@@ -588,6 +592,12 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
   const [ashorePool, setAshorePool] = useState<TenantUserRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
+  const [toast, setToast] = useState<{ msg: string; ok: boolean } | null>(null);
+
+  function showToast(msg: string, ok: boolean) {
+    setToast({ msg, ok });
+    setTimeout(() => setToast(null), 5000);
+  }
 
   async function loadManning() {
     if (!tenant) return;
@@ -624,33 +634,51 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
   async function handleSignOff(row: ManningCrew) {
     if (!row.assignment) return;
     setBusy(row.user.id);
-    await demoSignOff(tenant!.id, row.assignment.id);
-    await logAudit({
-      tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew',
-      action: `Sign-Off: ${row.user.name} (${row.assignment.rank}) from ${vessel.name}`,
-      target: row.user.email, location: vessel.name, severity: 'warning',
-    });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_off', userId: row.user.id, vessel: vessel.name } });
-    setBusy(null);
-    onChanged();
-    await loadManning();
+    try {
+      await demoSignOff(tenant!.id, row.assignment.id);
+      await logAudit({
+        tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew',
+        action: `Sign-Off: ${row.user.name} (${row.assignment.rank}) from ${vessel.name}`,
+        target: row.user.email, location: vessel.name, severity: 'warning',
+      });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_off', userId: row.user.id, vessel: vessel.name } });
+      onChanged();
+      await loadManning();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to sign off crew member', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function handleSignOn(user: TenantUserRow) {
     setBusy(user.id);
-    await demoSignOn(tenant!.id, user.id, vessel.id, user.rank);
-    await logAudit({
-      tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew',
-      action: `Sign-On: ${user.name} → ${user.rank} on ${vessel.name}`,
-      target: user.email, location: vessel.name,
-    });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_on', userId: user.id, vessel: vessel.name, rank: user.rank } });
-    setBusy(null);
-    onChanged();
-    await loadManning();
+    try {
+      await demoSignOn(tenant!.id, user.id, vessel.id, user.rank);
+      await logAudit({
+        tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew',
+        action: `Sign-On: ${user.name} → ${user.rank} on ${vessel.name}`,
+        target: user.email, location: vessel.name,
+      });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_on', userId: user.id, vessel: vessel.name, rank: user.rank } });
+      onChanged();
+      await loadManning();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to sign on crew member', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   return (
+    <>
+    {toast && (
+      <div
+        className={`fixed right-6 top-20 z-[60] flex items-center gap-2 rounded-lg px-4 py-3 text-sm font-semibold shadow-lg ${toast.ok ? 'bg-success-500 text-white' : 'bg-danger-500 text-white'}`}
+      >
+        {toast.msg}
+      </div>
+    )}
     <Modal
       open onClose={onClose}
       title="Officers & Crew On Board"
@@ -744,6 +772,7 @@ function VesselManningDrawer({ vessel, onClose, onChanged }: {
         </div>
       )}
     </Modal>
+    </>
   );
 }
 

@@ -63,6 +63,7 @@ import {
   apiDownloadFileAsBlobUrl,
   ApiFileError,
 } from "../lib/api";
+import { useAuth } from "../lib/auth";
 import { Modal } from "../components/Modal";
 import { Badge } from "../components/Badge";
 
@@ -199,16 +200,15 @@ export function SmsLibrarySplitView({
   authorRole = null,
   authorOrigin = null,
 }: SmsLibrarySplitViewProps) {
+  const { previewReadOnly } = useAuth();
   const canEdit =
     !readOnly && canDo(rankPermissions, "sms_documentation" as AppId, "edit");
   const canUpload =
     !readOnly && canDo(rankPermissions, "sms_documentation" as AppId, "upload");
   const canCreate = canEdit || canUpload;
-  const canPrint = canDo(
-    rankPermissions,
-    "sms_documentation" as AppId,
-    "print",
-  );
+  const canPrint =
+    !previewReadOnly &&
+    canDo(rankPermissions, "sms_documentation" as AppId, "print");
   const fleetScope = useFleetScope();
   const [roots, setRoots] = useState<TreeNode[]>([]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -1464,17 +1464,19 @@ export function SmsLibrarySplitView({
           size="full"
           scrollable
           actions={
-            <button
-              onClick={() => {
-                const realUrl = pdfBlobUrls.get(previewDoc.id) ?? (isGcsPath(previewDoc.content) ? previewSignedUrl : null);
-                if (previewDoc.content_kind === "pdf" && realUrl) window.open(realUrl, "_blank");
-                else openDocInNewTab(previewDoc);
-              }}
-              className="flex items-center gap-1.5 rounded-lg border border-ink-200 px-2.5 py-1.5 text-xs font-semibold text-ink-600 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 dark:border-ink-700 dark:text-ink-300 dark:hover:border-primary-600 dark:hover:bg-primary-900/30 dark:hover:text-primary-300"
-              title="Open in New Tab"
-            >
-              <ExternalLink className="h-4 w-4" /> Open in New Tab
-            </button>
+            !previewReadOnly && (
+              <button
+                onClick={() => {
+                  const realUrl = pdfBlobUrls.get(previewDoc.id) ?? (isGcsPath(previewDoc.content) ? previewSignedUrl : null);
+                  if (previewDoc.content_kind === "pdf" && realUrl) window.open(realUrl, "_blank");
+                  else openDocInNewTab(previewDoc);
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-ink-200 px-2.5 py-1.5 text-xs font-semibold text-ink-600 transition-colors hover:border-primary-300 hover:bg-primary-50 hover:text-primary-600 dark:border-ink-700 dark:text-ink-300 dark:hover:border-primary-600 dark:hover:bg-primary-900/30 dark:hover:text-primary-300"
+                title="Open in New Tab"
+              >
+                <ExternalLink className="h-4 w-4" /> Open in New Tab
+              </button>
+            )
           }
           footer={
             <div className="flex w-full items-center justify-end gap-3">
@@ -1586,6 +1588,14 @@ export function SmsLibrarySplitView({
                   ? "(rejected)"
                   : "awaiting approval"}
                 .
+              </p>
+            </div>
+          ) : previewReadOnly ? (
+            <div className="flex flex-col items-center gap-3 py-12">
+              <FileText className="h-12 w-12 text-danger-400" />
+              <p className="text-sm font-semibold text-danger-600 dark:text-danger-300">Document access isn't available</p>
+              <p className="max-w-xs text-center text-xs text-danger-400">
+                Document content can't be opened during a read-only Super Admin preview.
               </p>
             </div>
           ) : previewDoc.content_kind === "pdf" ? (

@@ -1,6 +1,6 @@
 import { useState, useEffect, type ReactNode } from 'react';
 import {
-  LayoutDashboard, Ship, FileText, Library, Users, Shield, LogOut, Anchor, Menu, X, KeyRound, Grid3x3,
+  LayoutDashboard, Ship, FileText, Library, Users, Shield, LogOut, Anchor, Menu, X, KeyRound, Grid3x3, ShieldAlert, Eye,
 } from 'lucide-react';
 import { useAuth } from '../lib/auth';
 import { roleLabel } from '../lib/auth-utils';
@@ -33,18 +33,23 @@ function useCompanyNav(): { id: CompanySection; label: string; icon: ReactNode; 
 }
 
 export function CompanyShell({ children, active }: { children: ReactNode; active: CompanySection }) {
-  const { user, role, tenant, tenantUser, signOut } = useAuth();
+  const { user, role, tenant, tenantUser, signOut, previewReadOnly } = useAuth();
   const { isEnabled } = useFeatureFlags(tenant?.id);
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
+    // A read-only preview window has no real tenant session to register —
+    // it's the Super Admin's own JWT viewing another tenant's data.
+    if (previewReadOnly) return;
     broadcastSecurityTenant(tenant?.id);
-  }, [tenant?.id]);
+  }, [tenant?.id, previewReadOnly]);
 
   const navItems = useCompanyNav();
   const items = navItems.filter((n) => role && n.roles.includes(role) && (!n.feature || isEnabled(n.feature)));
 
   function handleSignOut() {
+    // In a read-only preview window, useAuth().signOut() closes this window
+    // instead of clearing the shared token — see auth.tsx.
     signOut();
   }
 
@@ -60,7 +65,13 @@ export function CompanyShell({ children, active }: { children: ReactNode; active
           </div>
           <div className="min-w-0">
             <p className="truncate text-sm font-bold text-ink-900 dark:text-white">{tenant?.company ?? 'Company'}</p>
-            <p className="truncate text-[10px] text-ink-400">{(role === 'company_admin' || role === 'dpa') && tenantUser?.rank ? resolveShoreRoleName(tenantUser.rank) : roleLabel(role!)}</p>
+            <p className="truncate text-[10px] text-ink-400">
+              {previewReadOnly
+                ? 'Super Admin · Read-Only Preview'
+                : (role === 'company_admin' || role === 'dpa') && tenantUser?.rank
+                  ? resolveShoreRoleName(tenantUser.rank)
+                  : roleLabel(role!)}
+            </p>
           </div>
         </div>
         <nav className="flex flex-col gap-1 p-3">
@@ -84,6 +95,30 @@ export function CompanyShell({ children, active }: { children: ReactNode; active
       {open && <div className="fixed inset-0 z-30 bg-black/40 lg:hidden" onClick={() => setOpen(false)} />}
 
       <div className="flex min-w-0 flex-1 flex-col">
+        {previewReadOnly && (
+          <div className="flex flex-col gap-2 bg-danger-600 px-4 py-2.5 text-white shadow-elev-3 sm:flex-row sm:items-center sm:gap-4">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-widest opacity-90">
+              <ShieldAlert className="h-4 w-4" />
+              Read-Only Preview
+            </div>
+            <div className="hidden h-4 w-px bg-white/30 sm:block" />
+            <div className="flex flex-1 items-center gap-2 text-sm">
+              <Eye className="h-4 w-4 opacity-80" />
+              <span>
+                Inspecting{' '}
+                <span className="font-bold underline decoration-white/40 decoration-2 underline-offset-2">{tenant?.company}</span>
+                {' '}as Super Admin — changes cannot be saved and documents cannot be opened.
+              </span>
+            </div>
+            <button
+              onClick={() => window.close()}
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3 py-1.5 text-xs font-bold text-danger-700 shadow-sm hover:bg-danger-50"
+            >
+              <X className="h-3.5 w-3.5" />
+              Close Preview
+            </button>
+          </div>
+        )}
         <MaintenanceBanner />
         <ReconnectionBanner />
         <header className="flex h-16 items-center justify-between border-b border-ink-100 bg-white px-4 dark:border-ink-800 dark:bg-ink-900">
@@ -107,7 +142,7 @@ export function CompanyShell({ children, active }: { children: ReactNode; active
             <div className="text-right">
               <p className="text-xs font-semibold text-ink-800 dark:text-white">{user?.email}</p>
             </div>
-            <button onClick={handleSignOut} className="rounded-lg p-2 text-ink-500 hover:bg-danger-50 hover:text-danger-600 dark:hover:bg-danger-900/30" title="Sign Out">
+            <button onClick={handleSignOut} className="rounded-lg p-2 text-ink-500 hover:bg-danger-50 hover:text-danger-600 dark:hover:bg-danger-900/30" title={previewReadOnly ? 'Close Preview Window' : 'Sign Out'}>
               <LogOut className="h-4 w-4" />
             </button>
           </div>

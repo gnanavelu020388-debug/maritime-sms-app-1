@@ -220,12 +220,6 @@ export interface MaintenanceBanner {
   tenantCompany?: string | null;
 }
 
-export interface ImpersonationState {
-  active: boolean;
-  tenantId: string | null;
-  startedAt: string | null;
-}
-
 export type SectionId =
   | 'dashboard'
   | 'tenants'

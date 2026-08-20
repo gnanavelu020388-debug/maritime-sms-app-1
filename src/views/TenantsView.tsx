@@ -238,38 +238,27 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
   }
 
   function loginAsTenant(t: Tenant) {
-    const demoTenantId = t.demoTenantId;
-    if (demoTenantId) {
-      const params = new URLSearchParams();
-      params.set("view", "company");
-      params.set("tenant", demoTenantId);
-      window.open(
-        `${window.location.pathname}?${params.toString()}`,
-        "maritime_company",
-        "width=1100,height=800,scrollbars=1",
-      );
-      toast({
-        tone: "info",
-        title: "Opening Company Admin",
-        message: `Switching to ${t.company} workspace in a new window.`,
-      });
-    } else {
-      dispatch({ type: "IMPERSONATE_START", tenantId: t.id });
-      void logAudit({
-        tenantId: t.id,
-        actorEmail: user?.email ?? "super-admin",
-        category: "impersonation",
-        action: `Login As — impersonation started: ${t.company}`,
-        target: t.contactEmail,
-        severity: "critical",
-        after: { impersonating: true, tenant: t.company },
-      });
-      toast({
-        tone: "info",
-        title: "Impersonation started",
-        message: `Simulating session as ${t.company} Admin (Read-Only Audit Mode).`,
-      });
-    }
+    const params = new URLSearchParams();
+    params.set("previewTenant", t.id);
+    window.open(
+      `${window.location.pathname}?${params.toString()}`,
+      "maritime_company_preview",
+      "width=1280,height=860,scrollbars=1",
+    );
+    void logAudit({
+      tenantId: t.id,
+      actorEmail: user?.email ?? "super-admin",
+      category: "impersonation",
+      action: `Login As — read-only Company Admin preview opened: ${t.company}`,
+      target: t.contactEmail,
+      severity: "critical",
+      after: { inspecting: true, tenant: t.company },
+    });
+    toast({
+      tone: "info",
+      title: "Opening read-only Company Admin portal",
+      message: `Inspecting ${t.company}'s Company Admin portal in a new window (read-only — changes and document opens are disabled).`,
+    });
   }
 
   // Master Tenant Ledger filter toggle: Active/Trial vs Archived.

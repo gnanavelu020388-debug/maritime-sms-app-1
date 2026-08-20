@@ -4,7 +4,6 @@ import type {
   AuditEvent,
   BackupSnapshot,
   ErrorLog,
-  ImpersonationState,
   InternalUser,
   Invoice,
   MaintenanceBanner,
@@ -144,7 +143,6 @@ interface State {
   systemRoles: SshRole[];
   errorLogs: ErrorLog[];
   maintenance: MaintenanceBanner | null;
-  impersonation: ImpersonationState;
   globalMfaEnforced: boolean;
   globalGuardrails: TenantGuardrails;
   smsSnapshots: SmsSnapshot[];
@@ -167,7 +165,7 @@ type Action =
   | { type: 'INVOICE_ADD'; invoice: Invoice } | { type: 'USER_RESET_PASSWORD'; id: string } | { type: 'USER_LOCK_TOGGLE'; id: string; user?: InternalUser }
   | { type: 'USER_INVITE'; user: InternalUser } | { type: 'USER_EDIT'; id: string; name: string; email: string; role: InternalUser['role'] }
   | { type: 'USER_DELETE'; id: string; mode: 'soft' | 'hard' } | { type: 'MFA_GLOBAL_TOGGLE'; enforced: boolean } | { type: 'MFA_GLOBAL_HYDRATE'; enforced: boolean }
-  | { type: 'IMPERSONATE_START'; tenantId: string } | { type: 'IMPERSONATE_END' } | { type: 'AUDIT_ADD'; event: AuditEvent }
+  | { type: 'AUDIT_ADD'; event: AuditEvent }
   | { type: 'TENANT_FREEZE'; id: string; frozen: boolean } | { type: 'TENANT_ROLLBACK'; snapshotId: string }
   | { type: 'GUARDRAILS_UPDATE'; id: string; patch: Partial<TenantGuardrails> } | { type: 'GUARDRAILS_GLOBAL_UPDATE'; patch: Partial<TenantGuardrails> };
 
@@ -186,7 +184,6 @@ const initialState: State = {
   audit: [], invoices: [], backups: [],
   internalUsers: [], systemRoles: SYSTEM_ROLES, errorLogs: [],
   maintenance: null, // populated by MaintenanceBanner's poll against the real backend
-  impersonation: { active: false, tenantId: null, startedAt: null },
   globalMfaEnforced: true, globalGuardrails: { workspaceFrozen: false, maxSubfolderDepth: 4, maxUploadSizeMb: 50 },
   smsSnapshots: [], toasts: [],
   theme: loadStoredTheme(),
@@ -348,10 +345,6 @@ function reducer(state: State, action: Action): State {
     // just updates local state without also fabricating a local entry.
     case 'MFA_GLOBAL_TOGGLE': return { ...state, globalMfaEnforced: action.enforced };
     case 'MFA_GLOBAL_HYDRATE': return { ...state, globalMfaEnforced: action.enforced };
-    // Real logAudit() calls now happen at the call sites (TenantsView.tsx
-    // start, ImpersonationOverlay.tsx end) — see the comment above.
-    case 'IMPERSONATE_START': return { ...state, impersonation: { active: true, tenantId: action.tenantId, startedAt: new Date().toISOString() } };
-    case 'IMPERSONATE_END': return { ...state, impersonation: { active: false, tenantId: null, startedAt: null } };
     // Real backend action (tenants.workspace_frozen / max_subfolder_depth /
     // max_upload_size_mb, enforced server-side — see smsDocuments.js and
     // files.js) — the caller (SmsView.tsx) awaits the real API write and

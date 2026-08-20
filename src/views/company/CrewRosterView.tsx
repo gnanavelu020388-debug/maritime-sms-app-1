@@ -198,66 +198,96 @@ export function CrewRosterView() {
   // ── Actions ────────────────────────────────────────────────────────
   async function approveSignOn(u: TenantUserRow, vessel: VesselRow) {
     setBusy(u.id);
-    await demoSetUserStatus(tenant!.id, u.id, 'active');
-    await demoSignOn(tenant!.id, u.id, vessel.id, u.rank);
-    await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Sign-On Approved: ${u.name} → ${u.rank} on ${vessel.name}`, target: u.email, location: vessel.name });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_on_approved', userId: u.id, vessel: vessel.name } });
-    setBusy(null);
-    await load();
+    try {
+      await demoSetUserStatus(tenant!.id, u.id, 'active');
+      await demoSignOn(tenant!.id, u.id, vessel.id, u.rank);
+      await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Sign-On Approved: ${u.name} → ${u.rank} on ${vessel.name}`, target: u.email, location: vessel.name });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_on_approved', userId: u.id, vessel: vessel.name } });
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to approve sign-on.', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function signOff(r: PersonnelRow) {
     if (!r.assignment) return;
     setBusy(r.user.id);
-    await demoSignOff(tenant!.id, r.assignment.id);
-    await demoSetUserStatus(tenant!.id, r.user.id, 'active');
-    await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Sign-Off: ${r.user.name} from ${r.vesselName}`, target: r.user.email, location: r.vesselName ?? '', severity: 'warning' });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_off', userId: r.user.id, vessel: r.vesselName } });
-    setBusy(null);
-    await load();
+    try {
+      await demoSignOff(tenant!.id, r.assignment.id);
+      await demoSetUserStatus(tenant!.id, r.user.id, 'active');
+      await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'crew', action: `Sign-Off: ${r.user.name} from ${r.vesselName}`, target: r.user.email, location: r.vesselName ?? '', severity: 'warning' });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'sign_off', userId: r.user.id, vessel: r.vesselName } });
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to sign off crew member.', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function toggleLock(u: TenantUserRow) {
     setLockBusy(u.id);
     const isLocked = u.status === 'locked';
     const next = isLocked ? 'active' : 'locked';
-    await demoSetUserStatus(tenant!.id, u.id, next);
-    await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `${isLocked ? 'Unlocked' : 'Locked'}: ${u.name}`, target: u.email, severity: isLocked ? 'info' : 'warning' });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'status_change', userId: u.id } });
-    setLockBusy(null);
-    await load();
+    try {
+      await demoSetUserStatus(tenant!.id, u.id, next);
+      await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `${isLocked ? 'Unlocked' : 'Locked'}: ${u.name}`, target: u.email, severity: isLocked ? 'info' : 'warning' });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'status_change', userId: u.id } });
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to update lock status.', false);
+    } finally {
+      setLockBusy(null);
+    }
   }
 
   async function confirmDeactivate(u: TenantUserRow) {
     setBusy(u.id);
-    await demoDeactivateUser(tenant!.id, u.id);
-    await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `Account deactivated: ${u.name} (${u.email})`, target: u.email, severity: 'warning' });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'deactivated', userId: u.id } });
-    setBusy(null);
-    setDeactivateFor(null);
-    await load();
+    try {
+      await demoDeactivateUser(tenant!.id, u.id);
+      await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `Account deactivated: ${u.name} (${u.email})`, target: u.email, severity: 'warning' });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'deactivated', userId: u.id } });
+      setDeactivateFor(null);
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to deactivate account.', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function confirmDelete(u: TenantUserRow) {
     setBusy(u.id);
-    await demoDeleteUser(tenant!.id, u.id);
-    await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `User PERMANENTLY DELETED: ${u.name} (${u.email})`, target: u.email, severity: 'critical' });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'deleted', userId: u.id } });
-    setBusy(null);
-    setDeleteFor(null);
-    showToast(`${u.name} has been permanently deleted from the system.`, true);
-    await load();
+    try {
+      await demoDeleteUser(tenant!.id, u.id);
+      await logAudit({ tenantId: tenant!.id, actorEmail: tenantUser!.email, category: 'security', action: `User PERMANENTLY DELETED: ${u.name} (${u.email})`, target: u.email, severity: 'critical' });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant!.id, payload: { action: 'deleted', userId: u.id } });
+      setDeleteFor(null);
+      showToast(`${u.name} has been permanently deleted from the system.`, true);
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to delete user.', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   async function saveEdit(data: { name: string; email: string; employee_id: string | null; rank: Rank; status: string }) {
     if (!editing || !tenant) return;
     setBusy(editing.id);
-    await demoUpdateUserProfile(tenant.id, editing.id, { name: data.name, email: data.email, employee_id: data.employee_id, rank: data.rank, status: data.status });
-    await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'security', action: `User edited: ${data.name}`, target: data.email });
-    postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant.id, payload: { action: 'edited', name: data.name } });
-    setBusy(null);
-    setEditing(null);
-    await load();
+    try {
+      await demoUpdateUserProfile(tenant.id, editing.id, { name: data.name, email: data.email, employee_id: data.employee_id, rank: data.rank, status: data.status });
+      await logAudit({ tenantId: tenant.id, actorEmail: tenantUser!.email, category: 'security', action: `User edited: ${data.name}`, target: data.email });
+      postSyncEvent({ type: 'CREW_UPDATED', tenantId: tenant.id, payload: { action: 'edited', name: data.name } });
+      setEditing(null);
+      await load();
+    } catch (err) {
+      showToast((err as Error).message || 'Failed to save changes.', false);
+    } finally {
+      setBusy(null);
+    }
   }
 
   function showToast(msg: string, ok: boolean) {

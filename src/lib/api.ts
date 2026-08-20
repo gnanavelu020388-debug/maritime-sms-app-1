@@ -14,6 +14,22 @@ export { getToken, setToken, clearToken };
 
 const WRITE_METHODS = new Set(['POST', 'PUT', 'DELETE', 'PATCH']);
 
+// Set by AuthProvider when a Super Admin is inspecting a tenant's Company
+// Admin portal read-only (the "Login As" popup — see TenantsView.tsx). While
+// active, every write is rejected client-side before it reaches the network,
+// and document content is never fetched — this is the enforcement point for
+// both guarantees, rather than trying to disable every button individually.
+let readOnlyPreview = false;
+
+export function setReadOnlyPreview(active: boolean): void {
+  readOnlyPreview = active;
+}
+
+const READ_ONLY_PREVIEW_MESSAGE =
+  'This is a read-only preview — changes cannot be saved while inspecting a tenant as Super Admin.';
+const READ_ONLY_PREVIEW_DOCUMENT_MESSAGE =
+  "Document access isn't available during impersonation.";
+
 function getNetworkMode(): 'online' | 'offline' {
   const fn = (window as unknown as Record<string, unknown>).__networkMode as (() => 'online' | 'offline') | undefined;
   return fn ? fn() : 'online';
@@ -37,6 +53,10 @@ async function request<T>(
 
   const method = (options.method || 'GET').toUpperCase();
   const mode = getNetworkMode();
+
+  if (readOnlyPreview && WRITE_METHODS.has(method)) {
+    throw new Error(READ_ONLY_PREVIEW_MESSAGE);
+  }
 
   // In offline mode, queue writes and throw a gentle error so the UI
   // can show "saved locally" feedback. Reads still hit the local server.
@@ -456,6 +476,7 @@ export class ApiFileError extends Error {
 }
 
 export async function apiUploadFile(tenantId: string, docId: string, file: File): Promise<{ gcsUri: string; fileName: string; contentType: string; size: number }> {
+  if (readOnlyPreview) throw new ApiFileError(READ_ONLY_PREVIEW_MESSAGE);
   const formData = new FormData();
   formData.append('file', file);
   formData.append('tenantId', tenantId);
@@ -474,6 +495,7 @@ export async function apiUploadFile(tenantId: string, docId: string, file: File)
 }
 
 export async function apiGetSignedUrl(filePath: string): Promise<string> {
+  if (readOnlyPreview) throw new Error(READ_ONLY_PREVIEW_DOCUMENT_MESSAGE);
   const res = await request<{ url: string }>(`/files/signed-url?filePath=${encodeURIComponent(filePath)}`);
   return res.url;
 }
@@ -483,6 +505,7 @@ export async function apiGetSignedUrl(filePath: string): Promise<string> {
 // authenticated API instead of a direct GCS URL, and hands back a local
 // blob: URL the caller can use exactly like a signed URL.
 export async function apiDownloadFileAsBlobUrl(filePath: string): Promise<string> {
+  if (readOnlyPreview) throw new ApiFileError(READ_ONLY_PREVIEW_DOCUMENT_MESSAGE);
   const token = getToken();
   const res = await fetch(`${getApiBase()}/files/download?filePath=${encodeURIComponent(filePath)}`, {
     headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },

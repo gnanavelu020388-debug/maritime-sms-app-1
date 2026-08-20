@@ -49,6 +49,15 @@ export interface AuthState {
   sessionConflict: boolean;
   rankPermissions: RankPermissionMap | null;
   mustChangePassword: boolean;
+  // True when a Super Admin opened this window via the Tenants "Login As"
+  // popup (?previewTenant=<id> in the URL) to inspect a tenant's Company
+  // Admin portal read-only. See api.ts's setReadOnlyPreview() for how writes
+  // and document opens are actually blocked while this is true.
+  previewReadOnly: boolean;
+}
+
+function getPreviewTenantId(): string | null {
+  return new URLSearchParams(window.location.search).get('previewTenant');
 }
 
 export interface AuthContextValue extends AuthState {
@@ -123,6 +132,7 @@ function resolveRoleAndTenant(
   | "internalRole"
   | "adminName"
   | "rankPermissions"
+  | "previewReadOnly"
 > {
   // Super admin
   if (email === "admin@maritime-platform.io" || uid === "local-sa") {
@@ -134,6 +144,7 @@ function resolveRoleAndTenant(
       tenantUser: null,
       activeAssignment: null,
       rankPermissions: null,
+      previewReadOnly: false,
     };
   }
 
@@ -153,6 +164,7 @@ function resolveRoleAndTenant(
       tenantUser: null,
       activeAssignment: null,
       rankPermissions: null,
+      previewReadOnly: false,
     };
   }
 
@@ -166,6 +178,7 @@ function resolveRoleAndTenant(
       tenantUser: null,
       activeAssignment: null,
       rankPermissions: null,
+      previewReadOnly: false,
     };
   }
 
@@ -205,6 +218,7 @@ function resolveRoleAndTenant(
     tenantUser,
     activeAssignment,
     rankPermissions,
+    previewReadOnly: false,
   };
 }
 
@@ -227,11 +241,40 @@ async function resolveFromApi(userObj: {
     | "internalRole"
     | "adminName"
     | "rankPermissions"
+    | "previewReadOnly"
   >
 > {
   // If server provided a role, prefer that and fetch tenant data when available
   try {
     if (userObj.role === "super_admin") {
+      // "Login As" (TenantsView.tsx) opens this window at
+      // ?previewTenant=<id> — the Super Admin's own JWT already has
+      // cross-tenant read/write access server-side (see requireTenantAccess
+      // in server/middleware/auth.js), so we just fetch that tenant's row
+      // and present the real Company Admin portal for it, locally relabeled
+      // as role "company_admin" so CompanyShell's nav and App.tsx's router
+      // treat it exactly like a real company admin session would. Nothing
+      // is actually granted here — writes are blocked centrally in api.ts
+      // via setReadOnlyPreview(), driven by the previewReadOnly flag below.
+      const previewTenantId = getPreviewTenantId();
+      if (previewTenantId) {
+        try {
+          const tenant = await api.apiGetTenant<TenantRow>(previewTenantId);
+          return {
+            role: "company_admin",
+            internalRole: (userObj.internalRole as InternalRole | undefined) ?? "super_admin",
+            adminName: `${userObj.adminName ?? userObj.name ?? "Super Admin"} (Read-Only Preview)`,
+            tenant,
+            tenantUser: null,
+            activeAssignment: null,
+            rankPermissions: null,
+            previewReadOnly: true,
+          };
+        } catch {
+          // Tenant fetch failed (bad id, network) — fall back to the
+          // normal Super Admin console rather than a broken preview.
+        }
+      }
       return {
         role: "super_admin",
         internalRole: (userObj.internalRole as InternalRole | undefined) ?? "super_admin",
@@ -240,6 +283,7 @@ async function resolveFromApi(userObj: {
         tenantUser: null,
         activeAssignment: null,
         rankPermissions: null,
+        previewReadOnly: false,
       };
     }
     if (userObj.tenant_id) {
@@ -309,6 +353,7 @@ async function resolveFromApi(userObj: {
           tenantUser,
           activeAssignment,
           rankPermissions,
+          previewReadOnly: false,
         };
       } catch {
         // fall through to demo resolution
@@ -325,6 +370,7 @@ async function resolveFromApi(userObj: {
     tenantUser: null,
     activeAssignment: null,
     rankPermissions: null,
+    previewReadOnly: false,
   };
 }
 
@@ -345,6 +391,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     sessionConflict: false,
     rankPermissions: null,
     mustChangePassword: false,
+    previewReadOnly: false,
   });
 
   // Registered so api.ts's request() can drop the app back to the login
@@ -353,6 +400,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const handleAuthExpired = () => {
       clearFeatureFlagCache();
+      api.setReadOnlyPreview(false);
       setState({
         user: null,
         session: null,
@@ -368,6 +416,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         sessionConflict: false,
         rankPermissions: null,
         mustChangePassword: false,
+        previewReadOnly: false,
       });
     };
     (window as unknown as Record<string, unknown>).__mpcAuthExpired = handleAuthExpired;
@@ -393,6 +442,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
       // prefer server-provided role/tenant information when available
       const resolved = await resolveFromApi(res.user);
+      api.setReadOnlyPreview(resolved.previewReadOnly);
       const user = buildUser(res.user.id, res.user.email);
       const session = buildSession(user, api.getToken() ?? "");
       const token = await registerNewSessionToken(res.user.id);
@@ -434,6 +484,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const resolved =
           (await resolveFromApi(res.user)) ??
           resolveRoleAndTenant(res.user.id, res.user.email);
+        api.setReadOnlyPreview(resolved.previewReadOnly);
         const user = buildUser(res.user.id, res.user.email);
         const session = buildSession(user, token);
         const sessionToken = await registerNewSessionToken(res.user.id);
@@ -470,6 +521,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const resolved =
       (await resolveFromApi(apiUser)) || resolveRoleAndTenant(uid, apiUser.email);
+    api.setReadOnlyPreview(resolved.previewReadOnly);
     const user = buildUser(uid, apiUser.email);
     const session = buildSession(user, token);
     const sessionToken = await registerNewSessionToken(uid);
@@ -582,11 +634,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   const signOut = async () => {
+    // A read-only preview window (Super Admin "Login As") shares its auth
+    // token with the Super Admin's real main window via localStorage —
+    // clearing it here (from an inactivity timeout, a session conflict, or
+    // the Sign Out button) would log the real session out too. There's
+    // nothing real to sign out of in a preview, so just close the window.
+    if (state.previewReadOnly) {
+      window.close();
+      return;
+    }
     clearFeatureFlagCache();
     if (state.user) {
       await clearSessionToken(state.user.id);
     }
     api.clearToken();
+    api.setReadOnlyPreview(false);
     clearQueue();
     setState({
       user: null,
@@ -603,6 +665,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       sessionConflict: false,
       rankPermissions: null,
       mustChangePassword: false,
+      previewReadOnly: false,
     });
   };
 

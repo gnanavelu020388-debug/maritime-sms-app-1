@@ -298,31 +298,36 @@ export function SmsDpaView() {
   async function approveOne(doc: SmsDocRow) {
     if (!tenant) return;
     setApprovingId(doc.id);
-    await demoApproveSmsDoc(tenant.id, doc.id);
-    const versionSuffix = activeProfile ? ` (${activeProfile.name} v${activeProfile.version})` : "";
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `DPA approved & deployed: ${doc.label}${versionSuffix}`,
-      target: doc.tree_kind,
-      location: tenant.company,
-      severity: "warning",
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: {
-        action: "approved",
-        docId: doc.id,
-        label: doc.label,
-        version: activeProfile?.version ?? null,
-      },
-    });
-    setApprovingId(null);
-    await loadTree();
-    await loadAllPending();
-    await loadAllCounts();
+    try {
+      await demoApproveSmsDoc(tenant.id, doc.id);
+      const versionSuffix = activeProfile ? ` (${activeProfile.name} v${activeProfile.version})` : "";
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `DPA approved & deployed: ${doc.label}${versionSuffix}`,
+        target: doc.tree_kind,
+        location: tenant.company,
+        severity: "warning",
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: {
+          action: "approved",
+          docId: doc.id,
+          label: doc.label,
+          version: activeProfile?.version ?? null,
+        },
+      });
+      await loadTree();
+      await loadAllPending();
+      await loadAllCounts();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to approve document.", false);
+    } finally {
+      setApprovingId(null);
+    }
   }
 
   async function loadProfilesList() {
@@ -385,44 +390,52 @@ export function SmsDpaView() {
 
   async function handleCreateProfile(name: string) {
     if (!tenant || !name.trim()) return;
-    await createProfile(tenant.id, name.trim());
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Created SMS Fleet Profile: ${name.trim()}`,
-      target: "sms_profile",
-      location: tenant.company,
-    });
-    postSyncEvent({
-      type: "PROFILES_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "created", name: name.trim() },
-    });
-    await loadProfilesList();
-    setCreateProfileOpen(false);
+    try {
+      await createProfile(tenant.id, name.trim());
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Created SMS Fleet Profile: ${name.trim()}`,
+        target: "sms_profile",
+        location: tenant.company,
+      });
+      postSyncEvent({
+        type: "PROFILES_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "created", name: name.trim() },
+      });
+      await loadProfilesList();
+      setCreateProfileOpen(false);
+    } catch (err) {
+      showToast((err as Error).message || "Failed to create SMS Fleet Profile.", false);
+    }
   }
 
   async function handleDeleteProfile() {
     if (!tenant || !deleteProfileTarget) return;
-    await deleteProfile(tenant.id, deleteProfileTarget.id);
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Deleted SMS Fleet Profile: ${deleteProfileTarget.name}`,
-      target: "sms_profile",
-      location: tenant.company,
-      severity: "warning",
-    });
-    postSyncEvent({
-      type: "PROFILES_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "deleted", profileId: deleteProfileTarget.id },
-    });
-    if (activeProfileId === deleteProfileTarget.id) setActiveProfileId(null);
-    setDeleteProfileTarget(null);
-    await loadProfilesList();
+    try {
+      await deleteProfile(tenant.id, deleteProfileTarget.id);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Deleted SMS Fleet Profile: ${deleteProfileTarget.name}`,
+        target: "sms_profile",
+        location: tenant.company,
+        severity: "warning",
+      });
+      postSyncEvent({
+        type: "PROFILES_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "deleted", profileId: deleteProfileTarget.id },
+      });
+      if (activeProfileId === deleteProfileTarget.id) setActiveProfileId(null);
+      setDeleteProfileTarget(null);
+      await loadProfilesList();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to delete SMS Fleet Profile.", false);
+    }
   }
 
   const toggle = (id: string) =>
@@ -453,122 +466,145 @@ export function SmsDpaView() {
     const currentId = inlineEditId;
     cancelInlineEdit();
     if (!trimmed || trimmed === node.label || !currentId || !tenant) return;
-    await demoRenameSmsDoc(tenant.id, node.id, trimmed);
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Renamed: ${node.label} → ${trimmed}`,
-      target: treeKind,
-      location: tenant.company,
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "renamed", nodeId: node.id, label: trimmed },
-    });
-    await loadTree();
-  }
-
-  async function confirmDeleteNode() {
-    if (!deleteFor || !tenant) return;
-    await demoRequestDeleteSmsDoc(tenant.id, deleteFor.id);
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Requested deletion (pending DPA review): ${deleteFor.label}`,
-      target: treeKind,
-      location: tenant.company,
-      severity: "warning",
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: {
-        action: "delete_requested",
-        nodeId: deleteFor.id,
-        label: deleteFor.label,
-      },
-    });
-    setDeleteFor(null);
-    await loadTree();
-    await loadAllCounts();
-    await loadCustomTabs();
-    await loadAllPending();
-  }
-
-  async function approveDeleteOne(doc: SmsDocRow) {
-    if (!tenant) return;
-    setApprovingDeleteId(doc.id);
-    await demoApproveDeleteSmsDoc(tenant.id, doc.id);
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `DPA approved deletion: ${doc.label}`,
-      target: doc.tree_kind,
-      location: tenant.company,
-      severity: "warning",
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "delete_approved", docId: doc.id, label: doc.label },
-    });
-    setApprovingDeleteId(null);
-    await loadTree();
-    await loadAllPending();
-    await loadAllCounts();
-    await loadCustomTabs();
-  }
-
-  async function cancelDeleteRequest(doc: SmsDocRow) {
-    if (!tenant) return;
-    setCancelingDeleteId(doc.id);
-    await demoRejectDeleteSmsDoc(tenant.id, doc.id);
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Deletion request withdrawn/rejected: ${doc.label}`,
-      target: doc.tree_kind,
-      location: tenant.company,
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "delete_rejected", docId: doc.id, label: doc.label },
-    });
-    setCancelingDeleteId(null);
-    await loadTree();
-    await loadAllPending();
-  }
-
-  async function approveAll() {
-    if (!tenant) return;
-    setApproving(true);
-    const count = await demoApproveAllSmsDocs(tenant.id);
-    if (count > 0) {
-      const versionSuffix = activeProfile ? ` (${activeProfile.name} v${activeProfile.version})` : "";
+    try {
+      await demoRenameSmsDoc(tenant.id, node.id, trimmed);
       await logAudit({
         tenantId: tenant.id,
         actorEmail: tenantUser!.email,
         category: "sms",
-        action: `DPA approval — ${count} documents approved${versionSuffix}`,
-        target: `${count} documents`,
+        action: `Renamed: ${node.label} → ${trimmed}`,
+        target: treeKind,
+        location: tenant.company,
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "renamed", nodeId: node.id, label: trimmed },
+      });
+      await loadTree();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to rename.", false);
+    }
+  }
+
+  async function confirmDeleteNode() {
+    if (!deleteFor || !tenant) return;
+    try {
+      await demoRequestDeleteSmsDoc(tenant.id, deleteFor.id);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Requested deletion (pending DPA review): ${deleteFor.label}`,
+        target: treeKind,
         location: tenant.company,
         severity: "warning",
       });
       postSyncEvent({
         type: "SMS_UPDATED",
         tenantId: tenant.id,
-        payload: { action: "approve_all", version: activeProfile?.version ?? null, count },
+        payload: {
+          action: "delete_requested",
+          nodeId: deleteFor.id,
+          label: deleteFor.label,
+        },
       });
+      setDeleteFor(null);
+      await loadTree();
+      await loadAllCounts();
+      await loadCustomTabs();
+      await loadAllPending();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to request deletion.", false);
     }
-    setApproving(false);
-    await loadTree();
-    await loadAllPending();
+  }
+
+  async function approveDeleteOne(doc: SmsDocRow) {
+    if (!tenant) return;
+    setApprovingDeleteId(doc.id);
+    try {
+      await demoApproveDeleteSmsDoc(tenant.id, doc.id);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `DPA approved deletion: ${doc.label}`,
+        target: doc.tree_kind,
+        location: tenant.company,
+        severity: "warning",
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "delete_approved", docId: doc.id, label: doc.label },
+      });
+      await loadTree();
+      await loadAllPending();
+      await loadAllCounts();
+      await loadCustomTabs();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to approve deletion.", false);
+    } finally {
+      setApprovingDeleteId(null);
+    }
+  }
+
+  async function cancelDeleteRequest(doc: SmsDocRow) {
+    if (!tenant) return;
+    setCancelingDeleteId(doc.id);
+    try {
+      await demoRejectDeleteSmsDoc(tenant.id, doc.id);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Deletion request withdrawn/rejected: ${doc.label}`,
+        target: doc.tree_kind,
+        location: tenant.company,
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "delete_rejected", docId: doc.id, label: doc.label },
+      });
+      await loadTree();
+      await loadAllPending();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to withdraw deletion request.", false);
+    } finally {
+      setCancelingDeleteId(null);
+    }
+  }
+
+  async function approveAll() {
+    if (!tenant) return;
+    setApproving(true);
+    try {
+      const count = await demoApproveAllSmsDocs(tenant.id);
+      if (count > 0) {
+        const versionSuffix = activeProfile ? ` (${activeProfile.name} v${activeProfile.version})` : "";
+        await logAudit({
+          tenantId: tenant.id,
+          actorEmail: tenantUser!.email,
+          category: "sms",
+          action: `DPA approval — ${count} documents approved${versionSuffix}`,
+          target: `${count} documents`,
+          location: tenant.company,
+          severity: "warning",
+        });
+        postSyncEvent({
+          type: "SMS_UPDATED",
+          tenantId: tenant.id,
+          payload: { action: "approve_all", version: activeProfile?.version ?? null, count },
+        });
+      }
+      await loadTree();
+      await loadAllPending();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to approve all documents.", false);
+    } finally {
+      setApproving(false);
+    }
   }
 
   const [versionEditOpen, setVersionEditOpen] = useState(false);
@@ -633,40 +669,48 @@ export function SmsDpaView() {
       .toLowerCase()
       .replace(/[^a-z0-9]+/g, "_")
       .slice(0, 40)}_${Date.now().toString().slice(-4)}`;
-    await createDemoCustomTab(
-      tenant.id,
-      key,
-      label.trim(),
-      "Custom document group",
-    );
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Tab created: ${label.trim()}`,
-      target: key,
-      location: tenant.company,
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "tab_created", label: label.trim() },
-    });
-    await loadCustomTabs();
-    setAddTabOpen(false);
-    setTreeKind(key);
+    try {
+      await createDemoCustomTab(
+        tenant.id,
+        key,
+        label.trim(),
+        "Custom document group",
+      );
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Tab created: ${label.trim()}`,
+        target: key,
+        location: tenant.company,
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "tab_created", label: label.trim() },
+      });
+      await loadCustomTabs();
+      setAddTabOpen(false);
+      setTreeKind(key);
+    } catch (err) {
+      showToast((err as Error).message || "Failed to create tab.", false);
+    }
   }
 
   async function renameCustomTab(key: string, label: string) {
     if (!tenant || !label.trim()) return;
-    await renameDemoCustomTab(tenant.id, key, label.trim());
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "tab_renamed", key, label: label.trim() },
-    });
-    await loadCustomTabs();
-    setRenameTabKey(null);
+    try {
+      await renameDemoCustomTab(tenant.id, key, label.trim());
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "tab_renamed", key, label: label.trim() },
+      });
+      await loadCustomTabs();
+      setRenameTabKey(null);
+    } catch (err) {
+      showToast((err as Error).message || "Failed to rename tab.", false);
+    }
   }
 
   async function deleteCustomTab(key: string) {
@@ -674,23 +718,27 @@ export function SmsDpaView() {
     const docs = getEffectiveDemoSmsDocs(tenant.id, key);
     if (docs.length > 0) return;
     const label = customTabs[key]?.label ?? key;
-    await deleteDemoCustomTab(tenant.id, key);
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Tab deleted: ${label}`,
-      target: key,
-      location: tenant.company,
-      severity: "warning",
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "tab_deleted", key },
-    });
-    setDeleteTabKey(null);
-    await loadCustomTabs();
+    try {
+      await deleteDemoCustomTab(tenant.id, key);
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Tab deleted: ${label}`,
+        target: key,
+        location: tenant.company,
+        severity: "warning",
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "tab_deleted", key },
+      });
+      setDeleteTabKey(null);
+      await loadCustomTabs();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to delete tab.", false);
+    }
   }
 
   const activeTab = tabs.find((t) => t.key === treeKind);
@@ -710,35 +758,39 @@ export function SmsDpaView() {
       }
     }
     setFolderDepthError("");
-    await demoCreateSmsDoc(tenant.id, {
-      parent_id: addFolderFor.parentId,
-      tree_kind: treeKind,
-      label,
-      node_kind: "folder",
-      content_kind: null,
-      content: null,
-      profile_id: activeProfile?.id,
-    });
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Created folder: ${label}`,
-      target: treeKind,
-      location: tenant.company,
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "added", label, kind: "folder" },
-    });
-    // Auto-expand parent so the new subfolder is immediately visible as nested
-    if (addFolderFor.parentId)
-      setExpanded((s) => new Set(s).add(addFolderFor.parentId!));
-    setAddFolderFor(null);
-    await loadTree();
-    await loadAllCounts();
-    await loadAllPending();
+    try {
+      await demoCreateSmsDoc(tenant.id, {
+        parent_id: addFolderFor.parentId,
+        tree_kind: treeKind,
+        label,
+        node_kind: "folder",
+        content_kind: null,
+        content: null,
+        profile_id: activeProfile?.id,
+      });
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Created folder: ${label}`,
+        target: treeKind,
+        location: tenant.company,
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "added", label, kind: "folder" },
+      });
+      // Auto-expand parent so the new subfolder is immediately visible as nested
+      if (addFolderFor.parentId)
+        setExpanded((s) => new Set(s).add(addFolderFor.parentId!));
+      setAddFolderFor(null);
+      await loadTree();
+      await loadAllCounts();
+      await loadAllPending();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to create folder.", false);
+    }
   }
 
   async function handleAddDocument(
@@ -878,29 +930,33 @@ export function SmsDpaView() {
 
   async function handleRestoreVersion(node: TreeNode, revision: number) {
     if (!tenant) return;
-    const restored = await restoreDocumentVersion(tenant.id, node.id, revision);
-    if (!restored) {
-      showToast("Failed to restore version.", false);
-      return;
+    try {
+      const restored = await restoreDocumentVersion(tenant.id, node.id, revision);
+      if (!restored) {
+        showToast("Failed to restore version.", false);
+        return;
+      }
+      await logAudit({
+        tenantId: tenant.id,
+        actorEmail: tenantUser!.email,
+        category: "sms",
+        action: `Restored ${node.label} to version ${restored.version_label}`,
+        target: treeKind,
+        location: tenant.company,
+        severity: "warning",
+      });
+      postSyncEvent({
+        type: "SMS_UPDATED",
+        tenantId: tenant.id,
+        payload: { action: "edited", nodeId: node.id, label: node.label },
+      });
+      showToast(`Restored ${node.label} to ${restored.version_label}.`, true);
+      setVersionsFor(null);
+      await loadTree();
+      await loadAllPending();
+    } catch (err) {
+      showToast((err as Error).message || "Failed to restore version.", false);
     }
-    await logAudit({
-      tenantId: tenant.id,
-      actorEmail: tenantUser!.email,
-      category: "sms",
-      action: `Restored ${node.label} to version ${restored.version_label}`,
-      target: treeKind,
-      location: tenant.company,
-      severity: "warning",
-    });
-    postSyncEvent({
-      type: "SMS_UPDATED",
-      tenantId: tenant.id,
-      payload: { action: "edited", nodeId: node.id, label: node.label },
-    });
-    showToast(`Restored ${node.label} to ${restored.version_label}.`, true);
-    setVersionsFor(null);
-    await loadTree();
-    await loadAllPending();
   }
 
   function renderNode(node: TreeNode, depth: number): React.ReactNode {
@@ -1794,6 +1850,7 @@ function DocumentPreview({
 }) {
   const [signedUrl, setSignedUrl] = useState<string | null>(null);
   const [signedUrlError, setSignedUrlError] = useState(false);
+  const { previewReadOnly } = useAuth();
   const hasRealFile = node.content_kind === "pdf" && isGcsPath(node.content);
 
   useEffect(() => {
@@ -1847,30 +1904,44 @@ function DocumentPreview({
           <button onClick={onClose} className="btn-secondary">
             Close
           </button>
-          <button
-            onClick={() =>
-              hasRealFile && signedUrl
-                ? window.open(signedUrl, "_blank")
-                : openInNewTab(node)
-            }
-            className="btn-secondary"
-          >
-            <ExternalLink className="h-4 w-4" /> Open in New Tab
-          </button>
-          <button
-            onClick={() =>
-              hasRealFile && signedUrl
-                ? window.open(signedUrl, "_blank")?.print()
-                : printDoc(node)
-            }
-            className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
-          >
-            <Printer className="h-4 w-4" /> Print Document
-          </button>
+          {!previewReadOnly && (
+            <>
+              <button
+                onClick={() =>
+                  hasRealFile && signedUrl
+                    ? window.open(signedUrl, "_blank")
+                    : openInNewTab(node)
+                }
+                className="btn-secondary"
+              >
+                <ExternalLink className="h-4 w-4" /> Open in New Tab
+              </button>
+              <button
+                onClick={() =>
+                  hasRealFile && signedUrl
+                    ? window.open(signedUrl, "_blank")?.print()
+                    : printDoc(node)
+                }
+                className="flex items-center gap-2 rounded-lg bg-blue-600 px-4 py-2 font-medium text-white shadow-sm transition-colors hover:bg-blue-700"
+              >
+                <Printer className="h-4 w-4" /> Print Document
+              </button>
+            </>
+          )}
         </div>
       }
     >
-      {node.content_kind === "pdf" ? (
+      {previewReadOnly ? (
+        <div className="flex flex-col items-center justify-center rounded-lg border-2 border-dashed border-danger-200 bg-danger-50/50 py-16 dark:border-danger-800 dark:bg-danger-900/10">
+          <AlertTriangle className="h-10 w-10 text-danger-400" />
+          <p className="mt-3 text-sm font-semibold text-danger-600 dark:text-danger-300">
+            Document access isn't available
+          </p>
+          <p className="mt-1 max-w-xs text-center text-xs text-danger-400">
+            Document content can't be opened during a read-only Super Admin preview.
+          </p>
+        </div>
+      ) : node.content_kind === "pdf" ? (
         <div className="space-y-3">
           <div className="flex items-center gap-2 rounded-lg bg-warning-50 px-3 py-2 text-xs text-warning-700 dark:bg-warning-900/20 dark:text-warning-300">
             <FileText className="h-4 w-4 shrink-0" />
