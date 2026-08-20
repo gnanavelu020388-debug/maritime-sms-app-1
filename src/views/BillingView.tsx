@@ -29,6 +29,7 @@ import type { Invoice, InvoiceLineItem, Tenant, TierConfig } from "../types";
 import type { Capabilities } from "../lib/permissions";
 import { useAuth } from "../lib/auth";
 import {
+  isOfflineQueued,
   apiCreateInvoice,
   apiUpdateTenant,
   apiUpdateTierConfig,
@@ -566,6 +567,11 @@ export function BillingView({ caps }: { caps: Capabilities }) {
                                       contact_email: pendingEmail,
                                     });
                                   } catch (err) {
+                                    if (isOfflineQueued(err)) {
+                                      toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+                                      setEditEmailFor(null);
+                                      return;
+                                    }
                                     toast({
                                       tone: "danger",
                                       title: "Failed to save recipient email",
@@ -806,6 +812,11 @@ export function BillingView({ caps }: { caps: Capabilities }) {
                     });
                     setEmailPreview(null);
                   } catch (err) {
+                    if (isOfflineQueued(err)) {
+                      toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+                      setEmailPreview(null);
+                      return;
+                    }
                     toast({
                       tone: "danger",
                       title: "Failed to log reminder",
@@ -906,6 +917,13 @@ export function BillingView({ caps }: { caps: Capabilities }) {
                         contact_email: "",
                       });
                     } catch (err) {
+                      if (isOfflineQueued(err)) {
+                        toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+                        setDeleteFor(null);
+                        setDeleteTyped("");
+                        setDeleteStep(1);
+                        return;
+                      }
                       toast({
                         tone: "danger",
                         title: "Failed to remove configuration",

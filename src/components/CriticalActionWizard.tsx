@@ -4,6 +4,8 @@ import {
 } from 'lucide-react';
 import { Modal } from './Modal';
 import { ProgressBar } from './ProgressBar';
+import { useStore } from '../store';
+import { isOfflineQueued } from '../lib/api';
 
 export interface CriticalTarget {
   kind: 'Tenant' | 'Staff Account' | 'Document Tree / Folder' | 'Backup Snapshot' | 'SMS Tree Snapshot';
@@ -34,6 +36,7 @@ interface Props {
 const STEP_LABELS = ['Verify', 'Acknowledge', 'Confirm', 'Execute'] as const;
 
 export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }: Props) {
+  const { toast } = useStore();
   const [step, setStep] = useState<1 | 2 | 3 | 4>(1);
   const [acks, setAcks] = useState<boolean[]>(() => target.acknowledgements.map(() => false));
   const [typed, setTyped] = useState('');
@@ -61,9 +64,20 @@ export function CriticalActionWizard({ target, actorEmail, onClose, onExecute }:
       await onExecute(payload);
       // On success the parent is expected to unmount this component.
     } catch (err) {
-      // If onExecute throws (e.g. the backend call failed), fall back to the
-      // confirmation step instead of leaving the wizard stuck on "Executing…"
-      // with no way to close it.
+      // Offline: the delete is safely queued, not rejected — close like a
+      // normal completion instead of falling back to the confirm step with
+      // an "Action failed" banner that would misrepresent what happened
+      // (and contradict its own "Saved locally" text). The item won't
+      // actually disappear until the queue flushes, which the toast says.
+      if (isOfflineQueued(err)) {
+        toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+        setExecuting(false);
+        onClose();
+        return;
+      }
+      // If onExecute throws for a real reason (e.g. the backend call
+      // failed), fall back to the confirmation step instead of leaving the
+      // wizard stuck on "Executing…" with no way to close it.
       setExecuting(false);
       setStep(3);
       setExecError((err as Error)?.message || 'Action failed. Please try again.');

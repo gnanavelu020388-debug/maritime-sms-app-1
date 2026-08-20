@@ -7,7 +7,7 @@ import { type TenantUserRow, type Rank } from '../../lib/supabase';
 import { getEffectiveDemoUsers, getEffectiveDemoAssignments } from '../../lib/demoData';
 import { logAudit } from '../../lib/audit';
 import { postSyncEvent } from '../../lib/syncChannel';
-import { apiEmergencyResetUserPassword } from '../../lib/api';
+import { apiEmergencyResetUserPassword, isOfflineQueued } from '../../lib/api';
 
 export function EmergencyControlsPanel({
   tenantId, vesselId, vesselName, actorEmail, actorRank: _actorRank,
@@ -67,6 +67,11 @@ export function EmergencyControlsPanel({
       });
       postSyncEvent({ type: 'CREW_UPDATED', tenantId, payload: { action: 'password_reset', userId: user.id, vessel: vesselName } });
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setResetFor(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to reset password.', false);
     } finally {
       setBusy(false);

@@ -243,6 +243,11 @@ export function MonitoringView({ caps: _caps }: { caps: Capabilities }) {
             try {
               await upgradeTenantPlan(upgradeFor, plan, contractExpires, tierConfigs, user?.email ?? "super-admin");
             } catch (err) {
+              if (api.isOfflineQueued(err)) {
+                toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+                setUpgradeFor(null);
+                return;
+              }
               toast({ tone: "danger", title: "Upgrade failed", message: (err as Error).message });
               return;
             }

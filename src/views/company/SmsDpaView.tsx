@@ -57,6 +57,7 @@ import {
   type SmsProfileWithVessels,
 } from "../../lib/smsProfiles";
 import {
+  isOfflineQueued,
   apiUploadFile,
   apiGetSignedUrl,
   apiDownloadFileAsBlobUrl,
@@ -408,6 +409,11 @@ export function SmsDpaView() {
       await loadProfilesList();
       setCreateProfileOpen(false);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setCreateProfileOpen(false);
+        return;
+      }
       showToast((err as Error).message || "Failed to create SMS Fleet Profile.", false);
     }
   }
@@ -434,6 +440,11 @@ export function SmsDpaView() {
       setDeleteProfileTarget(null);
       await loadProfilesList();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setDeleteProfileTarget(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to delete SMS Fleet Profile.", false);
     }
   }
@@ -515,6 +526,11 @@ export function SmsDpaView() {
       await loadCustomTabs();
       await loadAllPending();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setDeleteFor(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to request deletion.", false);
     }
   }
@@ -656,6 +672,11 @@ export function SmsDpaView() {
       setVersionEditOpen(false);
       showToast(`SMS version for "${activeProfile.name}" set to v${next}.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setVersionEditOpen(false);
+        return;
+      }
       showToast((err as Error).message || "Failed to update SMS version.", false);
     } finally {
       setSavingVersion(false);
@@ -693,6 +714,11 @@ export function SmsDpaView() {
       setAddTabOpen(false);
       setTreeKind(key);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setAddTabOpen(false);
+        return;
+      }
       showToast((err as Error).message || "Failed to create tab.", false);
     }
   }
@@ -709,6 +735,11 @@ export function SmsDpaView() {
       await loadCustomTabs();
       setRenameTabKey(null);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setRenameTabKey(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to rename tab.", false);
     }
   }
@@ -737,6 +768,11 @@ export function SmsDpaView() {
       setDeleteTabKey(null);
       await loadCustomTabs();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setDeleteTabKey(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to delete tab.", false);
     }
   }
@@ -789,6 +825,11 @@ export function SmsDpaView() {
       await loadAllCounts();
       await loadAllPending();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setAddFolderFor(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to create folder.", false);
     }
   }
@@ -853,6 +894,11 @@ export function SmsDpaView() {
       await loadAllCounts();
       await loadAllPending();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setAddDocFor(null);
+        return;
+      }
       const msg =
         err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
           ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
@@ -918,6 +964,11 @@ export function SmsDpaView() {
       await loadTree();
       await loadAllPending();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setEditorFor(null);
+        return;
+      }
       const msg =
         err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
           ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
@@ -955,6 +1006,11 @@ export function SmsDpaView() {
       await loadTree();
       await loadAllPending();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setVersionsFor(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to restore version.", false);
     }
   }

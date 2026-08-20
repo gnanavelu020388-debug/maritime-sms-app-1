@@ -25,7 +25,11 @@ const ICON_TONES = {
 export function Toaster() {
   const { toasts, dismissToast } = useStore();
   return (
-    <div className="pointer-events-none fixed bottom-4 right-4 z-[60] flex w-full max-w-sm flex-col gap-2">
+    // Must outrank Modal's backdrop (z-[9999], the highest elsewhere in the
+    // app) — otherwise a toast fired while a confirmation modal is still
+    // open (e.g. an offline-queued write) renders behind the modal's
+    // backdrop-blur and is unreadable.
+    <div className="pointer-events-none fixed bottom-4 right-4 z-[10000] flex w-full max-w-sm flex-col gap-2">
       {toasts.map((t) => {
         const Icon = ICONS[t.tone];
         return (

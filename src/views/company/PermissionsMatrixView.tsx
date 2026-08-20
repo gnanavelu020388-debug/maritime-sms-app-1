@@ -44,6 +44,7 @@ import {
 } from '../../lib/shoreRoles';
 import { Modal } from '../../components/Modal';
 import { postSyncEvent } from '../../lib/syncChannel';
+import { OFFLINE_QUEUED_MESSAGE } from '../../lib/api';
 
 const APP_ICON_MAP: Record<AppId, React.ComponentType<{ className?: string }>> = {
   sms_documentation: FileCheck2,
@@ -232,7 +233,10 @@ export function PermissionsMatrixView() {
     setRankBusy(true);
     const { error } = await saveCustomRank(tenant.id, name, description);
     setRankBusy(false);
-    if (error) {
+    if (error === OFFLINE_QUEUED_MESSAGE) {
+      showToast(error, true);
+      setShowAddRank(false);
+    } else if (error) {
       showToast(`Failed to add rank: ${error}`, false);
     } else {
       showToast(`Custom rank "${name}" added — now configure its permissions`, true);
@@ -247,7 +251,10 @@ export function PermissionsMatrixView() {
     setRankBusy(true);
     const { error } = await updateCustomRank(tenant.id, oldName, newName, description);
     setRankBusy(false);
-    if (error) {
+    if (error === OFFLINE_QUEUED_MESSAGE) {
+      showToast(error, true);
+      setEditingRank(null);
+    } else if (error) {
       showToast(`Failed to update rank: ${error}`, false);
     } else {
       showToast(`Rank updated to "${newName}"`, true);
@@ -262,7 +269,10 @@ export function PermissionsMatrixView() {
     setRankBusy(true);
     const { error } = await deleteCustomRank(tenant.id, rank);
     setRankBusy(false);
-    if (error) {
+    if (error === OFFLINE_QUEUED_MESSAGE) {
+      showToast(error, true);
+      setDeletingRank(null);
+    } else if (error) {
       showToast(`Failed to delete rank: ${error}`, false);
     } else {
       showToast(`Custom rank "${rank}" deleted`, true);
@@ -405,7 +415,10 @@ export function PermissionsMatrixView() {
     setShoreRoleBusy(true);
     const { error } = await saveCustomShoreRole(tenant.id, name, description);
     setShoreRoleBusy(false);
-    if (error) {
+    if (error === OFFLINE_QUEUED_MESSAGE) {
+      showToast(error, true);
+      setShowAddShoreRole(false);
+    } else if (error) {
       showToast(`Failed to add shore role: ${error}`, false);
     } else {
       showToast(`Custom shore role "${name}" added`, true);
@@ -419,7 +432,10 @@ export function PermissionsMatrixView() {
     setShoreRoleBusy(true);
     const { error } = await updateCustomShoreRole(tenant.id, oldName, newName, description);
     setShoreRoleBusy(false);
-    if (error) {
+    if (error === OFFLINE_QUEUED_MESSAGE) {
+      showToast(error, true);
+      setEditingShoreRole(null);
+    } else if (error) {
       showToast(`Failed to update shore role: ${error}`, false);
     } else {
       showToast(`Shore role updated`, true);
@@ -433,7 +449,10 @@ export function PermissionsMatrixView() {
     setShoreRoleBusy(true);
     const { error } = await deleteCustomShoreRole(tenant.id, role);
     setShoreRoleBusy(false);
-    if (error) {
+    if (error === OFFLINE_QUEUED_MESSAGE) {
+      showToast(error, true);
+      setDeletingShoreRole(null);
+    } else if (error) {
       showToast(`Failed to delete shore role: ${error}`, false);
     } else {
       showToast(`Custom shore role "${role}" deleted`, true);

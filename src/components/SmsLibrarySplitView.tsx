@@ -58,6 +58,7 @@ import { useFleetScope } from "../lib/useFleetScope";
 import { onSyncEvent, postSyncEvent } from "../lib/syncChannel";
 import { enqueueSyncEntry } from "../lib/syncService";
 import {
+  isOfflineQueued,
   apiUploadFile,
   apiGetSignedUrl,
   apiDownloadFileAsBlobUrl,
@@ -427,6 +428,11 @@ export function SmsLibrarySplitView({
       setPreviewDoc(null);
       showToast("Folder resubmitted for DPA approval.", true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setPreviewDoc(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to resubmit folder.", false);
     }
   }
@@ -481,6 +487,18 @@ export function SmsLibrarySplitView({
       }
       showToast(`"${editingDoc.label}" resubmitted for DPA approval.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setEditingDoc(null);
+        setDraftContent("");
+        setResubmitPdfSize(null);
+        setResubmitPdfFile(null);
+        if (resubmitPdfPreviewUrl) {
+          URL.revokeObjectURL(resubmitPdfPreviewUrl);
+          setResubmitPdfPreviewUrl(null);
+        }
+        return;
+      }
       const msg = err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
         ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
         : (err as Error).message || "Failed to resubmit document.";
@@ -509,6 +527,12 @@ export function SmsLibrarySplitView({
       setSyncTick((t) => t + 1);
       showToast(`Draft "${deleteTarget.label}" deleted.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setDeleteTarget(null);
+        setPreviewDoc(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to delete draft.", false);
     } finally {
       setDeleting(false);
@@ -569,6 +593,14 @@ export function SmsLibrarySplitView({
         true,
       );
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setEditingDoc(null);
+        setDraftContent("");
+        setResubmitPdfSize(null);
+        setResubmitPdfFile(null);
+        return;
+      }
       const msg = err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
         ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
         : (err as Error).message || "Failed to save draft revision.";
@@ -603,6 +635,11 @@ export function SmsLibrarySplitView({
       setSyncTick((t) => t + 1);
       showToast(`Folder "${label.trim()}" submitted for DPA approval.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setAddFolderFor(null);
+        return;
+      }
       showToast((err as Error).message || "Failed to create folder.", false);
     }
   }
@@ -655,6 +692,11 @@ export function SmsLibrarySplitView({
       setSyncTick((t) => t + 1);
       showToast(`"${label.trim()}" submitted for DPA approval.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setAddDocFor(null);
+        return;
+      }
       const msg = err instanceof ApiFileError && err.code === "STORAGE_LIMIT_REACHED"
         ? "Upload failed — tenant storage limit reached. Contact your Super Admin."
         : (err as Error).message || "Failed to create document.";

@@ -23,6 +23,7 @@ import { type TenantUserRow, type CrewAssignmentRow, type VesselRow, type Rank }
 import { useAuth } from '../../lib/auth';
 import { logAudit } from '../../lib/audit';
 import { postSyncEvent, onSyncEvent } from '../../lib/syncChannel';
+import { isOfflineQueued } from '../../lib/api';
 import {
   getEffectiveDemoUsers, getEffectiveDemoVessels, getEffectiveDemoAssignments,
   demoSignOff, demoSignOn, demoCreateUser, demoDeactivateUser, demoSetUserStatus, demoUpdateUserProfile, demoDeleteUser,
@@ -252,6 +253,11 @@ export function CrewRosterView() {
       setDeactivateFor(null);
       await load();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setDeactivateFor(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to deactivate account.', false);
     } finally {
       setBusy(null);
@@ -268,6 +274,11 @@ export function CrewRosterView() {
       showToast(`${u.name} has been permanently deleted from the system.`, true);
       await load();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setDeleteFor(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to delete user.', false);
     } finally {
       setBusy(null);
@@ -284,6 +295,11 @@ export function CrewRosterView() {
       setEditing(null);
       await load();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setEditing(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to save changes.', false);
     } finally {
       setBusy(null);
@@ -599,14 +615,27 @@ export function CrewRosterView() {
               ? (data.rank === 'Company Admin' ? 'company_admin' : 'dpa')
               : 'vessel';
             const status = isShoreside ? 'invited' : CREW_STATUS.PENDING_SIGN_ON;
-            await demoCreateUser(tenant.id, {
-              name: data.name, email: data.email, employee_id: data.employeeId,
-              passport_number: null, seaman_book_number: null, nationality: null,
-              rank: data.rank, role, status, password: data.password,
-              fleet_scope: data.fleetScope,
-              assigned_vessel_ids: isShoreside ? data.fleetVessels : [],
-              assigned_fleet_profile_ids: isShoreside ? data.fleetProfiles : [],
-            });
+            try {
+              await demoCreateUser(tenant.id, {
+                name: data.name, email: data.email, employee_id: data.employeeId,
+                passport_number: null, seaman_book_number: null, nationality: null,
+                rank: data.rank, role, status, password: data.password,
+                fleet_scope: data.fleetScope,
+                assigned_vessel_ids: isShoreside ? data.fleetVessels : [],
+                assigned_fleet_profile_ids: isShoreside ? data.fleetProfiles : [],
+              });
+            } catch (err) {
+              // Offline: safely queued, not rejected — close the form like a
+              // normal registration instead of leaving it open on an error
+              // the user can't do anything about. Re-throw anything else so
+              // RegisterCrewModal's own catch shows the real failure inline.
+              if (isOfflineQueued(err)) {
+                showToast((err as Error).message, true);
+                setShowRegister(false);
+                return;
+              }
+              throw err;
+            }
             const actionLabel = isShoreside
               ? `Shoreside staff registered: ${data.name} (${data.rank}) — fleet scope: ${data.fleetScope === 'global' ? 'Global' : `Specific (${data.fleetVessels.length} vessels, ${data.fleetProfiles.length} profiles)`}`
               : `Crew registered: ${data.name} (${data.rank}) — pending sign-on`;

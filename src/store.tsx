@@ -30,6 +30,7 @@ import type {
   SmsSnapshotRow,
 } from './lib/supabase';
 import type { TierConfigRow } from './lib/api';
+import { OFFLINE_QUEUED_MESSAGE } from './lib/api';
 
 // A row fetched from the real backend, merged into the ledger by
 // TENANTS_HYDRATE. Usage counts (seats/vessels used) are computed
@@ -401,7 +402,22 @@ export function StoreProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<StoreCtx>(() => ({
     ...state, dispatch,
-    toast: (t) => { const id = uid('toast'); dispatch({ type: 'TOAST_ADD', toast: { ...t, id } }); setTimeout(() => dispatch({ type: 'TOAST_DISMISS', id }), 4200); },
+    toast: (t) => {
+      // Every write's catch block forwards err.message verbatim as the toast
+      // message, but hardcodes its own tone/title (usually danger/"X
+      // failed") — a write made offline was never actually rejected, it was
+      // queued for sync (api.ts's OFFLINE_QUEUED_MESSAGE, which is itself
+      // already a correctly-worded message). Swapping in an info tone and a
+      // matching title here, in the one shared dispatcher, fixes that
+      // mismatch for every call site at once instead of special-casing
+      // dozens of catch blocks.
+      const resolved = t.message === OFFLINE_QUEUED_MESSAGE
+        ? { ...t, tone: 'info' as const, title: 'Saved locally' }
+        : t;
+      const id = uid('toast');
+      dispatch({ type: 'TOAST_ADD', toast: { ...resolved, id } });
+      setTimeout(() => dispatch({ type: 'TOAST_DISMISS', id }), 4200);
+    },
     dismissToast: (id) => dispatch({ type: 'TOAST_DISMISS', id }),
   }), [state]);
 

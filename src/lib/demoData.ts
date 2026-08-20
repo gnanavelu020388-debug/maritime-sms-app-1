@@ -73,13 +73,6 @@ export async function demoCreateTenant(
   return t.id;
 }
 
-export async function demoDeleteTenant(tenantId: string): Promise<void> {
-  // Soft-archive — the endpoint only flips `status` server-side and
-  // returns {success}, not the row, so mirror that one-field change here.
-  await api.apiArchiveTenant(tenantId);
-  dataCache.patchCachedTenant(tenantId, { status: 'archived' });
-}
-
 export async function demoUpdateTenantSmsVersion(tenantId: string, smsVersion: string): Promise<void> {
   const t = await api.apiUpdateTenant<TenantRow>(tenantId, { sms_version: smsVersion });
   dataCache.upsertCachedTenant(t);

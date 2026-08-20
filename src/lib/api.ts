@@ -30,6 +30,27 @@ const READ_ONLY_PREVIEW_MESSAGE =
 const READ_ONLY_PREVIEW_DOCUMENT_MESSAGE =
   "Document access isn't available during impersonation.";
 
+// Thrown (instead of hitting the network) when a write is made while
+// offline. Every call site across the app forwards `(err as Error).message`
+// verbatim into whatever error surface it uses (the shared toast() in
+// store.tsx, a dozen local showToast()s, inline form-error banners, even a
+// couple of alert()s) — so the message itself has to already read correctly
+// everywhere, rather than relying on each of those ~70 call sites to
+// special-case a sentinel. store.tsx's `toast()` additionally matches this
+// exact string to upgrade the toast's tone/title, since that's the one
+// truly centralized surface, and modal/form catch blocks match it via
+// isOfflineQueued() below to close themselves instead of showing an error.
+export const OFFLINE_QUEUED_MESSAGE =
+  "Saved locally — nothing was written to the database yet, so this won't show up elsewhere until it syncs automatically once the connection to Cloud Run is restored.";
+
+// Call sites that own a modal/form (not just a toast) use this to tell an
+// offline-queued write apart from a real failure: the former should close
+// the form and show an informational toast, the latter should keep the
+// form open with the error visible so the user can retry.
+export function isOfflineQueued(err: unknown): boolean {
+  return err instanceof Error && err.message === OFFLINE_QUEUED_MESSAGE;
+}
+
 function getNetworkMode(): 'online' | 'offline' {
   const fn = (window as unknown as Record<string, unknown>).__networkMode as (() => 'online' | 'offline') | undefined;
   return fn ? fn() : 'online';
@@ -66,7 +87,7 @@ async function request<T>(
       try { body = JSON.parse(options.body as string); } catch { body = options.body; }
     }
     enqueueOfflineAction(path, method, body);
-    throw new Error('OFFLINE_QUEUED');
+    throw new Error(OFFLINE_QUEUED_MESSAGE);
   }
 
   const res = await fetch(`${getApiBase()}${path}`, { ...options, headers });

@@ -12,7 +12,7 @@ import { useAuth } from '../lib/auth';
 import { formatGb, relativeTime, formatUtc } from '../constants';
 import type { BackupSnapshot, Tenant } from '../types';
 import type { Capabilities } from '../lib/permissions';
-import { apiCreateBackup, apiRestoreBackup, apiDeleteBackup, apiUpdateTenant } from '../lib/api';
+import { isOfflineQueued, apiCreateBackup, apiRestoreBackup, apiDeleteBackup, apiUpdateTenant } from '../lib/api';
 import { logAudit } from '../lib/audit';
 import { refreshTenantData } from '../lib/dataCache';
 import type { BackupSnapshotRow } from '../lib/supabase';
@@ -245,10 +245,26 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
           tenants={tenants}
           onClose={() => setManualOpen(false)}
           onCreate={async (draft) => {
-            const row = await apiCreateBackup<BackupSnapshotRow>({
-              tenant_id: draft.tenantId, size_gb: draft.sizeGb, type: 'manual', status: 'completed',
-              expiry: new Date(Date.now() + 30 * 86400000).toISOString(), reason: draft.reason,
-            });
+            // ManualSnapshotModal calls this fire-and-forget from inside a
+            // setInterval with no catch of its own, and its own "running"
+            // progress bar has no way to be dismissed — so any rejection
+            // here (offline-queued or a real failure) has to close the
+            // modal itself, or it would stay frozen at 100% forever.
+            let row: BackupSnapshotRow;
+            try {
+              row = await apiCreateBackup<BackupSnapshotRow>({
+                tenant_id: draft.tenantId, size_gb: draft.sizeGb, type: 'manual', status: 'completed',
+                expiry: new Date(Date.now() + 30 * 86400000).toISOString(), reason: draft.reason,
+              });
+            } catch (err) {
+              if (isOfflineQueued(err)) {
+                toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+              } else {
+                toast({ tone: 'danger', title: 'Snapshot failed', message: (err as Error).message });
+              }
+              setManualOpen(false);
+              return;
+            }
             const snap = mapBackupRow(row, draft.company);
             dispatch({ type: 'BACKUP_ADD', snapshot: snap });
             await logAudit({ tenantId: draft.tenantId, actorEmail: user?.email ?? 'unknown', category: 'backup', action: `Manual snapshot triggered: ${draft.company}`, target: draft.company, severity: 'info' });
@@ -263,7 +279,23 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
           snapshot={restoreFor}
           onClose={() => setRestoreFor(null)}
           onConfirm={async () => {
-            const result = await apiRestoreBackup<{ restoredCounts?: Record<string, number> }>(restoreFor.id);
+            // RestoreWizard fires this via setTimeout with no promise
+            // handling of its own — a rejection here would otherwise leave
+            // it stuck on "Restoring…" forever with no way out, so this has
+            // to catch and always close itself, for offline-queued and real
+            // failures alike.
+            let result: { restoredCounts?: Record<string, number> };
+            try {
+              result = await apiRestoreBackup<{ restoredCounts?: Record<string, number> }>(restoreFor.id);
+            } catch (err) {
+              if (isOfflineQueued(err)) {
+                toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+              } else {
+                toast({ tone: 'danger', title: 'Restore failed', message: (err as Error).message });
+              }
+              setRestoreFor(null);
+              return;
+            }
             dispatch({ type: 'BACKUP_RESTORE', snapshotId: restoreFor.id });
             // The restore genuinely rewrote this tenant's users/vessels/
             // assignments/SMS documents — refresh the shared cache so any
@@ -289,7 +321,17 @@ export function BackupsView({ caps }: { caps: Capabilities }) {
           tenant={freqFor}
           onClose={() => setFreqFor(null)}
           onSave={async (hours) => {
-            await apiUpdateTenant(freqFor.id, { auto_backup_interval_hours: hours });
+            try {
+              await apiUpdateTenant(freqFor.id, { auto_backup_interval_hours: hours });
+            } catch (err) {
+              if (isOfflineQueued(err)) {
+                toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+                setFreqFor(null);
+                return;
+              }
+              toast({ tone: 'danger', title: 'Failed to update auto-backup frequency', message: (err as Error).message });
+              return;
+            }
             dispatch({ type: 'TENANT_UPDATE', id: freqFor.id, patch: { autoBackupIntervalHours: hours } });
             await logAudit({
               tenantId: freqFor.id, actorEmail: user?.email ?? 'unknown', category: 'backup',

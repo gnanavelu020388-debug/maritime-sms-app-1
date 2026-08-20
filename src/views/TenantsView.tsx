@@ -36,6 +36,11 @@ import {
   getEffectiveDemoUsers,
   hydrateAllTenants,
 } from "../lib/demoData";
+import {
+  MODULE_KEYS,
+  fetchEnabledFeatures,
+  onFeatureFlagsChanged,
+} from "../lib/featureFlags";
 import * as api from "../lib/api";
 import { logAudit } from "../lib/audit";
 import { nextPlanUp, upgradeTenantPlan } from "../lib/tenantUpgrade";
@@ -65,6 +70,9 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [upgradeFor, setUpgradeFor] = useState<Tenant | null>(null);
   const [selectedPlan, setSelectedPlan] = useState<PlanTier>("Professional");
+  const [enabledModuleCounts, setEnabledModuleCounts] = useState<
+    Record<string, number>
+  >({});
 
   // Pull the full tenant ledger from the backend.
   async function hydrateTenants() {
@@ -79,6 +87,33 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
     hydrateTenants();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // The "Feature Flags" column must reflect the Tenant Feature Matrix (the
+  // feature_flags overrides + default-enabled set), not the tenant row's own
+  // `modules` array — that array is only a legacy snapshot and can drift out
+  // of sync with what's actually toggled on in the matrix.
+  useEffect(() => {
+    let mounted = true;
+    const loadCounts = async (ids: string[]) => {
+      const entries = await Promise.all(
+        ids.map(
+          async (id) => [id, (await fetchEnabledFeatures(id)).size] as const,
+        ),
+      );
+      if (mounted) {
+        setEnabledModuleCounts((prev) => ({
+          ...prev,
+          ...Object.fromEntries(entries),
+        }));
+      }
+    };
+    loadCounts(tenants.map((t) => t.id));
+    const unsub = onFeatureFlagsChanged((tenantId) => loadCounts([tenantId]));
+    return () => {
+      mounted = false;
+      unsub();
+    };
+  }, [tenants]);
 
   async function saveTenant(tenant: Tenant) {
     setSaveError(null);
@@ -97,6 +132,17 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
           mfa_enforced: tenant.mfaEnforced,
         });
       } catch (err) {
+        // Offline: the edit is safely queued, not rejected — close the form
+        // like a normal save instead of leaving it open on an error. Skip
+        // the audit log + dispatch below since the edit hasn't actually
+        // landed yet; the toast says it won't show up until it syncs.
+        if (api.isOfflineQueued(err)) {
+          toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+          setSaveBusy(false);
+          setEditing(null);
+          setCreating(false);
+          return;
+        }
         setSaveError((err as Error).message || "Failed to update tenant.");
         setSaveBusy(false);
         return;
@@ -202,25 +248,42 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       // instead of showing its raw UUID until the next visit to this page.
       hydrateTenants();
     } catch (err) {
+      if (api.isOfflineQueued(err)) {
+        toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+        setEditing(null);
+        setCreating(false);
+        return;
+      }
       setSaveError((err as Error).message || "Failed to provision tenant.");
     } finally {
       setSaveBusy(false);
     }
   }
 
+  // "ok" = actually applied — caller shows its specific success toast.
+  // "queued" — safely captured but not applied yet; setTenantStatus already
+  // showed the "Saved locally" toast itself, so the caller must NOT also
+  // show its own "Tenant archived"/"Suspended" toast (that would both
+  // duplicate the notification and falsely claim the status already
+  // changed) — it should just close its confirmation modal, same as "ok".
+  // "failed" — a real error; caller keeps its modal open.
   async function setTenantStatus(
     t: Tenant,
     status: TenantStatus,
-  ): Promise<boolean> {
+  ): Promise<"ok" | "queued" | "failed"> {
     try {
       await api.apiUpdateTenant(t.id, { status });
     } catch (err) {
+      if (api.isOfflineQueued(err)) {
+        toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+        return "queued";
+      }
       toast({
         tone: "danger",
         title: "Status update failed",
         message: (err as Error).message,
       });
-      return false;
+      return "failed";
     }
     await logAudit({
       tenantId: t.id,
@@ -234,7 +297,7 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       after: { status },
     });
     dispatch({ type: "TENANT_SET_STATUS", id: t.id, status });
-    return true;
+    return "ok";
   }
 
   function loginAsTenant(t: Tenant) {
@@ -357,21 +420,14 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       },
     },
     {
-      key: "features",
-      header: "Feature Flags",
+      key: "enabled_apps",
+      header: "Enabled Apps",
       render: (t) => (
-        <div className="flex items-center gap-1.5 py-0.5">
+        <div className="flex justify-center py-0.5">
           <Badge tone="info" className="!text-[10px] !px-1.5 !py-0">
-            {t.modules.length} active
+            {enabledModuleCounts[t.id] ?? t.modules.length}/{MODULE_KEYS.length}{" "}
+            active
           </Badge>
-          {caps.tenantEdit && t.status !== "archived" && (
-            <span
-              className="text-[10px] font-medium text-ink-400"
-              title="Module licensing is managed in the Tenant Feature Matrix"
-            >
-              <Grid3x3 className="inline h-3 w-3" /> Matrix
-            </span>
-          )}
         </div>
       ),
     },
@@ -391,12 +447,15 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
             caps.tenantArchive ? (
               <button
                 onClick={async () => {
-                  if (!(await setTenantStatus(t, "active"))) return;
-                  toast({
-                    tone: "success",
-                    title: "Tenant restored",
-                    message: `${t.company} reactivated. Login access re-enabled.`,
-                  });
+                  const result = await setTenantStatus(t, "active");
+                  if (result === "failed") return;
+                  if (result === "ok") {
+                    toast({
+                      tone: "success",
+                      title: "Tenant restored",
+                      message: `${t.company} reactivated. Login access re-enabled.`,
+                    });
+                  }
                 }}
                 className="inline-flex items-center gap-1 rounded bg-success-50 px-1.5 py-0.5 text-[11px] font-semibold text-success-700 hover:bg-success-100 dark:bg-success-900/30 dark:text-success-300 dark:hover:bg-success-900/50"
                 title="Restore Tenant"
@@ -441,12 +500,15 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
               ) : (
                 <button
                   onClick={async () => {
-                    if (!(await setTenantStatus(t, "active"))) return;
-                    toast({
-                      tone: "success",
-                      title: "Activated",
-                      message: t.company,
-                    });
+                    const result = await setTenantStatus(t, "active");
+                    if (result === "failed") return;
+                    if (result === "ok") {
+                      toast({
+                        tone: "success",
+                        title: "Activated",
+                        message: t.company,
+                      });
+                    }
                   }}
                   disabled={!caps.tenantEdit}
                   className="rounded p-1 text-ink-400 hover:bg-success-50 hover:text-success-600 disabled:cursor-not-allowed disabled:opacity-30 dark:hover:bg-success-900/30 dark:hover:text-success-400"
@@ -577,13 +639,32 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
           onClose={() => setUpgradeFor(null)}
           onConfirm={async (plan, contractExpires) => {
             try {
-              await upgradeTenantPlan(upgradeFor, plan, contractExpires, tierConfigs, user?.email ?? "super-admin");
+              await upgradeTenantPlan(
+                upgradeFor,
+                plan,
+                contractExpires,
+                tierConfigs,
+                user?.email ?? "super-admin",
+              );
             } catch (err) {
-              toast({ tone: "danger", title: "Upgrade failed", message: (err as Error).message });
+              if (api.isOfflineQueued(err)) {
+                toast({ tone: "info", title: "Saved locally", message: (err as Error).message });
+                setUpgradeFor(null);
+                return;
+              }
+              toast({
+                tone: "danger",
+                title: "Upgrade failed",
+                message: (err as Error).message,
+              });
               return;
             }
             dispatch({ type: "TENANT_SET_PLAN", id: upgradeFor.id, plan });
-            dispatch({ type: "TENANT_UPDATE", id: upgradeFor.id, patch: { contractExpires } });
+            dispatch({
+              type: "TENANT_UPDATE",
+              id: upgradeFor.id,
+              patch: { contractExpires },
+            });
             toast({
               tone: "success",
               title: "Tier upgraded",
@@ -595,7 +676,8 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       )}
 
       {archiveConfirm && (
-        <Modal scrollable
+        <Modal
+          scrollable
           open
           onClose={() => setArchiveConfirm(null)}
           title="Archive Tenant"
@@ -612,13 +694,15 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
               </button>
               <button
                 onClick={async () => {
-                  if (!(await setTenantStatus(archiveConfirm, "archived")))
-                    return;
-                  toast({
-                    tone: "warning",
-                    title: "Tenant archived",
-                    message: `${archiveConfirm.company} archived. Login blocked for all users. Records retained.`,
-                  });
+                  const result = await setTenantStatus(archiveConfirm, "archived");
+                  if (result === "failed") return;
+                  if (result === "ok") {
+                    toast({
+                      tone: "warning",
+                      title: "Tenant archived",
+                      message: `${archiveConfirm.company} archived. Login blocked for all users. Records retained.`,
+                    });
+                  }
                   setArchiveConfirm(null);
                 }}
                 className="btn-primary"
@@ -649,7 +733,8 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
       )}
 
       {suspendConfirm && (
-        <Modal scrollable
+        <Modal
+          scrollable
           open
           onClose={() => setSuspendConfirm(null)}
           title="Suspend Tenant"
@@ -666,13 +751,15 @@ export function TenantsView({ caps }: { caps: Capabilities }) {
               </button>
               <button
                 onClick={async () => {
-                  if (!(await setTenantStatus(suspendConfirm, "suspended")))
-                    return;
-                  toast({
-                    tone: "warning",
-                    title: "Suspended",
-                    message: suspendConfirm.company,
-                  });
+                  const result = await setTenantStatus(suspendConfirm, "suspended");
+                  if (result === "failed") return;
+                  if (result === "ok") {
+                    toast({
+                      tone: "warning",
+                      title: "Suspended",
+                      message: suspendConfirm.company,
+                    });
+                  }
                   setSuspendConfirm(null);
                 }}
                 className="btn-primary"
@@ -809,7 +896,10 @@ function MiniLimit({
       <div className="relative h-6 w-1.5 shrink-0 overflow-hidden rounded-full bg-ink-200/70 dark:bg-ink-800">
         <div
           className={`absolute inset-x-0 bottom-0 w-full rounded-full ${barTone} transition-[height] duration-700 ease-out ${over ? "animate-pulse-soft" : ""}`}
-          style={{ height: `${Math.max(pct, 8)}%`, transitionDelay: `${delayMs}ms` }}
+          style={{
+            height: `${Math.max(pct, 8)}%`,
+            transitionDelay: `${delayMs}ms`,
+          }}
         />
       </div>
       <div className="flex flex-col leading-tight">

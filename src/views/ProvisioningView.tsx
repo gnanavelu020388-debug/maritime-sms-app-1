@@ -4,6 +4,7 @@ import {
   Loader2, ExternalLink, RefreshCw, Trash2, KeyRound,
 } from 'lucide-react';
 import { type TenantRow, type TenantUserRow, type Rank } from '../lib/supabase';
+import * as api from '../lib/api';
 import { useAuth } from '../lib/auth';
 import { useStore } from '../store';
 import { logAudit } from '../lib/audit';
@@ -13,7 +14,7 @@ import type { Capabilities } from '../lib/permissions';
 import type { TierConfig } from '../types';
 import {
   getEffectiveDemoTenants, getEffectiveDemoUsers,
-  demoCreateTenant, demoDeleteTenant, demoCloneMasterSms,
+  demoCreateTenant, demoCloneMasterSms,
   demoCreateUser, demoDeleteUser,
 } from '../lib/demoData';
 
@@ -30,7 +31,7 @@ const COMPANY_ADMIN_RANK = '__company_admin__';
 
 export function ProvisioningView({ caps }: { caps: Capabilities }) {
   const { user } = useAuth();
-  const { tierConfigs } = useStore();
+  const { tierConfigs, toast } = useStore();
   const [tenants, setTenants] = useState<TenantRow[]>([]);
   const [usersByTenant, setUsersByTenant] = useState<Record<string, TenantUserRow[]>>({});
   const [loading, setLoading] = useState(true);
@@ -64,6 +65,15 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
       setShowTenant(false);
       await load();
     } catch (err) {
+      // Offline: the write is safely queued, not actually rejected — close
+      // the form like a normal success instead of blocking it on an error
+      // banner the user would have to dismiss for no reason. The list won't
+      // show the new tenant until the queue flushes, which the toast says.
+      if (api.isOfflineQueued(err)) {
+        toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+        setShowTenant(false);
+        return;
+      }
       setFormError((err as Error).message || 'Failed to create tenant.');
     } finally {
       setBusy(false);
@@ -86,6 +96,11 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
       setShowUser(null);
       await load();
     } catch (err) {
+      if (api.isOfflineQueued(err)) {
+        toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+        setShowUser(null);
+        return;
+      }
       setFormError((err as Error).message || 'Failed to provision user.');
     } finally {
       setBusy(false);
@@ -104,11 +119,29 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
 
   async function deleteTenant(t: TenantRow) {
     setBusy(true);
-    demoDeleteTenant(t.id);
-    await logAudit({ actorEmail: user?.email ?? 'super-admin', category: 'tenant', action: `Deleted tenant: ${t.company}`, target: t.contact_email, severity: 'warning' });
-    setBusy(false);
-    setConfirmDelete(null);
-    load();
+    setFormError(null);
+    try {
+      // The confirmation modal's own copy promises a permanent cascade
+      // delete ("Delete Permanently" — vessels, SMS docs, audit logs, users
+      // all gone) — apiArchiveTenant only flips `status`, so this must call
+      // the real hard-delete endpoint to match what the UI tells the admin
+      // is happening. Audit log is written after the delete succeeds, with
+      // no tenantId, since the tenant's own audit_logs rows cascade-deleted
+      // with it (same pattern as TenantsView's hard-delete flow).
+      await api.apiDeleteTenantPermanent(t.id);
+      await logAudit({ actorEmail: user?.email ?? 'super-admin', category: 'tenant', action: `Tenant permanently deleted: ${t.company}`, target: t.contact_email, severity: 'critical' });
+      setConfirmDelete(null);
+      load();
+    } catch (err) {
+      if (api.isOfflineQueued(err)) {
+        toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+        setConfirmDelete(null);
+        return;
+      }
+      setFormError((err as Error).message || 'Failed to delete tenant.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -165,7 +198,7 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
                     <span className="whitespace-nowrap text-xs font-medium text-ink-400">{users.length}/{t.seats_max} users</span>
                     <button onClick={() => setShowUser({ tenant: t })} disabled={!caps.provisioningWrite} className="btn-primary whitespace-nowrap px-4 py-2 !text-xs disabled:cursor-not-allowed disabled:opacity-50"><Plus className="h-3.5 w-3.5" /> Provision User</button>
                     {caps.provisioningWrite && (
-                      <button onClick={() => setConfirmDelete(t)} className="rounded-lg border border-danger-200 bg-danger-50 p-1.5 text-danger-600 hover:bg-danger-100 dark:border-danger-800 dark:bg-danger-900/20 dark:text-danger-400" title="Delete tenant"><Trash2 className="h-3.5 w-3.5" /></button>
+                      <button onClick={() => { setFormError(null); setConfirmDelete(t); }} className="rounded-lg border border-danger-200 bg-danger-50 p-1.5 text-danger-600 hover:bg-danger-100 dark:border-danger-800 dark:bg-danger-900/20 dark:text-danger-400" title="Delete tenant"><Trash2 className="h-3.5 w-3.5" /></button>
                     )}
                   </div>
                 </div>
@@ -240,15 +273,16 @@ export function ProvisioningView({ caps }: { caps: Capabilities }) {
         <UserFormModal tenant={showUser.tenant} busy={busy} error={formError} onClose={() => { setShowUser(null); setFormError(null); }} onCreate={(d) => provisionUser(showUser.tenant, d)} />
       )}
       {confirmDelete && (
-        <Modal scrollable open onClose={() => setConfirmDelete(null)} title="Delete Tenant" subtitle="This action is permanent and cannot be undone" icon={<Trash2 className="h-5 w-5 text-danger-500" />}
+        <Modal scrollable open onClose={() => { setConfirmDelete(null); setFormError(null); }} title="Delete Tenant" subtitle="This action is permanent and cannot be undone" icon={<Trash2 className="h-5 w-5 text-danger-500" />}
           footer={
             <>
-              <button onClick={() => setConfirmDelete(null)} className="btn-secondary">Cancel</button>
+              <button onClick={() => { setConfirmDelete(null); setFormError(null); }} className="btn-secondary">Cancel</button>
               <button disabled={busy} onClick={() => deleteTenant(confirmDelete)} className="btn-danger">
                 {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : <><Trash2 className="h-4 w-4" /> Delete Permanently</>}
               </button>
             </>
           }>
+          {formError && <div className="mb-4 rounded-lg bg-danger-50 p-3 text-sm text-danger-700 dark:bg-danger-900/20 dark:text-danger-400">{formError}</div>}
           <div className="rounded-lg border border-danger-200 bg-danger-50 p-4 dark:border-danger-800 dark:bg-danger-900/20">
             <p className="text-sm font-semibold text-danger-800 dark:text-danger-300">You are about to delete:</p>
             <p className="mt-1 text-lg font-bold text-danger-900 dark:text-white">{confirmDelete.company}</p>

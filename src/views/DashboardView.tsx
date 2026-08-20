@@ -157,6 +157,11 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
       toast({ tone: 'success', title: 'Storage pool updated', message: `Platform pool set to ${formatGb(poolGb)}.` });
       setPoolEditing(false);
     } catch (err) {
+      if (api.isOfflineQueued(err)) {
+        toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+        setPoolEditing(false);
+        return;
+      }
       toast({ tone: 'danger', title: 'Update failed', message: (err as Error).message });
     } finally {
       setPoolSaving(false);

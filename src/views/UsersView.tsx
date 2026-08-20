@@ -15,6 +15,7 @@ import { relativeTime } from '../constants';
 import type { InternalUser, Tenant } from '../types';
 import type { Capabilities } from '../lib/permissions';
 import {
+  isOfflineQueued,
   apiInvitePlatformStaff, apiUpdatePlatformStaff, apiTogglePlatformStaffLock, apiResetPlatformStaffPassword, apiDeletePlatformStaff,
   apiGetMfaEnforcement, apiSetMfaEnforcement, apiForceTenantPasswordReset, apiUpdateTenant,
   apiSearchTenantUsers, apiResetUserMfa, apiEmergencyResetUserPassword, type TenantUserSearchResult,
@@ -131,7 +132,17 @@ export function UsersView({ caps }: { caps: Capabilities }) {
           ><Pencil className="h-4 w-4" /></button>
           <button
             onClick={async () => {
-              const result = await apiResetPlatformStaffPassword(u.id);
+              let result: { success: boolean; tempPassword: string };
+              try {
+                result = await apiResetPlatformStaffPassword(u.id);
+              } catch (err) {
+                if (isOfflineQueued(err)) {
+                  toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+                  return;
+                }
+                toast({ tone: 'danger', title: 'Password reset failed', message: (err as Error).message });
+                return;
+              }
               dispatch({ type: 'USER_RESET_PASSWORD', id: u.id });
               await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Password reset issued: ${u.email}`, target: u.email, severity: 'warning' });
               setTempPasswordReveal({ email: u.email, password: result.tempPassword });
@@ -143,7 +154,17 @@ export function UsersView({ caps }: { caps: Capabilities }) {
           <button
             onClick={async () => {
               const wasLocked = u.status === 'locked';
-              const row = await apiTogglePlatformStaffLock<PlatformStaffRow>(u.id);
+              let row: PlatformStaffRow;
+              try {
+                row = await apiTogglePlatformStaffLock<PlatformStaffRow>(u.id);
+              } catch (err) {
+                if (isOfflineQueued(err)) {
+                  toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+                  return;
+                }
+                toast({ tone: 'danger', title: 'Could not update lock status', message: (err as Error).message });
+                return;
+              }
               dispatch({ type: 'USER_LOCK_TOGGLE', id: u.id, user: mapStaffRow(row) });
               await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Account ${wasLocked ? 'unlocked' : 'locked'}: ${u.email}`, target: u.email, severity: 'warning' });
               toast({ tone: wasLocked ? 'success' : 'warning', title: wasLocked ? 'Account unlocked' : 'Account locked', message: u.email });
@@ -272,7 +293,23 @@ export function UsersView({ caps }: { caps: Capabilities }) {
         <InviteModal
           onClose={() => setInviteOpen(false)}
           onInvite={async (draft) => {
-            const row = await apiInvitePlatformStaff<PlatformStaffRow & { tempPassword: string }>({ name: draft.name, email: draft.email, role: draft.role });
+            // Previously had no catch at all — any failure (offline-queued
+            // or a real error) vanished silently, leaving the modal open
+            // with no feedback. isOfflineQueued distinguishes "safely
+            // queued, close like a success" from "genuinely failed, tell
+            // the user"; either way something is now shown.
+            let row: (PlatformStaffRow & { tempPassword: string }) | null = null;
+            try {
+              row = await apiInvitePlatformStaff<PlatformStaffRow & { tempPassword: string }>({ name: draft.name, email: draft.email, role: draft.role });
+            } catch (err) {
+              if (isOfflineQueued(err)) {
+                toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+                setInviteOpen(false);
+                return;
+              }
+              toast({ tone: 'danger', title: 'Invite failed', message: (err as Error).message });
+              return;
+            }
             const u = mapStaffRow(row);
             dispatch({ type: 'USER_INVITE', user: u });
             await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Internal staff invited: ${u.email}`, target: u.email, severity: 'info' });
@@ -287,7 +324,17 @@ export function UsersView({ caps }: { caps: Capabilities }) {
           user={editTarget}
           onClose={() => setEditTarget(null)}
           onSave={async (name, email, role) => {
-            await apiUpdatePlatformStaff<PlatformStaffRow>(editTarget.id, { name, email, role });
+            try {
+              await apiUpdatePlatformStaff<PlatformStaffRow>(editTarget.id, { name, email, role });
+            } catch (err) {
+              if (isOfflineQueued(err)) {
+                toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+                setEditTarget(null);
+                return;
+              }
+              toast({ tone: 'danger', title: 'Failed to save staff account', message: (err as Error).message });
+              return;
+            }
             dispatch({ type: 'USER_EDIT', id: editTarget.id, name, email, role });
             await logAudit({ actorEmail: currentEmail || 'unknown', category: 'security', action: `Staff account edited: ${editTarget.email} → ${email} (${role})`, target: email, severity: 'warning' });
             toast({ tone: 'success', title: 'Staff account updated', message: `${email} saved as ${role}.` });
@@ -528,6 +575,11 @@ function EmergencyTenantActionModal({
       }
       onClose();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+        onClose();
+        return;
+      }
       toast({ tone: 'danger', title: 'Action failed', message: (err as Error).message });
     } finally {
       setBusy(false);
@@ -593,6 +645,11 @@ function MfaResetModal({
       toast({ tone: 'success', title: 'MFA reset', message: `${target.email} will be prompted for fresh authenticator setup on next sign-in.` });
       onDone(target.id);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        toast({ tone: 'info', title: 'Saved locally', message: (err as Error).message });
+        onClose();
+        return;
+      }
       toast({ tone: 'danger', title: 'Could not reset MFA', message: (err as Error).message });
     } finally {
       setBusy(false);

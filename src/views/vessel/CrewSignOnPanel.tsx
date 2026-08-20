@@ -14,7 +14,7 @@ import { CREW_STATUS } from '../../lib/rankPermissions';
 import { MODULE_KEYS, MODULE_LABELS, type ModuleKey } from '../../lib/featureFlags';
 import { Modal } from '../../components/Modal';
 import { Badge } from '../../components/Badge';
-import { apiGetGalleyStatus, type GalleyStatus } from '../../lib/api';
+import { apiGetGalleyStatus, type GalleyStatus, isOfflineQueued } from '../../lib/api';
 
 interface PendingCrew {
   user: TenantUserRow;
@@ -123,6 +123,11 @@ export function CrewSignOnPanel({
       showToast(`${user.name} signed on successfully. Login access unlocked across ${licensedModuleLabels.length} licensed modules.${enabledModules.has('haccp_galley') && galley ? ` Galley headcount now ${galley.headcount}.` : ''}`, true);
       await load();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setSignOnFor(null);
+        return;
+      }
       showToast((err as Error).message || 'Sign-on failed.', false);
     } finally {
       setBusy(null);

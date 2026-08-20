@@ -5,6 +5,7 @@ import { useAuth } from '../../lib/auth';
 import { logAudit } from '../../lib/audit';
 import { postSyncEvent, onSyncEvent } from '../../lib/syncChannel';
 import { getEffectiveDemoUsers, getEffectiveDemoVessels, getEffectiveDemoAssignments, demoSignOff, demoSignOn, demoCreateVessel, demoDeleteVessel, demoUpdateVessel, demoUpdateVesselSync } from '../../lib/demoData';
+import { isOfflineQueued } from '../../lib/api';
 import { loadProfiles, assignVesselToProfile, getProfileForVessel, getVesselProfileMap, countApprovedDocsForProfile, type SmsProfileWithVessels } from '../../lib/smsProfiles';
 import { Modal } from '../../components/Modal';
 import { Badge } from '../../components/Badge';
@@ -127,6 +128,11 @@ export function VesselsView() {
       setDeleteFor(null);
       await load();
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setDeleteFor(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to delete vessel', false);
     }
   }
@@ -401,6 +407,11 @@ export function VesselsView() {
               setShowForm(false);
               await load();
             } catch (err) {
+              if (isOfflineQueued(err)) {
+                showToast((err as Error).message, true);
+                setShowForm(false);
+                return;
+              }
               showToast((err as Error).message || 'Failed to create vessel', false);
             }
           }}
@@ -432,6 +443,12 @@ export function VesselsView() {
               setEditForProfileId(null);
               await load();
             } catch (err) {
+              if (isOfflineQueued(err)) {
+                showToast((err as Error).message, true);
+                setEditFor(null);
+                setEditForProfileId(null);
+                return;
+              }
               showToast((err as Error).message || 'Failed to update vessel', false);
             }
           }}

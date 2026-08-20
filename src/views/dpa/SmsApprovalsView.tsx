@@ -19,7 +19,7 @@ import { loadProfiles, type SmsProfileWithVessels } from '../../lib/smsProfiles'
 import { useFleetScope } from '../../lib/useFleetScope';
 import { getSelectedProfileId, setSelectedProfileId, onSelectedProfileChange } from '../../lib/dpaProfileSelection';
 import { useShoreRolePermissions, canDoShore, resolveShoreRoleName, dpaFullAuthority, normalizeShorePerms, DEFAULT_SHORE_PERMISSIONS } from '../../lib/shoreRoles';
-import { apiGetSignedUrl, apiDownloadFileAsBlobUrl } from '../../lib/api';
+import { isOfflineQueued, apiGetSignedUrl, apiDownloadFileAsBlobUrl } from '../../lib/api';
 import { Modal } from '../../components/Modal';
 
 interface Crumb {
@@ -293,6 +293,16 @@ export function SmsApprovalsView() {
       setSyncTick((t) => t + 1);
       showToast(`Approved & deployed to fleet.${versionSuffix} Signed by ${signatureName}.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setShowSignModal(false);
+        setSignatureName('');
+        setSignatureTitle('');
+        setSelectedDoc(null);
+        setRejectMode(false);
+        setRejectComments('');
+        return;
+      }
       showToast((err as Error).message || 'Failed to approve & deploy.', false);
     } finally {
       setDeploying(false);
@@ -312,6 +322,13 @@ export function SmsApprovalsView() {
       setSyncTick((t) => t + 1);
       showToast(`Document rejected with comments.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setSelectedDoc(null);
+        setRejectMode(false);
+        setRejectComments('');
+        return;
+      }
       showToast((err as Error).message || 'Failed to reject document.', false);
     } finally {
       setRejectingId(null);
@@ -338,6 +355,12 @@ export function SmsApprovalsView() {
       setSyncTick((t) => t + 1);
       showToast(`Draft "${doc.label}" purged permanently.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setShowPurgeModal(false);
+        setSelectedDoc(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to purge draft.', false);
     } finally {
       setPurgingId(null);
@@ -364,6 +387,11 @@ export function SmsApprovalsView() {
       setSyncTick((t) => t + 1);
       showToast(`"${doc.label}" permanently deleted.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setConfirmDeleteDoc(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to approve deletion.', false);
     } finally {
       setDeleteApprovingId(null);
@@ -425,6 +453,11 @@ export function SmsApprovalsView() {
       setSyncTick((t) => t + 1);
       showToast(`"${data.label}" uploaded and submitted for DPA approval.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setShowUploadModal(false);
+        return;
+      }
       showToast((err as Error).message || 'Failed to upload document.', false);
     }
   }
@@ -455,6 +488,11 @@ export function SmsApprovalsView() {
       setSyncTick((t) => t + 1);
       showToast(`Section "${editLabel}" updated and resubmitted for approval.`, true);
     } catch (err) {
+      if (isOfflineQueued(err)) {
+        showToast((err as Error).message, true);
+        setEditingDoc(null);
+        return;
+      }
       showToast((err as Error).message || 'Failed to save changes.', false);
     } finally {
       setSavingEdit(false);
