@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  Building2, Ship, Wifi, WifiOff, HardDrive, DollarSign, TrendingUp, TrendingDown,
+  Building2, Ship, Wifi, WifiOff, HardDrive, TrendingUp, TrendingDown,
   Megaphone, Radio, Gauge, ArrowUpRight, Server, Loader2, X, Pencil, Check, ShieldAlert,
 } from 'lucide-react';
 import { Card } from '../components/Card';
@@ -8,7 +8,7 @@ import { ProgressBar } from '../components/ProgressBar';
 import { Badge } from '../components/Badge';
 import { useStore } from '../store';
 import { useAuth } from '../lib/auth';
-import { formatCurrency, formatGb, formatNumber, relativeTime } from '../constants';
+import { formatGb, formatNumber, relativeTime } from '../constants';
 import type { Capabilities } from '../lib/permissions';
 import * as api from '../lib/api';
 import { getEffectiveDemoVessels } from '../lib/demoData';
@@ -297,14 +297,6 @@ export function DashboardView({ caps }: { caps: Capabilities }) {
             : 'No compliance breaches platform-wide'}
           tone={platformBreaches.companies > 0 ? 'danger' : 'success'}
         />
-        {/* <KpiCard
-          icon={<DollarSign className="h-5 w-5" />}
-          label="Subscription Revenue"
-          value={formatCurrency(kpis.revenue)}
-          sub={`Monthly recurring · ${kpis.activePlanTiers} tier${kpis.activePlanTiers === 1 ? '' : 's'} active`}
-          trend={{ dir: 'up', text: `+${formatCurrency(rangeGrowth.newMrr)} MRR in ${rangeLabel}` }}
-          tone="success"
-        /> */}
       </div>
 
       <div className="grid grid-cols-1 gap-6">
