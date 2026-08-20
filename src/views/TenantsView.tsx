@@ -11,7 +11,6 @@ import {
   RotateCcw,
   ArchiveRestore,
   Trash2,
-  Grid3x3,
   Loader2,
   Eye,
   EyeOff,
